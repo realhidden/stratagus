@@ -1,0 +1,6 @@
+debian/*
+obj-*
+.bzr/
+.byrignore
+.bzr-builddeb/*
+doc/*

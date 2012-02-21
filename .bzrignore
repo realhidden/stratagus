@@ -1,0 +1,9 @@
+debian/*.debhelper
+debian/files
+debian/*.log
+debian/*.substvars
+debian/stratagus
+debian/stratagus-dbg
+debian/stratagus-dev
+debian/stratagus-doc
+obj-*

@@ -1,0 +1,33 @@
+class Vec2i
+{
+	short int x;
+	short int y;
+};
+
+
+class CUnit
+{
+	tolua_readonly int Slot;
+
+	Vec2i tilePos;
+
+	CUnitType *Type;
+	CPlayer *Player;
+	bool Active;
+	int ResourcesHeld;
+};
+
+class CPreference
+{
+	bool ShowSightRange;
+	bool ShowReactionRange;
+	bool ShowAttackRange;
+	bool ShowMessages;
+	bool BigScreen;
+
+	unsigned int ShowOrders;
+};
+
+CPreference Preference;
+
+CUnit *GetUnitUnderCursor();

@@ -1,0 +1,18 @@
+#!/bin/sh
+#File:	MyBundle.app/Contents/MacOS/MyBundle
+mypath=`dirname "$0"`
+osascript << EOT
+tell application "System Events" to set terminalOn to (exists process "Terminal")
+if (terminalOn) then
+   tell application "Terminal"
+	activate
+	do script "\"$mypath/startup.command\"; exit"
+   end tell
+else
+   tell application "Terminal"
+	activate
+	do script "\"$mypath/startup.command\"; exit" in front window
+   end tell
+end if
+EOT
+exit 0

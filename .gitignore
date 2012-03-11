@@ -11,3 +11,5 @@ Makefile
 macdist/*
 stratagus
 tolua.cpp
+
+png2stratagus

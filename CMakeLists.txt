@@ -545,6 +545,10 @@ add_definitions(${PNG_DEFINITIONS} -DUSE_ZLIB)
 include_directories(${LUA_INCLUDE_DIR} ${PNG_INCLUDE_DIR} ${SDL_INCLUDE_DIR} ${TOLUA++_INCLUDE_DIR} ${ZLIB_INCLUDE_DIRS})
 set(stratagus_LIBS ${stratagus_LIBS} ${LUA_LIBRARIES} ${PNG_LIBRARIES} ${SDL_LIBRARY} ${TOLUA++_LIBRARY} ${ZLIB_LIBRARIES})
 
+if (APPLE)
+	set(stratagus_LIBS ${stratagus_LIBS}  SDLmain)
+endif()
+
 if(WIN32 AND NOT ENABLE_STDIO_REDIRECT)
 	add_definitions(-DNO_STDIO_REDIRECT)
 endif()
@@ -797,27 +801,27 @@ endif()
 
 ########### next target ###############
 
-set(metaserver_SRCS
-	metaserver/cmd.cpp
-	metaserver/db.cpp
-	metaserver/games.cpp
-	metaserver/main.cpp
-	metaserver/netdriver.cpp
-	src/network/lowlevel.cpp
-)
+#set(metaserver_SRCS
+#	metaserver/cmd.cpp
+#	metaserver/db.cpp
+#	metaserver/games.cpp
+#	metaserver/main.cpp
+#	metaserver/netdriver.cpp
+#	src/network/lowlevel.cpp
+#)
 
-set(metaserver_HDRS
-	metaserver/cmd.h
-	metaserver/db.h
-	metaserver/games.h
-	metaserver/netdriver.h
-)
+#set(metaserver_HDRS
+#	metaserver/cmd.h
+#	metaserver/db.h
+#	metaserver/games.h
+#	metaserver/netdriver.h
+#)
 
-source_group(metaserver FILES ${metaserver_SRCS} ${metaserver_HDRS})
+#source_group(metaserver FILES ${metaserver_SRCS} ${metaserver_HDRS})
 
 if(SQLITE_FOUND)
-	add_executable(metaserver ${metaserver_SRCS} ${metaserver_HDRS})
-	target_link_libraries(metaserver ${SDL_LIBRARY} ${SQLITE_LIBRARIES})
+	#add_executable(metaserver ${metaserver_SRCS} ${metaserver_HDRS})
+	#target_link_libraries(metaserver ${SDL_LIBRARY} ${SQLITE_LIBRARIES})
 
 	if(WIN32 AND MINGW AND ENABLE_STATIC)
 		set_target_properties(metaserver PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc")
@@ -914,7 +918,7 @@ install(TARGETS stratagus DESTINATION games)
 install(TARGETS png2stratagus DESTINATION bin)
 
 if(SQLITE_FOUND)
-	install(TARGETS metaserver DESTINATION sbin)
+	#install(TARGETS metaserver DESTINATION sbin)
 endif()
 
 if(ENABLE_DOC AND DOXYGEN_FOUND)

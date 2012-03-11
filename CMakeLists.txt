@@ -42,6 +42,7 @@ set(action_SRCS
 	src/action/action_attack.cpp
 	src/action/action_board.cpp
 	src/action/action_build.cpp
+	src/action/action_built.cpp
 	src/action/action_die.cpp
 	src/action/action_follow.cpp
 	src/action/action_move.cpp
@@ -49,14 +50,12 @@ set(action_SRCS
 	src/action/action_repair.cpp
 	src/action/action_research.cpp
 	src/action/action_resource.cpp
-	src/action/action_returngoods.cpp
-	src/action/actions.cpp
 	src/action/action_spellcast.cpp
-	src/action/action_stand.cpp
 	src/action/action_still.cpp
 	src/action/action_train.cpp
 	src/action/action_unload.cpp
 	src/action/action_upgradeto.cpp
+	src/action/actions.cpp
 	src/action/command.cpp
 )
 source_group(action FILES ${action_SRCS})
@@ -303,7 +302,74 @@ set(stratagus_SRCS
 	${CMAKE_CURRENT_BINARY_DIR}/tolua.cpp
 )
 
-set(stratagus_HDRS
+set(stratagus_guichan_HDRS
+	src/guichan/include/guichan/actionlistener.h
+	src/guichan/include/guichan/allegro.h
+	src/guichan/include/guichan/basiccontainer.h
+	src/guichan/include/guichan/cliprectangle.h
+	src/guichan/include/guichan/color.h
+	src/guichan/include/guichan/defaultfont.h
+	src/guichan/include/guichan/exception.h
+	src/guichan/include/guichan/focushandler.h
+	src/guichan/include/guichan/font.h
+	src/guichan/include/guichan/graphics.h
+	src/guichan/include/guichan/gsdl.h
+	src/guichan/include/guichan/gui.h
+	src/guichan/include/guichan.h
+	src/guichan/include/guichan/imagefont.h
+	src/guichan/include/guichan/image.h
+	src/guichan/include/guichan/imageloader.h
+	src/guichan/include/guichan/input.h
+	src/guichan/include/guichan/key.h
+	src/guichan/include/guichan/keyinput.h
+	src/guichan/include/guichan/keylistener.h
+	src/guichan/include/guichan/listmodel.h
+	src/guichan/include/guichan/mouseinput.h
+	src/guichan/include/guichan/mouselistener.h
+	src/guichan/include/guichan/platform.h
+	src/guichan/include/guichan/rectangle.h
+	src/guichan/include/guichan/sdl/sdlgraphics.h
+	src/guichan/include/guichan/sdl/sdlimageloader.h
+	src/guichan/include/guichan/sdl/sdlinput.h
+	src/guichan/include/guichan/sdl/sdlpixel.h
+	src/guichan/include/guichan/widget.h
+	src/guichan/include/guichan/widgets/button.h
+	src/guichan/include/guichan/widgets/container.h
+	src/guichan/include/guichan/widgets/dropdown.h
+	src/guichan/include/guichan/widgets/checkbox.h
+	src/guichan/include/guichan/widgets/icon.h
+	src/guichan/include/guichan/widgets/label.h
+	src/guichan/include/guichan/widgets/listbox.h
+	src/guichan/include/guichan/widgets/radiobutton.h
+	src/guichan/include/guichan/widgets/scrollarea.h
+	src/guichan/include/guichan/widgets/slider.h
+	src/guichan/include/guichan/widgets/textbox.h
+	src/guichan/include/guichan/widgets/textfield.h
+	src/guichan/include/guichan/widgets/window.h
+	src/guichan/include/guichan/x.h
+)
+
+set(stratagus_action_HDRS
+	src/include/action/action_attack.h
+	src/include/action/action_board.h
+	src/include/action/action_build.h
+	src/include/action/action_built.h
+	src/include/action/action_die.h
+	src/include/action/action_follow.h
+	src/include/action/action_move.h
+	src/include/action/action_patrol.h
+	src/include/action/action_repair.h
+	src/include/action/action_research.h
+	src/include/action/action_resource.h
+	src/include/action/action_spellcast.h
+	src/include/action/action_still.h
+	src/include/action/action_train.h
+	src/include/action/action_unload.h
+	src/include/action/action_upgradeto.h
+)
+
+
+set(stratagus_generic_HDRS
 	src/ai/ai_local.h
 	src/video/intern_video.h
 	src/video/renderer.h
@@ -363,52 +429,14 @@ set(stratagus_HDRS
 	src/include/video.h
 	src/include/wav.h
 	src/include/widgets.h
-	src/guichan/include/guichan/actionlistener.h
-	src/guichan/include/guichan/allegro.h
-	src/guichan/include/guichan/basiccontainer.h
-	src/guichan/include/guichan/cliprectangle.h
-	src/guichan/include/guichan/color.h
-	src/guichan/include/guichan/defaultfont.h
-	src/guichan/include/guichan/exception.h
-	src/guichan/include/guichan/focushandler.h
-	src/guichan/include/guichan/font.h
-	src/guichan/include/guichan/graphics.h
-	src/guichan/include/guichan/gsdl.h
-	src/guichan/include/guichan/gui.h
-	src/guichan/include/guichan.h
-	src/guichan/include/guichan/imagefont.h
-	src/guichan/include/guichan/image.h
-	src/guichan/include/guichan/imageloader.h
-	src/guichan/include/guichan/input.h
-	src/guichan/include/guichan/key.h
-	src/guichan/include/guichan/keyinput.h
-	src/guichan/include/guichan/keylistener.h
-	src/guichan/include/guichan/listmodel.h
-	src/guichan/include/guichan/mouseinput.h
-	src/guichan/include/guichan/mouselistener.h
-	src/guichan/include/guichan/platform.h
-	src/guichan/include/guichan/rectangle.h
-	src/guichan/include/guichan/sdl/sdlgraphics.h
-	src/guichan/include/guichan/sdl/sdlimageloader.h
-	src/guichan/include/guichan/sdl/sdlinput.h
-	src/guichan/include/guichan/sdl/sdlpixel.h
-	src/guichan/include/guichan/widget.h
-	src/guichan/include/guichan/widgets/button.h
-	src/guichan/include/guichan/widgets/container.h
-	src/guichan/include/guichan/widgets/dropdown.h
-	src/guichan/include/guichan/widgets/checkbox.h
-	src/guichan/include/guichan/widgets/icon.h
-	src/guichan/include/guichan/widgets/label.h
-	src/guichan/include/guichan/widgets/listbox.h
-	src/guichan/include/guichan/widgets/radiobutton.h
-	src/guichan/include/guichan/widgets/scrollarea.h
-	src/guichan/include/guichan/widgets/slider.h
-	src/guichan/include/guichan/widgets/textbox.h
-	src/guichan/include/guichan/widgets/textfield.h
-	src/guichan/include/guichan/widgets/window.h
-	src/guichan/include/guichan/x.h
 )
-source_group(include FILES ${stratagus_HDRS})
+
+
+source_group(include FILES ${stratagus_generic_HDRS})
+source_group(include\\action FILES ${stratagus_action_HDRS})
+source_group(include\\guichan FILES ${stratagus_guichan_HDRS})
+
+set (stratagus_HDRS ${stratagus_generic_HDRS} ${stratagus_action_HDRS} ${stratagus_guichan_HDRS})
 
 # Additional platform checks
 
@@ -576,11 +604,15 @@ endif()
 if(WIN32)
 	add_definitions(-DUSE_WIN32)
 	set(stratagus_SRCS ${stratagus_SRCS} ${win32_SRCS})
-	set(stratagus_LIBS ${stratagus_LIBS} dsound dxguid winmm ws2_32)
+	set(stratagus_LIBS ${stratagus_LIBS} dsound winmm ws2_32)
 endif()
 
 if (WIN32 AND MSVC)
 	add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_SECURE_NO_DEPRECATE=1)
+endif()
+
+if (WIN32 AND MINGW)
+	set(stratagus_LIBS ${stratagus_LIBS} dxguid)
 endif()
 
 if(APPLE)
@@ -609,8 +641,8 @@ endif()
 
 # Stratagus needs to have char by default signed
 # No idea how to tell this to other compilers
-if(CMAKE_COMPILER_IS_GNUCC)
-	add_definitions(-fsigned-char)
+if(CMAKE_COMPILER_IS_GNUCXX)
+	set(CMAKE_CXX_FLAGS "-fsigned-char")
 endif()
 
 check_function_exists("strcasestr" HAVE_STRCASESTR)

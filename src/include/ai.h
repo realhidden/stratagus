@@ -52,14 +52,14 @@ extern int AiSleepCycles;  /// Ai sleeps # cycles
 --  Functions
 ----------------------------------------------------------------------------*/
 
-extern void AiEachCycle(CPlayer *player);   /// Called each game cycle
-extern void AiEachSecond(CPlayer *player);  /// Called each second
+extern void AiEachCycle(CPlayer &player);   /// Called each game cycle
+extern void AiEachSecond(CPlayer &player);  /// Called each second
 
 extern void InitAiModule();       /// Init AI global structures
-extern void AiInit(CPlayer *player);   /// Init AI for this player
+extern void AiInit(CPlayer &player);   /// Init AI for this player
 extern void CleanAi();            /// Cleanup the AI module
 extern void FreeAi();            /// Free the AI resources
-extern void SaveAi(CFile *file);     /// Save the AI state
+extern void SaveAi(CFile &file);     /// Save the AI state
 
 extern void AiCclRegister();      /// Register ccl features
 
@@ -81,7 +81,7 @@ extern void AiNeedMoreSupply(const CPlayer &player);
 	/// Called if AI unit has completed work
 extern void AiWorkComplete(CUnit *unit, CUnit &what);
 	/// Called if AI unit can't build
-extern void AiCanNotBuild(CUnit &unit, const CUnitType &what);
+extern void AiCanNotBuild(const CUnit &unit, const CUnitType &what);
 	/// Called if AI unit can't reach building place
 extern void AiCanNotReach(CUnit &unit, const CUnitType &what);
 	/// Called if an AI unit can't move

@@ -92,134 +92,25 @@ void CMap::Remove(CUnit &unit)
 	} while( --i && unit.tilePos.y + (i - h) < Info.MapHeight);
 }
 
-/**
-**  Select units on map tile.
-**
-**  @param pos        Map tile position
-**  @param table      All units in the selection rectangle
-**  @param tablesize  Size of table array
-**
-**  @return           Returns the number of units found
-*/
-int CMap::Select(const Vec2i &pos, CUnit *table[], const int tablesize)
+
+class NoFilter
 {
-	int n = 0;
-	CUnitCache &cache = Field(pos)->UnitCache;
-	const size_t size = cache.size();
-	for(unsigned int i = 0; n < tablesize && i < size; ++i) {
-		CUnit *unit = cache.Units[i];
-		Assert(!unit->Removed);
-		table[n++] = unit;
-	}
-	return n;
+public:
+	bool operator () (const CUnit*) const { return true; }
+};
+
+void CMap::Select(const Vec2i& ltPos, const Vec2i& rbPos, std::vector<CUnit*>& units)
+{
+	Select(ltPos, rbPos, units, NoFilter());
 }
 
-/**
-**  Select units in rectangle range.
-**
-**  @param ltpos      Left Top position of selection rectangle
-**  @param rbpos      Right Bottom position of selection rectangle
-**  @param table      All units in the selection rectangle
-**  @param tablesize  Size of table array
-**
-**  @return           Returns the number of units found
-*/
-int CMap::SelectFixed(const Vec2i &ltpos, const Vec2i &rbpos, CUnit *table[], const int tablesize)
+void CMap::SelectFixed(const Vec2i& ltPos, const Vec2i& rbPos, std::vector<CUnit*>& units)
 {
-	Assert(Info.IsPointOnMap(ltpos));
-	Assert(Info.IsPointOnMap(rbpos));
-
-	// Optimize small searches.
-	if (ltpos == rbpos) {
-		return Select(ltpos, table, tablesize);
-	}
-
-	int i;
-	int n = 0;
-	CUnit *unit;
-	unsigned int index = getIndex(ltpos);
-	int j = rbpos.y - ltpos.y + 1;
-	do {
-		const CMapField *mf = Field(index);
-		i = rbpos.x - ltpos.x + 1;
-		do {
-#if __GNUC__ >  3
-			//GCC version only, since std::vector::data() is not in STL
-			size_t count = mf->UnitCache.size();
-			if (count) {
-				CUnit **cache = (CUnit **)mf->UnitCache.Units.data();
-				do {
-					unit = *cache;
-					//
-					// To avoid getting a unit in multiple times we use a cache lock.
-					// It should only be used in here, unless you somehow want the unit
-					// to be out of cache.
-					//
-					if (!unit->CacheLock && !unit->Type->Revealer) {
-						Assert(!unit->Removed);
-						unit->CacheLock = 1;
-						table[n++] = unit;
-					}
-					++cache;
-				} while(--count && n < tablesize);
-			}
-#else
-			const size_t count = mf->UnitCache.size();
-			if (count) {
-				unsigned int k = 0;
-				const CUnitCache &cache = mf->UnitCache;
-				do {
-					unit = cache[k];
-					//
-					// To avoid getting a unit in multiple times we use a cache lock.
-					// It should only be used in here, unless you somehow want the unit
-					// to be out of cache.
-					//
-					if (!unit->CacheLock && !unit->Type->Revealer) {
-						Assert(!unit->Removed);
-						unit->CacheLock = 1;
-						table[n++] = unit;
-					}
-				} while(++k < count && n < tablesize);
-			}
-#endif
-			++mf;
-		} while(--i && n < tablesize);
-		index += Info.MapWidth;
-	} while(--j && n < tablesize);
-
-	if (!n)
-		return 0;
-
-	//
-	// Clean the cache locks, restore to original situation.
-	//
-#ifndef __GNUG__
-	for (i = 0; i < n; ++i) {
-		table[i]->CacheLock = 0;
-	}
-#else
-	i = 0;
-	j = (n+3)/4;
-	switch (n & 3) {
-		case 0: do {
-						table[i++]->CacheLock = 0;
-		case 3:			table[i++]->CacheLock = 0;
-		case 2:			table[i++]->CacheLock = 0;
-		case 1:			table[i++]->CacheLock = 0;
-			} while ( --j > 0 );
-	}
-#endif
-	return n;
+	Select(ltPos, rbPos, units, NoFilter());
 }
 
-int CMap::Select(int x1, int y1,
-		int x2, int y2, CUnit *table[], const int tablesize)
+void CMap::SelectAroundUnit(const CUnit &unit, int range, std::vector<CUnit*>& around)
 {
-	//  Reduce to map limits.
-	Vec2i ltpos = {std::max<int>(x1, 0), std::max<int>(y1, 0)};
-	Vec2i rbpos = {std::min<int>(x2, Info.MapWidth - 1), std::min<int>(y2, Info.MapHeight - 1)};
-
-	return SelectFixed(ltpos, rbpos, table, tablesize);
+	SelectAroundUnit(unit, range, around, NoFilter());
 }
 

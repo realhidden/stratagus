@@ -209,7 +209,7 @@ static void UiAddGroupToSelection(unsigned group)
 	//
 	//  Don't allow to mix units and buildings
 	//
-	if (NumUnits && Selected[0]->Type->Building) {
+	if (NumSelected && Selected[0]->Type->Building) {
 		return;
 	}
 
@@ -747,10 +747,6 @@ static bool CommandKey(int key)
 	return true;
 }
 
-#if defined(DEBUG) || defined(PROF)
-extern void MapUnmarkUnitGuard(CUnit &unit);
-#endif
-
 /**
 **  Handle cheats
 **
@@ -767,28 +763,17 @@ int HandleCheats(const std::string &input)
 			// for human players.  We can't switch back to a human player or
 			// we'll be using the wrong ref counts.
 #if 0
-			ThisPlayer->AiEnabled = 0;
+			ThisPlayer->AiEnabled = false;
 			ThisPlayer->Type = PlayerPerson;
 			SetMessage("AI is off, Normal Player");
 #else
 			SetMessage("Cannot disable 'ai me' cheat");
 #endif
 		} else {
-
-			for (int j = 0; j < ThisPlayer->TotalNumUnits; ++j) {
-				CUnit *guard = ThisPlayer->Units[j];
-				bool stand_ground =
-					guard->CurrentAction() == UnitActionStandGround;
-				if ((stand_ground || guard->IsIdle()) &&
-							 !guard->IsUnusable()) {
-					MapUnmarkUnitGuard(*guard);
-					guard->SubAction = 0;
-				}
-			}
-			ThisPlayer->AiEnabled = 1;
+			ThisPlayer->AiEnabled = true;
 			ThisPlayer->Type = PlayerComputer;
 			if (!ThisPlayer->Ai) {
-				AiInit(ThisPlayer);
+				AiInit(*ThisPlayer);
 			}
 			SetMessage("I'm the BORG, resistance is futile!");
 		}
@@ -1010,7 +995,7 @@ int HandleKeyModifiersDown(unsigned key, unsigned)
 		case SDLK_PRINT:
 			Screenshot();
 			if (GameRunning) {
-				SetMessage(_("Screenshot made."));
+				SetMessage("%s", _("Screenshot made."));
 			}
 			return 1;
 		default:

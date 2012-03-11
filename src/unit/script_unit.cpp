@@ -39,6 +39,23 @@
 
 #include "stratagus.h"
 #include "unit.h"
+
+#include "action/action_attack.h"
+#include "action/action_board.h"
+#include "action/action_build.h"
+#include "action/action_built.h"
+#include "action/action_die.h"
+#include "action/action_follow.h"
+#include "action/action_move.h"
+#include "action/action_patrol.h"
+#include "action/action_repair.h"
+#include "action/action_research.h"
+#include "action/action_resource.h"
+#include "action/action_spellcast.h"
+#include "action/action_still.h"
+#include "action/action_train.h"
+#include "action/action_unload.h"
+#include "action/action_upgradeto.h"
 #include "unit_manager.h"
 #include "unittype.h"
 #include "animation.h"
@@ -132,296 +149,102 @@ CUnit *CclGetUnitFromRef(lua_State *l)
 	return UnitSlots[slot];
 }
 
-/**
-**  Get a position from lua state
-**
-**  @param l  Lua state.
-**	@param x  pointer to output x position.
-**	@param y  pointer to output y position.
-**
-**  @return   The unit pointer
-*/
-template <typename T>
-static void CclGetPos(lua_State *l, T *x , T *y, const int offset = -1)
-{
-	if (!lua_istable(l, offset) || lua_objlen(l, offset) != 2) {
-		LuaError(l, "incorrect argument");
-	}
-	lua_rawgeti(l, offset, 1);
-	*x = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-	lua_rawgeti(l, offset, 2);
-	*y = LuaToNumber(l, -1);
-	lua_pop(l, 1);
-}
-
-/**
-**  Parse res worker data
-**
-**  @param l     Lua state.
-**  @param unit  Unit pointer which should be filled with the data.
-*/
-static void CclParseResWorker(lua_State *l, COrderPtr order)
-{
-	const char *value;
-	int args;
-	int j;
-
-	if (!lua_istable(l, -1)) {
-		LuaError(l, "incorrect argument");
-	}
-	args = lua_objlen(l, -1);
-	for (j = 0; j < args; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		value = LuaToString(l, -1);
-		lua_pop(l, 1);
-		++j;
-		if (!strcmp(value, "time-to-harvest")) {
-			lua_rawgeti(l, -1, j + 1);
-			order->Data.ResWorker.TimeToHarvest = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-		} else if (!strcmp(value, "done-harvesting")) {
-			order->Data.ResWorker.DoneHarvesting = 1;
-			--j;
-		} else {
-			LuaError(l, "ParseResWorker: Unsupported tag: %s" _C_ value);
-		}
-	}
-}
-
-/**
-**  Parse upgrade to
-**
-**  @param l     Lua state.
-**  @param unit  Unit pointer which should be filled with the data.
-*/
-static void CclParseUpgradeTo(lua_State *l, COrderPtr order)
-{
-	const char *value;
-	int args;
-	int j;
-
-	if (!lua_istable(l, -1)) {
-		LuaError(l, "incorrect argument");
-	}
-	args = lua_objlen(l, -1);
-	for (j = 0; j < args; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		value = LuaToString(l, -1);
-		lua_pop(l, 1);
-		++j;
-		if (!strcmp(value, "ticks")) {
-			lua_rawgeti(l, -1, j + 1);
-			order->Data.UpgradeTo.Ticks = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-		} else {
-			LuaError(l, "ParseUpgradeTo: Unsupported tag: %s" _C_ value);
-		}
-	}
-}
-
-/**
-**  Parse stored data for train order
-**
-**  @param l     Lua state.
-**  @param unit  Unit pointer which should be filled with the data.
-*/
-static void CclParseTrain(lua_State *l, COrderPtr order)
-{
-	const char *value;
-	int args;
-	int j;
-
-	if (!lua_istable(l, -1)) {
-		LuaError(l, "incorrect argument");
-	}
-	args = lua_objlen(l, -1);
-	for (j = 0; j < args; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		value = LuaToString(l, -1);
-		lua_pop(l, 1);
-		++j;
-		if (!strcmp(value, "ticks")) {
-			lua_rawgeti(l, -1, j + 1);
-			order->Data.Train.Ticks = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-		} else {
-			LuaError(l, "ParseTrain: Unsupported tag: %s" _C_ value);
-		}
-	}
-}
-
-/**
-**  Parse stored data for move order
-**
-**  @param l     Lua state.
-**  @param unit  Unit pointer which should be filled with the data.
-*/
-static void CclParseMove(lua_State *l, COrderPtr order)
-{
-	const char *value;
-	int args;
-	int j;
-
-	if (!lua_istable(l, -1)) {
-		LuaError(l, "incorrect argument");
-	}
-	args = lua_objlen(l, -1);
-	for (j = 0; j < args; ++j) {
-		lua_rawgeti(l, -1, j + 1);
-		value = LuaToString(l, -1);
-		lua_pop(l, 1);
-		++j;
-		if (!strcmp(value, "cycles")) {
-			lua_rawgeti(l, -1, j + 1);
-			order->Data.Move.Cycles = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-		} else if (!strcmp(value, "fast")) {
-			order->Data.Move.Fast = 1;
-			--j;
-		} else if (!strcmp(value, "path")) {
-			int subargs;
-			int k;
-
-			lua_rawgeti(l, -1, j + 1);
-			if (!lua_istable(l, -1)) {
-				LuaError(l, "incorrect argument");
-			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, -1, k + 1);
-				order->Data.Move.Path[k] = LuaToNumber(l, -1);
-				lua_pop(l, 1);
-			}
-			order->Data.Move.Length = subargs;
-			lua_pop(l, 1);
-		} else {
-			LuaError(l, "ParseMove: Unsupported tag: %s" _C_ value);
-		}
-	}
-}
 
 bool COrder::ParseGenericData(lua_State *l, int &j, const char *value)
 {
-	if (!strcmp(value, "range")) {
-		++j;
+	if (!strcmp(value, "finished")) {
 		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "min-range")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->MinRange = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "width")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Width = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "height")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Height = LuaToNumber(l, -1);
+		this->Finished = true;
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "goal")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
 		this->Goal = CclGetUnitFromRef(l);
 		lua_pop(l, 1);
-	} else if (!strcmp(value, "tile")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		CclGetPos(l, &this->goalPos.x , &this->goalPos.y);
-		lua_pop(l, 1);
 	} else {
 		return false;
 	}
 	return true;
 }
 
-bool COrder::ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit)
+
+
+void PathFinderInput::Load(lua_State *l)
 {
-	if (!strcmp(value, "type")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Arg1.Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
-
-	} else if (!strcmp(value, "patrol")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		CclGetPos(l, &this->Arg1.Patrol.x , &this->Arg1.Patrol.y);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "current-resource")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->CurrentResource = CclGetResourceByName(l);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "resource-pos")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Arg1.Resource.Mine = NULL;
-		CclGetPos(l, &this->Arg1.Resource.Pos.x , &this->Arg1.Resource.Pos.y);
-		lua_pop(l, 1);
-
-		Assert(this->CurrentResource);
-	} else if (!strcmp(value, "resource-mine")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		Vec2i invalidPos = {-1, -1};
-		this->Arg1.Resource.Pos = invalidPos;
-		this->Arg1.Resource.Mine = CclGetUnitFromRef(l);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "data-res-worker")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		CclParseResWorker(l, this);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "data-upgrade-to")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		CclParseUpgradeTo(l, this);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "data-train")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		CclParseTrain(l, this);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "data-move")) {
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		CclParseMove(l, this);
-		lua_pop(l, 1);
-	} else if (!strcmp(value, "mine")) { /* old save format */
-		int pos;
-		++j;
-		lua_rawgeti(l, -1, j + 1);
-		pos = LuaToNumber(l, -1);
-		lua_pop(l, 1);
-
-		const Vec2i mpos = {pos >> 16, pos & 0xFFFF};
-		CUnit *mine = NULL;
-		pos = 0;
-		do {
-			pos++;
-			mine = ResourceOnMap(mpos, pos, true);
-		} while (!mine && pos < MaxCosts);
-		if (mine) {
-			Vec2i invalidPos = {-1, -1};
-			this->Arg1.Resource.Pos = invalidPos;
-
-			mine->RefsIncrease();
-			this->Arg1.Resource.Mine = mine;
-			this->CurrentResource = pos;
-		} else {
-			this->CurrentResource = WoodCost;
-			this->Arg1.Resource.Mine = NULL;
-			this->Arg1.Resource.Pos = mpos;
-		}
-	} else {
-		return false;
+	if (!lua_istable(l, -1)) {
+		LuaError(l, "incorrect argument in PathFinderInput::Load");
 	}
-	return true;
+	const int args = 1 + lua_objlen(l, -1);
+	for (int i = 1; i < args; ++i) {
+		lua_rawgeti(l, -1, i);
+		const char *tag = LuaToString(l, -1);
+		lua_pop(l, 1);
+		++i;
+		if (!strcmp(tag, "unit-size")) {
+			lua_rawgeti(l, -1, i);
+			CclGetPos(l, &this->unitSize.x, &this->unitSize.y);
+			lua_pop(l, 1);
+		} else if (!strcmp(tag, "goalpos")) {
+			lua_rawgeti(l, -1, i);
+			CclGetPos(l, &this->goalPos.x, &this->goalPos.y);
+			lua_pop(l, 1);
+		} else if (!strcmp(tag, "goal-size")) {
+			lua_rawgeti(l, -1, i);
+			CclGetPos(l, &this->goalSize.x, &this->goalSize.y);
+			lua_pop(l, 1);
+		} else if (!strcmp(tag, "minrange")) {
+			lua_rawgeti(l, -1, i);
+			this->minRange = LuaToNumber(l, -1);
+			lua_pop(l, 1);
+		} else if (!strcmp(tag, "maxrange")) {
+			lua_rawgeti(l, -1, i);
+			this->maxRange = LuaToNumber(l, -1);
+			lua_pop(l, 1);
+		} else if (!strcmp(tag, "invalid")) {
+			this->isRecalculatePathNeeded = true;
+			--i;
+		} else {
+			LuaError(l, "PathFinderInput::Load: Unsupported tag: %s" _C_ tag);
+		}
+	}
+}
+
+
+void PathFinderOutput::Load(lua_State *l)
+{
+	if (!lua_istable(l, -1)) {
+		LuaError(l, "incorrect argument in PathFinderOutput::Load");
+	}
+	const int args = 1 + lua_objlen(l, -1);
+	for (int i = 1; i < args; ++i) {
+		lua_rawgeti(l, -1, i);
+		const char *tag = LuaToString(l, -1);
+		lua_pop(l, 1);
+		++i;
+		if (!strcmp(tag, "cycles")) {
+			lua_rawgeti(l, -1, i);
+			this->Cycles = LuaToNumber(l, -1);
+			lua_pop(l, 1);
+		} else if (!strcmp(tag, "fast")) {
+			this->Fast = 1;
+			--i;
+		} else if (!strcmp(tag, "path")) {
+			lua_rawgeti(l, -1, i);
+			if (!lua_istable(l, -1)) {
+				LuaError(l, "incorrect argument _");
+			}
+			const int subargs = lua_objlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
+				lua_rawgeti(l, -1, k + 1);
+				this->Path[k] = LuaToNumber(l, -1);
+				lua_pop(l, 1);
+			}
+			this->Length = subargs;
+			lua_pop(l, 1);
+		} else {
+			LuaError(l, "PathFinderOutput::Load: Unsupported tag: %s" _C_ tag);
+		}
+	}
 }
 
 /**
@@ -430,7 +253,7 @@ bool COrder::ParseSpecificData(lua_State *l, int &j, const char *value, const CU
 **  @param l      Lua state.
 **  @param order  OUT: resulting order.
 */
-void CclParseOrder(lua_State *l, const CUnit &unit, COrderPtr *orderPtr)
+void CclParseOrder(lua_State *l, CUnit &unit, COrderPtr *orderPtr)
 {
 	const int args = lua_objlen(l, -1);
 
@@ -438,46 +261,44 @@ void CclParseOrder(lua_State *l, const CUnit &unit, COrderPtr *orderPtr)
 	const char *actiontype = LuaToString(l, -1);
 	lua_pop(l, 1);
 
-	if (!strcmp(actiontype, "action-still")) {
-		*orderPtr = COrder::NewActionStill();
-	} else if (!strcmp(actiontype, "action-stand-ground")) {
-		*orderPtr = COrder::NewActionStandGround();
-	} else if (!strcmp(actiontype, "action-follow")) {
-		*orderPtr = COrder::NewActionFollow();
-	} else if (!strcmp(actiontype, "action-move")) {
-		*orderPtr = COrder::NewActionMove();
-	} else if (!strcmp(actiontype, "action-attack")) {
-		*orderPtr = COrder::NewActionAttack();
+	if (!strcmp(actiontype, "action-attack")) {
+		*orderPtr = new COrder_Attack(false);
 	} else if (!strcmp(actiontype, "action-attack-ground")) {
-		*orderPtr = COrder::NewActionAttackGround();
-	} else if (!strcmp(actiontype, "action-die")) {
-		*orderPtr = COrder::NewActionDie();
-	} else if (!strcmp(actiontype, "action-spell-cast")) {
-		*orderPtr = COrder::NewActionSpellCast();
-	} else if (!strcmp(actiontype, "action-train")) {
-		*orderPtr = COrder::NewActionTrain();
-	} else if (!strcmp(actiontype, "action-upgrade-to")) {
-		*orderPtr = COrder::NewActionUpgradeTo();
-	} else if (!strcmp(actiontype, "action-research")) {
-		*orderPtr = COrder::NewActionResearch();
-	} else if (!strcmp(actiontype, "action-built")) {
-		*orderPtr = COrder::NewActionBuilt();
+		*orderPtr = new COrder_Attack(true);
 	} else if (!strcmp(actiontype, "action-board")) {
-		*orderPtr = COrder::NewActionBoard();
-	} else if (!strcmp(actiontype, "action-unload")) {
-		*orderPtr = COrder::NewActionUnload();
-	} else if (!strcmp(actiontype, "action-patrol")) {
-		*orderPtr = COrder::NewActionPatrol();
+		*orderPtr = new COrder_Board;
 	} else if (!strcmp(actiontype, "action-build")) {
-		*orderPtr = COrder::NewActionBuild();
+		*orderPtr = new COrder_Build;
+	} else if (!strcmp(actiontype, "action-built")) {
+		*orderPtr = new COrder_Built;
+	} else if (!strcmp(actiontype, "action-die")) {
+		*orderPtr = new COrder_Die;
+	} else if (!strcmp(actiontype, "action-follow")) {
+		*orderPtr = new COrder_Follow;
+	} else if (!strcmp(actiontype, "action-move")) {
+		*orderPtr = new COrder_Move;
+	} else if (!strcmp(actiontype, "action-patrol")) {
+		*orderPtr = new COrder_Patrol;
 	} else if (!strcmp(actiontype, "action-repair")) {
-		*orderPtr = COrder::NewActionRepair();
+		*orderPtr = new COrder_Repair;
+	} else if (!strcmp(actiontype, "action-research")) {
+		*orderPtr = new COrder_Research;
 	} else if (!strcmp(actiontype, "action-resource")) {
-		*orderPtr = COrder::NewActionResource();
-	} else if (!strcmp(actiontype, "action-return-goods")) {
-		*orderPtr = COrder::NewActionReturnGoods();
+		*orderPtr = new COrder_Resource(unit);
+	} else if (!strcmp(actiontype, "action-spell-cast")) {
+		*orderPtr = new COrder_SpellCast;
+	} else if (!strcmp(actiontype, "action-stand-ground")) {
+		*orderPtr = new COrder_Still(true);
+	} else if (!strcmp(actiontype, "action-still")) {
+		*orderPtr = new COrder_Still(false);
+	} else if (!strcmp(actiontype, "action-train")) {
+		*orderPtr = new COrder_Train;
 	} else if (!strcmp(actiontype, "action-transform-into")) {
-		*orderPtr = COrder::NewActionTransformInto();
+		*orderPtr = new COrder_TransformInto;
+	} else if (!strcmp(actiontype, "action-upgrade-to")) {
+		*orderPtr = new COrder_UpgradeTo;
+	} else if (!strcmp(actiontype, "action-unload")) {
+		*orderPtr = new COrder_Unload;
 	} else {
 		LuaError(l, "ParseOrder: Unsupported type: %s" _C_ actiontype);
 	}
@@ -627,6 +448,8 @@ static int CclUnit(lua_State *l)
 		} else if (!strcmp(value, "tile")) {
 			CclGetPos(l, &unit->tilePos.x , &unit->tilePos.y, j + 1);
 			unit->Offset = Map.getIndex(unit->tilePos.x, unit->tilePos.y);
+		} else if (!strcmp(value, "seen-tile")) {
+			CclGetPos(l, &unit->Seen.tilePos.x , &unit->Seen.tilePos.y, j + 1);
 		} else if (!strcmp(value, "stats")) {
 			unit->Stats = &type->Stats[(int)LuaToNumber(l, j + 1)];
 		} else if (!strcmp(value, "pixel")) {
@@ -706,8 +529,14 @@ static int CclUnit(lua_State *l)
 			lua_pushvalue(l, j + 1);
 			unit->CurrentResource = CclGetResourceByName(l);
 			lua_pop(l, 1);
-		} else if (!strcmp(value, "sub-action")) {
-			unit->SubAction = LuaToNumber(l, j + 1);
+		} else if (!strcmp(value, "pathfinder-input")) {
+			lua_pushvalue(l, j + 1);
+			unit->pathFinderData->input.Load(l);
+			lua_pop(l, 1);
+		} else if (!strcmp(value, "pathfinder-output")) {
+			lua_pushvalue(l, j + 1);
+			unit->pathFinderData->output.Load(l);
+			lua_pop(l, 1);
 		} else if (!strcmp(value, "wait")) {
 			unit->Wait = LuaToNumber(l, j + 1);
 		} else if (!strcmp(value, "state")) {
@@ -766,14 +595,13 @@ static int CclUnit(lua_State *l)
 				lua_pop(l, 1);
 				u->AddInContainer(*unit);
 			}
-		} else if (!strcmp(value, "order-flush")) {
-			unit->OrderFlush = LuaToNumber(l, j + 1);
 		} else if (!strcmp(value, "orders")) {
 			lua_pushvalue(l, j + 1);
 			CclParseOrders(l, *unit);
 			lua_pop(l, 1);
 			// now we know unit's action so we can assign it to a player
-			unit->AssignToPlayer (player);
+			Assert(player != NULL);
+			unit->AssignToPlayer(*player);
 			if (unit->CurrentAction() == UnitActionBuilt) {
 				DebugPrint("HACK: the building is not ready yet\n");
 				// HACK: the building is not ready yet
@@ -817,7 +645,8 @@ static int CclUnit(lua_State *l)
 	// have orders for those units.  They should appear here as if
 	// they were just created.
 	if (!unit->Player) {
-		unit->AssignToPlayer(player);
+		Assert(player);
+		unit->AssignToPlayer(*player);
 		UpdateForNewUnit(*unit, 0);
 	}
 
@@ -980,23 +809,23 @@ static int CclOrderUnit(lua_State *l)
 		LuaError(l, "incorrect argument");
 	}
 	lua_rawgeti(l, 3, 1);
-	int x1 = LuaToNumber(l, -1);
+	Vec2i pos1;
+	pos1.x = LuaToNumber(l, -1);
 	lua_pop(l, 1);
 	lua_rawgeti(l, 3, 2);
-	int y1 = LuaToNumber(l, -1);
+	pos1.y = LuaToNumber(l, -1);
 	lua_pop(l, 1);
-	int x2;
-	int y2;
+
+	Vec2i pos2;
 	if (lua_objlen(l, 3) == 4) {
 		lua_rawgeti(l, 3, 3);
-		x2 = LuaToNumber(l, -1);
+		pos2.x = LuaToNumber(l, -1);
 		lua_pop(l, 1);
 		lua_rawgeti(l, 3, 4);
-		y2 = LuaToNumber(l, -1);
+		pos2.y = LuaToNumber(l, -1);
 		lua_pop(l, 1);
 	} else {
-		x2 = x1;
-		y2 = y1;
+		pos2 = pos1;
 	}
 	if (!lua_istable(l, 4)) {
 		LuaError(l, "incorrect argument");
@@ -1020,9 +849,9 @@ static int CclOrderUnit(lua_State *l)
 		dpos2 = dpos1;
 	}
 	const char *order = LuaToString(l, 5);
-	CUnit *table[UnitMax];
-	const int an = Map.Select(x1, y1, x2 + 1, y2 + 1, table);
-	for (int i = 0; i < an; ++i) {
+	std::vector<CUnit *> table;
+	Map.Select(pos1, pos2, table);
+	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
 		if (unittype == ANY_UNIT ||
@@ -1033,9 +862,8 @@ static int CclOrderUnit(lua_State *l)
 				if (!strcmp(order,"move")) {
 					CommandMove(unit, (dpos1 + dpos2) / 2, 1);
 				} else if (!strcmp(order, "attack")) {
-					CUnit *attack;
+					CUnit *attack = TargetOnMap(unit, dpos1.x, dpos1.y, dpos2.x + 1, dpos2.y + 1);
 
-					attack = TargetOnMap(unit, dpos1.x, dpos1.y, dpos2.x + 1, dpos2.y + 1);
 					CommandAttack(unit, (dpos1 + dpos2) / 2, attack, 1);
 				} else if (!strcmp(order, "patrol")) {
 					CommandPatrolUnit(unit, (dpos1 + dpos2) / 2, 1);
@@ -1102,47 +930,41 @@ static int CclKillUnit(lua_State *l)
 */
 static int CclKillUnitAt(lua_State *l)
 {
-	int plynr;
-	int q;
-	int x1;
-	int y1;
-	int x2;
-	int y2;
-	const CUnitType *unittype;
-	CUnit *table[UnitMax];
-	CUnit *unit;
-	int an;
-	int j;
-	int s;
-
 	LuaCheckArgs(l, 2);
 
 	lua_pushvalue(l, 2);
-	plynr = TriggerGetPlayer(l);
+	int plynr = TriggerGetPlayer(l);
 	lua_pop(l, 1);
-	q = LuaToNumber(l, 3);
+	int q = LuaToNumber(l, 3);
 	lua_pushvalue(l, 1);
-	unittype = TriggerGetUnitType(l);
+	const CUnitType *unittype = TriggerGetUnitType(l);
 	lua_pop(l, 1);
 	if (!lua_istable(l, 4)) {
 		LuaError(l, "incorrect argument");
 	}
+	Vec2i pos1;
+	Vec2i pos2;
 	lua_rawgeti(l, 4, 1);
-	x1 = LuaToNumber(l, -1);
+	pos1.x = LuaToNumber(l, -1);
 	lua_pop(l, 1);
 	lua_rawgeti(l, 4, 2);
-	y1 = LuaToNumber(l, -1);
+	pos1.y = LuaToNumber(l, -1);
 	lua_pop(l, 1);
 	lua_rawgeti(l, 4, 3);
-	x2 = LuaToNumber(l, -1);
+	pos2.x = LuaToNumber(l, -1);
 	lua_pop(l, 1);
 	lua_rawgeti(l, 4, 4);
-	y2 = LuaToNumber(l, -1);
+	pos2.y = LuaToNumber(l, -1);
 	lua_pop(l, 1);
 
-	an = Map.Select(x1, y1, x2 + 1, y2 + 1, table);
-	for (j = s = 0; j < an && s < q; ++j) {
-		unit = table[j];
+	std::vector<CUnit *> table;
+
+	Map.Select(pos1, pos2, table);
+
+	int s = 0;
+	for (size_t j = 0; j < table.size() && s < q; ++j) {
+		CUnit *unit = table[j];
+
 		if (unittype == ANY_UNIT ||
 				(unittype == ALL_FOODUNITS && !unit->Type->Building) ||
 				(unittype == ALL_BUILDINGS && unit->Type->Building) ||
@@ -1153,7 +975,6 @@ static int CclKillUnitAt(lua_State *l)
 			}
 		}
 	}
-
 	lua_pushnumber(l, s);
 	return 1;
 }

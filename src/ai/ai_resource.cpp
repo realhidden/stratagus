@@ -38,15 +38,19 @@
 #include <stdlib.h>
 
 #include "stratagus.h"
+
+#include "ai_local.h"
+
+#include "action/action_build.h"
+#include "action/action_repair.h"
+#include "action/action_resource.h"
+#include "depend.h"
+#include "map.h"
+#include "pathfinder.h"
+#include "player.h"
 #include "unit.h"
 #include "unittype.h"
 #include "upgrade.h"
-#include "map.h"
-#include "pathfinder.h"
-#include "ai_local.h"
-#include "actions.h"
-#include "player.h"
-#include "depend.h"
 
 /*----------------------------------------------------------------------------
 --  Defines
@@ -82,10 +86,12 @@ static int AiCheckCosts(const int *costs)
 	CUnit **units = AiPlayer->Player->Units;
 	for (int i = 0; i < nunits; ++i) {
 		for (size_t k = 0; k < units[i]->Orders.size(); ++k) {
-			COrder &order = *units[i]->Orders[k];
+			const COrder &order = *units[i]->Orders[k];
 
 			if (order.Action == UnitActionBuild) {
-				const int *building_costs = order.Arg1.Type->Stats[AiPlayer->Player->Index].Costs;
+				const COrder_Build& orderBuild = static_cast<const COrder_Build&>(order);
+				const int *building_costs = orderBuild.GetUnitType().Stats[AiPlayer->Player->Index].Costs;
+
 				for (int j = 1; j < MaxCosts; ++j) {
 					used[j] += building_costs[j];
 				}
@@ -157,6 +163,34 @@ static int AiCheckUnitTypeCosts(const CUnitType &type)
 	return AiCheckCosts(type.Stats[AiPlayer->Player->Index].Costs);
 }
 
+class IsAEnemyUnitOf
+{
+public:
+	explicit IsAEnemyUnitOf(const CPlayer& _player) : player(&_player) {}
+	bool operator() (const CUnit* unit) const {
+		return unit->IsVisibleAsGoal(*player)
+			&& unit->IsEnemy(*player);
+	}
+private:
+	const CPlayer* player;
+};
+
+class IsAEnemyUnitWhichCanCounterAttackOf
+{
+public:
+	explicit IsAEnemyUnitWhichCanCounterAttackOf(const CPlayer& _player, const CUnitType& _type) :
+		player(&_player), type(&_type)
+	{}
+	bool operator() (const CUnit* unit) const {
+		return unit->IsVisibleAsGoal(*player)
+			&& unit->IsEnemy(*player)
+			&& CanTarget(unit->Type, type);
+	}
+private:
+	const CPlayer* player;
+	const CUnitType* type;
+};
+
 /**
 **  Enemy units in distance.
 **
@@ -167,33 +201,22 @@ static int AiCheckUnitTypeCosts(const CUnitType &type)
 **
 **  @return       Number of enemy units.
 */
-int AiEnemyUnitsInDistance(const CPlayer *player,
+int AiEnemyUnitsInDistance(const CPlayer &player,
 		const CUnitType *type, const Vec2i &pos, unsigned range)
 {
-	// Select all units in range.
-	CUnit *table[UnitMax];
-	const unsigned int n = Map.Select(pos.x - range, pos.y - range,
-		pos.x + range + (type ? type->TileWidth :0),
-		pos.y + range + (type ? type->TileHeight:0), table);
+	const Vec2i offset = {range, range};
+	std::vector<CUnit*> units;
 
-	// Find the enemy units which can attack
-	int e = 0;
-	for (unsigned int i = 0; i < n; ++i) {
-		const CUnit *dest = table[i];
-		// Those can't attack anyway.
-		if (dest->Removed || dest->Variable[INVISIBLE_INDEX].Value ||
-			dest->CurrentAction() == UnitActionDie) {
-			continue;
-		}
-		if (!player->IsEnemy(*dest)) { // a friend or neutral
-			continue;
-		}
-		// Unit can attack back?
-		if (!type || CanTarget(dest->Type, type)) {
-			++e;
-		}
+	if (type == NULL) {
+		Map.Select(pos - offset, pos + offset, units, IsAEnemyUnitOf(player));
+		return static_cast<int>(units.size());
+	} else {
+		const Vec2i typeSize = {type->TileWidth - 1, type->TileHeight - 1};
+		const IsAEnemyUnitWhichCanCounterAttackOf pred(player, *type);
+
+		Map.Select(pos - offset, pos + typeSize + offset, units, pred);
+		return static_cast<int>(units.size());
 	}
-	return e;
 }
 
 /**
@@ -206,8 +229,28 @@ int AiEnemyUnitsInDistance(const CPlayer *player,
 */
 int AiEnemyUnitsInDistance(const CUnit &unit, unsigned range)
 {
-	return AiEnemyUnitsInDistance(unit.Player, unit.Type, unit.tilePos, range);
+	return AiEnemyUnitsInDistance(*unit.Player, unit.Type, unit.tilePos, range);
 }
+
+static bool IsAlreadyWorking(const CUnit& unit)
+{
+	for (size_t i = 0; i != unit.Orders.size(); ++i) {
+		const int action = unit.Orders[i]->Action;
+
+		if (action == UnitActionBuild || action == UnitActionRepair) {
+			return true;
+		}
+		if (action == UnitActionResource) {
+			const COrder_Resource &order = *static_cast<const COrder_Resource*>(unit.Orders[i]);
+
+			if (order.IsGatheringStarted()) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 
 /**
 **  Check if we can build the building.
@@ -221,32 +264,20 @@ int AiEnemyUnitsInDistance(const CUnit &unit, unsigned range)
 */
 static int AiBuildBuilding(const CUnitType &type, CUnitType &building, int near_x, int near_y)
 {
-	CUnit *table[UnitMax];
+	std::vector<CUnit *> table;
+
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+
 	int num = 0;
 
-	//
 	// Remove all workers on the way building something
-	//
-	const int nunits = FindPlayerUnitsByType(*AiPlayer->Player, type, table);
-	for (int i = 0; i < nunits; ++i) {
+	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit& unit = *table[i];
-		size_t j;
 
-		for (j = 0; j < unit.Orders.size(); ++j) {
-			int action = unit.Orders[j]->Action;
-			if (action == UnitActionBuild ||
-				action == UnitActionRepair ||
-				action == UnitActionReturnGoods ||
-				(action == UnitActionResource &&
-					 unit.SubAction > 55) /* SUB_START_GATHERING */) {
-				break;
-			}
-		}
-		if (j == unit.Orders.size()) {
+		if (IsAlreadyWorking(unit) == false) {
 			table[num++] = &unit;
 		}
 	}
-
 	if (num == 0) {
 		// No workers available to build
 		return 0;
@@ -323,18 +354,10 @@ void AiNewDepotRequest(CUnit &worker) {
 				_C_ worker->Data.Move.Cycles
 				);
 	*/
+	Assert(worker.CurrentAction() == UnitActionResource);
+	COrder_Resource &order = *static_cast<COrder_Resource*>(worker.CurrentOrder());
 
-	Vec2i pos = {-1, -1};
-	ResourceInfo *resinfo = worker.Type->ResInfo[worker.CurrentResource];
-
-	if (resinfo->TerrainHarvester) {
-		pos = worker.CurrentOrder()->Arg1.Resource.Pos;
-	} else {
-		CUnit *mine = worker.CurrentOrder()->Arg1.Resource.Mine;
-		if (mine) {
-			pos = mine->tilePos;
-		}
-	}
+	const Vec2i pos = order.GetHarvestLocation();
 
 	if (pos.x != -1 && NULL != FindDepositNearLoc(*worker.Player, pos, 10, worker.CurrentResource)) {
 		/*
@@ -522,29 +545,20 @@ static bool AiRequestSupply()
 **
 **  @note        We must check if the dependencies are fulfilled.
 */
-static int AiTrainUnit(const CUnitType &type, CUnitType &what)
+static bool AiTrainUnit(const CUnitType &type, CUnitType &what)
 {
-	CUnit *table[UnitMax];
-	int num = 0;
+	std::vector<CUnit *> table;
 
-	//
-	// Remove all units already doing something.
-	//
-	const int nunits = FindPlayerUnitsByType(*AiPlayer->Player, type, table);
-	for (int i = 0; i < nunits; ++i) {
-		CUnit *unit = table[i];
-
-		if (unit->IsIdle()) {
-			table[num++] = unit;
-		}
-	}
-	for (int i = 0; i < num; ++i) {
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
-		CommandTrainUnit(unit, what, FlushCommands);
-		return 1;
+		if (unit.IsIdle()) {
+			CommandTrainUnit(unit, what, FlushCommands);
+			return true;
+		}
 	}
-	return 0;
+	return false;
 }
 
 /**
@@ -620,29 +634,20 @@ static int AiMakeUnit(CUnitType &typeToMake, int near_x, int near_y)
 **
 **  @note        We must check if the dependencies are fulfilled.
 */
-static int AiResearchUpgrade(const CUnitType &type, CUpgrade *what)
+static bool AiResearchUpgrade(const CUnitType &type, CUpgrade &what)
 {
-	CUnit *table[UnitMax];
-	int num = 0;
+	std::vector<CUnit *> table;
 
-	// Remove all units already doing something.
-
-	const int nunits = FindPlayerUnitsByType(*AiPlayer->Player, type, table);
-	for (int i = 0; i < nunits; ++i) {
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
 		if (unit.IsIdle()) {
-			table[num++] = &unit;
+			CommandResearch(unit, &what, FlushCommands);
+			return true;
 		}
 	}
-
-	for (int i = 0; i < num; ++i) {
-		CUnit &unit = *table[i];
-
-		CommandResearch(unit, what, FlushCommands);
-		return 1;
-	}
-	return 0;
+	return false;
 }
 
 /**
@@ -680,10 +685,9 @@ void AiAddResearchRequest(CUpgrade *upgrade)
 	const int *unit_count = AiPlayer->Player->UnitTypesCount;
 	for (unsigned int i = 0; i < table.size(); ++i) {
 		// The type is available
-		if (unit_count[table[i]->Slot]) {
-			if (AiResearchUpgrade(*table[i], upgrade)) {
-				return;
-			}
+		if (unit_count[table[i]->Slot]
+			&& AiResearchUpgrade(*table[i], *upgrade)) {
+			return;
 		}
 	}
 }
@@ -698,28 +702,21 @@ void AiAddResearchRequest(CUpgrade *upgrade)
 **
 **  @note        We must check if the dependencies are fulfilled.
 */
-static int AiUpgradeTo(const CUnitType &type, CUnitType &what)
+static bool AiUpgradeTo(const CUnitType &type, CUnitType &what)
 {
-	CUnit *table[UnitMax];
-	int num = 0;
+	std::vector<CUnit *> table;
 
 	// Remove all units already doing something.
-	const int nunits = FindPlayerUnitsByType(*AiPlayer->Player, type, table);
-	for (int i = 0; i < nunits; ++i) {
-		CUnit *unit = table[i];
-
-		if (unit->IsIdle()) {
-			table[num++] = unit;
-		}
-	}
-
-	for (int i = 0; i < num; ++i) {
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
-		CommandUpgradeTo(unit, what, FlushCommands);
-		return 1;
+		if (unit.IsIdle()) {
+			CommandUpgradeTo(unit, what, FlushCommands);
+			return true;
+		}
 	}
-	return 0;
+	return false;
 }
 
 /**
@@ -840,7 +837,7 @@ static int AiAssignHarvesterFromTerrain(CUnit &unit, int resource)
 	Vec2i forestPos;
 
 	// Code for terrain harvesters. Search for piece of terrain to mine.
-	if (FindTerrainType(unit.Type->MovementMask, MapFieldForest, 0, 1000, unit.Player, unit.tilePos, &forestPos)) {
+	if (FindTerrainType(unit.Type->MovementMask, MapFieldForest, 0, 1000, *unit.Player, unit.tilePos, &forestPos)) {
 		CommandResourceLoc(unit, forestPos, FlushCommands);
 		return 1;
 	}
@@ -1091,7 +1088,10 @@ static void AiCollectResources()
 					for (int k = num_units_assigned[src_c] - 1; k >= 0 && !unit; --k) {
 						unit = units_assigned[src_c][k];
 
-						if (unit->SubAction >= 65 /* SUB_STOP_GATHERING */ ) {
+						Assert(unit->CurrentAction() == UnitActionResource);
+						COrder_Resource &order = *static_cast<COrder_Resource*>(unit->CurrentOrder());
+
+						if (order.IsGatheringFinished()) {
 							//worker returning with resource
 							continue;
 						}
@@ -1116,10 +1116,6 @@ static void AiCollectResources()
 			if (unit) {
 				// i got a new unit.
 				priority_needed[i]--;
-
-				// Add to the assigned
-				units_assigned[c].push_back(unit);
-				num_units_assigned[c]++;
 
 				// Recompute priority now
 				break;
@@ -1154,21 +1150,28 @@ static int AiRepairBuilding(const CUnitType &type, CUnit &building)
 	// FIXME: too many workers repair the same building!
 
 	// Selection of mining workers.
-	CUnit *table[UnitMax];
-	int nunits = FindPlayerUnitsByType(*AiPlayer->Player, type, table);
+	std::vector<CUnit *> table;
+	FindPlayerUnitsByType(*AiPlayer->Player, type, table);
 	int num = 0;
-	for (int i = 0; i < nunits; ++i) {
+	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
-		if (unit.Type->RepairRange && unit.Orders.size() == 1 &&
-			((unit.CurrentAction() == UnitActionResource && unit.SubAction <= 55) /* SUB_START_GATHERING */ ||
-				unit.CurrentAction() == UnitActionStill)) {
-			table[num++] = &unit;
+		if (unit.Type->RepairRange && unit.Orders.size() == 1) {
+			if (unit.CurrentAction() == UnitActionStill) {
+				table[num++] = &unit;
+			} else if (unit.CurrentAction() == UnitActionResource) {
+				COrder_Resource &order = *static_cast<COrder_Resource*>(unit.CurrentOrder());
+
+				if (order.IsGatheringStarted() == false) {
+					table[num++] = &unit;
+				}
+			}
 		}
 	}
-
+	table.resize(num);
 	// Sort by distance loops -Antonis-
-	int distance[UnitMax];
+	std::vector<int> distance;
+	distance.resize(num);
 	for (int i = 0; i < num; ++i) {
 		CUnit &unit = *table[i];
 		int rX = unit.tilePos.x - building.tilePos.x;
@@ -1316,9 +1319,13 @@ static void AiCheckRepair()
 		if (unit.CurrentAction() == UnitActionBuilt) {
 			int j;
 			for (j = 0; j < AiPlayer->Player->TotalNumUnits; ++j) {
-				COrderPtr order = AiPlayer->Player->Units[j]->CurrentOrder();
-				if (order->Action == UnitActionRepair && order->GetGoal() == &unit) {
+				COrder* order = AiPlayer->Player->Units[j]->CurrentOrder();
+				if (order->Action == UnitActionRepair) {
+					COrder_Repair &orderRepair = *static_cast<COrder_Repair*>(order);
+
+					if (orderRepair.GetReparableTarget() == &unit) {
 					break;
+					}
 				}
 			}
 			if (j == AiPlayer->Player->TotalNumUnits) {

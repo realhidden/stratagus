@@ -37,115 +37,142 @@
 #include <stdlib.h>
 
 #include "stratagus.h"
+
+#include "action/action_patrol.h"
+
+#include "iolib.h"
+#include "map.h"
+#include "pathfinder.h"
+#include "script.h"
+#include "ui.h"
 #include "unit.h"
 #include "unittype.h"
-#include "actions.h"
-#include "pathfinder.h"
-#include "map.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
 
-extern bool AutoRepair(CUnit &unit);
-extern bool AutoCast(CUnit &unit);
-
-/**
-**  Swap the patrol points.
-*/
-static void SwapPatrolPoints(CUnit &unit)
+/* static */ COrder* COrder::NewActionPatrol(const Vec2i &currentPos, const Vec2i &dest)
 {
-	COrderPtr order = unit.CurrentOrder();
+	Assert(Map.Info.IsPointOnMap(currentPos));
+	Assert(Map.Info.IsPointOnMap(dest));
 
-	std::swap(order->Arg1.Patrol.x, order->goalPos.x);
-	std::swap(order->Arg1.Patrol.y, order->goalPos.y);
+	COrder_Patrol *order = new COrder_Patrol();
 
-	unit.CurrentOrder()->Data.Move.Cycles = 0; //moving counter
-	unit.CurrentOrder()->NewResetPath();
+	order->goalPos = dest;
+	order->WayPoint = currentPos;
+	return order;
 }
 
-/**
-**  Unit Patrol:
-**    The unit patrols between two points.
-**    Any enemy unit in reaction range is attacked.
-**  @todo FIXME:
-**    Should do some tries to reach the end-points.
-**    Should support patrol between more points!
-**    Patrol between units.
-**
-**  @param unit  Patroling unit pointer.
-*/
-void HandleActionPatrol(COrder& order, CUnit &unit)
+
+/* virtual */ void COrder_Patrol::Save(CFile &file, const CUnit &unit) const
+{
+	file.printf("{\"action-patrol\",");
+
+	if (this->Finished) {
+		file.printf(" \"finished\", ");
+	}
+	file.printf(" \"tile\", {%d, %d},", this->goalPos.x, this->goalPos.y);
+	file.printf(" \"range\", %d,", this->Range);
+
+	if (this->WaitingCycle != 0) {
+		file.printf(" \"waiting-cycle\", %d,", this->WaitingCycle);
+	}
+	file.printf(" \"patrol\", {%d, %d}", this->WayPoint.x, this->WayPoint.y);
+	file.printf("}");
+}
+
+/* virtual */ bool COrder_Patrol::ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit)
+{
+	if (!strcmp(value, "patrol")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		CclGetPos(l, &this->WayPoint.x , &this->WayPoint.y);
+		lua_pop(l, 1);
+	} else if (!strcmp(value, "waiting-cycle")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		this->WaitingCycle = LuaToNumber(l, -1);
+		lua_pop(l, 1);
+	} else if (!strcmp(value, "range")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		this->Range = LuaToNumber(l, -1);
+		lua_pop(l, 1);
+	} else if (!strcmp(value, "tile")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		CclGetPos(l, &this->goalPos.x , &this->goalPos.y);
+		lua_pop(l, 1);
+	} else {
+		return false;
+	}
+	return true;
+}
+
+/* virtual */ PixelPos COrder_Patrol::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+{
+	const PixelPos pos1 = vp.TilePosToScreen_Center(this->goalPos);
+	const PixelPos pos2 = vp.TilePosToScreen_Center(this->WayPoint);
+
+	Video.DrawLineClip(ColorGreen, lastScreenPos, pos1);
+	Video.FillCircleClip(ColorBlue, pos1, 2);
+	Video.DrawLineClip(ColorBlue, pos1, pos2);
+	Video.FillCircleClip(ColorBlue, pos2, 3);
+	return pos2;
+}
+
+/* virtual */ void COrder_Patrol::UpdatePathFinderData(PathFinderInput& input)
+{
+	input.SetMinRange(0);
+	input.SetMaxRange(this->Range);
+	const Vec2i tileSize = {0, 0};
+	input.SetGoal(this->goalPos, tileSize);
+}
+
+
+/* virtual */ void COrder_Patrol::Execute(CUnit &unit)
 {
 	if (unit.Wait) {
 		unit.Wait--;
-		return;
-	}
-
-	if (!unit.SubAction) { // first entry.
-		order.Data.Move.Cycles = 0; //moving counter
-		order.NewResetPath();
-		unit.SubAction = 1;
+		return ;
 	}
 
 	switch (DoActionMove(unit)) {
 		case PF_FAILED:
-			unit.SubAction = 1;
+			this->WaitingCycle = 0;
 			break;
 		case PF_UNREACHABLE:
 			// Increase range and try again
-			unit.SubAction = 1;
-			if (order.CheckRange()) {
-				order.Range++;
-				break;
-			}
-			// FALL THROUGH
+			this->WaitingCycle = 1;
+			this->Range++;
+			break;
+
 		case PF_REACHED:
-			unit.SubAction = 1;
-			order.Range = 0;
-			SwapPatrolPoints(unit);
+			this->WaitingCycle = 1;
+			this->Range = 0;
+			std::swap(this->WayPoint, this->goalPos);
+
 			break;
 		case PF_WAIT:
 			// Wait for a while then give up
-			unit.SubAction++;
-			if (unit.SubAction == 5) {
-				unit.SubAction = 1;
-				order.Range = 0;
-				SwapPatrolPoints(unit);
+			this->WaitingCycle++;
+			if (this->WaitingCycle == 5) {
+				this->WaitingCycle = 0;
+				this->Range = 0;
+				std::swap(this->WayPoint, this->goalPos);
+
+				unit.pathFinderData->output.Cycles = 0; //moving counter
 			}
 			break;
 		default: // moving
-			unit.SubAction = 1;
+			this->WaitingCycle = 0;
 			break;
 	}
 
 	if (!unit.Anim.Unbreakable) {
-		//
-		// Attack any enemy in reaction range.
-		//  If don't set the goal, the unit can then choose a
-		//  better goal if moving nearer to enemy.
-		//
-		if (unit.Type->CanAttack) {
-			const CUnit *goal = AttackUnitsInReactRange(unit);
-			if (goal) {
-				// Save current command to come back.
-				COrder *savedOrder = order.Clone();
-
-				DebugPrint("Patrol attack %d\n" _C_ UnitNumber(*goal));
-				CommandAttack(unit, goal->tilePos, NULL, FlushCommands);
-
-				if (unit.StoreOrder(savedOrder) == false) {
-					delete savedOrder;
-					savedOrder = NULL;
-				}
-				unit.ClearAction();
-				return;
-			}
-		}
-
-		// Look for something to auto repair or auto cast
-		if (AutoRepair(unit) || AutoCast(unit)) {
-			return;
+		if (AutoAttack(unit) || AutoRepair(unit) || AutoCast(unit)) {
+			this->Finished = true;
 		}
 	}
 }

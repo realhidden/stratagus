@@ -37,27 +37,84 @@
 #include <stdlib.h>
 
 #include "stratagus.h"
-#include "video.h"
-#include "unittype.h"
-#include "animation.h"
-#include "player.h"
-#include "unit.h"
-#include "tileset.h"
-#include "map.h"
-#include "actions.h"
-#include "pathfinder.h"
-#include "sound.h"
-#include "interface.h"
-#include "map.h"
+
+#include "action/action_move.h"
+
 #include "ai.h"
+#include "animation.h"
+#include "interface.h"
+#include "iolib.h"
+#include "map.h"
+#include "pathfinder.h"
+#include "script.h"
+#include "sound.h"
+#include "ui.h"
+#include "unit.h"
+#include "unittype.h"
 
 /*----------------------------------------------------------------------------
---  Variables
+--  Functions
 ----------------------------------------------------------------------------*/
 
-/*----------------------------------------------------------------------------
---  Function
-----------------------------------------------------------------------------*/
+/* static */ COrder* COrder::NewActionMove(const Vec2i &pos)
+{
+	Assert(Map.Info.IsPointOnMap(pos));
+
+	COrder_Move *order = new COrder_Move;
+
+	order->goalPos = pos;
+	return order;
+}
+
+/* virtual */ void COrder_Move::Save(CFile &file, const CUnit &unit) const
+{
+	file.printf("{\"action-move\",");
+
+	if (this->Finished) {
+		file.printf(" \"finished\", ");
+	}
+	file.printf(" \"range\", %d,", this->Range);
+	file.printf(" \"tile\", {%d, %d}", this->goalPos.x, this->goalPos.y);
+
+	file.printf("}");
+}
+
+/* virtual */ bool COrder_Move::ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit)
+{
+	if (!strcmp(value, "range")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		this->Range = LuaToNumber(l, -1);
+		lua_pop(l, 1);
+	} else if (!strcmp(value, "tile")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		CclGetPos(l, &this->goalPos.x , &this->goalPos.y);
+		lua_pop(l, 1);
+	} else {
+		return false;
+	}
+	return true;
+}
+
+/* virtual */ PixelPos COrder_Move::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+{
+	const PixelPos targetPos = vp.TilePosToScreen_Center(this->goalPos);
+
+	Video.FillCircleClip(ColorGreen, lastScreenPos, 2);
+	Video.DrawLineClip(ColorGreen, lastScreenPos, targetPos);
+	Video.FillCircleClip(ColorGreen, targetPos, 3);
+	return targetPos;
+}
+
+/* virtual */ void COrder_Move::UpdatePathFinderData(PathFinderInput& input)
+{
+	input.SetMinRange(0);
+	input.SetMaxRange(this->Range);
+	const Vec2i tileSize = {0, 0};
+
+	input.SetGoal(this->goalPos, tileSize);
+}
 
 /**
 **  Unit moves! Generic function called from other actions.
@@ -72,18 +129,16 @@ int DoActionMove(CUnit &unit)
 	Vec2i posd; // movement in tile.
 	int d;
 	Vec2i pos;
-	int move;
-	int off;
 
 	Assert(unit.CanMove());
-	if (!unit.Moving &&
-			(unit.Type->Animations->Move != unit.Anim.CurrAnim || !unit.Anim.Wait)) {
+
+	if (!unit.Moving && (unit.Type->Animations->Move != unit.Anim.CurrAnim || !unit.Anim.Wait)) {
 		Assert(!unit.Anim.Unbreakable);
 
 		// FIXME: So units flying up and down are not affected.
-		unit.IX = unit.IY = 0;
+		unit.IX = 0;
+		unit.IY = 0;
 
-		MapUnmarkUnitGuard(unit);
 		UnmarkUnitFieldFlags(unit);
 		d = NextPathElement(unit, &posd.x, &posd.y);
 		MarkUnitFieldFlags(unit);
@@ -111,14 +166,14 @@ int DoActionMove(CUnit &unit)
 				break;
 		}
 		pos = unit.tilePos;
-		off = unit.Offset;
+		int off = unit.Offset;
 		//
 		// Transporter (un)docking?
 		//
 		// FIXME: This is an ugly hack
-		if (unit.Type->CanTransport() &&
-				((Map.WaterOnMap(off) && Map.CoastOnMap(pos + posd)) ||
-				(Map.CoastOnMap(off) && Map.WaterOnMap(pos + posd)))) {
+		if (unit.Type->CanTransport()
+			&& ((Map.WaterOnMap(off) && Map.CoastOnMap(pos + posd))
+				|| (Map.CoastOnMap(off) && Map.WaterOnMap(pos + posd)))) {
 			PlayUnitSound(unit, VoiceDocking);
 		}
 
@@ -143,12 +198,11 @@ int DoActionMove(CUnit &unit)
 	} else {
 		posd.x = Heading2X[unit.Direction / NextDirection];
 		posd.y = Heading2Y[unit.Direction / NextDirection];
-		d = unit.CurrentOrder()->Data.Move.Length + 1;
+		d = unit.pathFinderData->output.Length + 1;
 	}
 
-	unit.CurrentOrder()->Data.Move.Cycles++;//reset have to be manualy controled by caller.
-	move = UnitShowAnimationScaled(unit, unit.Type->Animations->Move,
-			Map.Field(unit.Offset)->Cost);
+	unit.pathFinderData->output.Cycles++;//reset have to be manualy controled by caller.
+	int move = UnitShowAnimationScaled(unit, unit.Type->Animations->Move, Map.Field(unit.Offset)->Cost);
 
 	unit.IX += posd.x * move;
 	unit.IY += posd.y * move;
@@ -162,65 +216,28 @@ int DoActionMove(CUnit &unit)
 	return d;
 }
 
-/**
-**  Unit move action:
-**
-**  Move to a place or to a unit (can move).
-**  Tries 10x to reach the target, note this are the complete tries.
-**  If the target entered another unit, move to it's position.
-**  If the target unit is destroyed, continue to move to it's last position.
-**
-**  @param unit  Pointer to unit.
-*/
-void HandleActionMove(COrder& order, CUnit &unit)
-{
-	CUnit *goal;
 
+/* virtual */ void COrder_Move::Execute(CUnit &unit)
+{
 	Assert(unit.CanMove());
 
 	if (unit.Wait) {
 		unit.Wait--;
-		return;
+		return ;
 	}
-
-	if (!unit.SubAction) { // first entry
-		unit.SubAction = 1;
-		unit.CurrentOrder()->NewResetPath();
-		order.Data.Move.Cycles = 0;
-		Assert(unit.State == 0);
-	}
-
 	// FIXME: (mr-russ) Make a reachable goal here with GoalReachable ...
 
 	switch (DoActionMove(unit)) { // reached end-point?
 		case PF_UNREACHABLE:
-			//
 			// Some tries to reach the goal
-			//
-			if (order.CheckRange()) {
-				order.Range++;
-				break;
-			}
-			// FALL THROUGH
-		case PF_REACHED:
-			// Release target, if any.
-			order.ClearGoal();
-			unit.ClearAction();
-			return;
+			this->Range++;
+			break;
 
+		case PF_REACHED:
+			this->Finished = true;
+			break;
 		default:
 			break;
-	}
-
-	//
-	// Target destroyed?
-	//
-	goal = order.GetGoal();
-	if (goal && goal->Destroyed) {
-		DebugPrint("Goal dead\n");
-		order.goalPos = goal->tilePos + goal->Type->GetHalfTileSize();
-		order.ClearGoal();
-		order.NewResetPath();
 	}
 }
 

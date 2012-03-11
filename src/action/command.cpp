@@ -38,17 +38,18 @@
 #include <string.h>
 
 #include "stratagus.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
+
 #include "actions.h"
-#include "tileset.h"
+#include "action/action_train.h"
 #include "map.h"
-#include "upgrade.h"
 #include "pathfinder.h"
+#include "player.h"
 #include "spells.h"
-#include "interface.h"
+#include "tileset.h"
+#include "upgrade.h"
 #include "ui.h"
+#include "unit.h"
+#include "unittype.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -68,7 +69,7 @@ static void ReleaseOrders(CUnit &unit)
 		delete unit.Orders[i];
 	}
 	unit.Orders.resize(1);
-	unit.OrderFlush = 1;
+	unit.Orders[0]->Finished = true;
 }
 
 /**
@@ -107,9 +108,6 @@ static void RemoveOrder(CUnit &unit, unsigned int order)
 
 	delete unit.Orders[order];
 	unit.Orders.erase(unit.Orders.begin() + order);
-	if (order == 0) {
-		unit.SubAction = 0;
-	}
 	if (unit.Orders.empty()) {
 		unit.Orders.push_back(COrder::NewActionStill());
 	}
@@ -540,7 +538,7 @@ void CommandResource(CUnit &unit, CUnit &dest, int flush)
 			return;
 		}
 	}
-	*order = COrder::NewActionResource(dest);
+	*order = COrder::NewActionResource(unit, dest);
 	ClearSavedAction(unit);
 }
 
@@ -572,7 +570,7 @@ void CommandReturnGoods(CUnit &unit, CUnit *goal, int flush)
 			return;
 		}
 	}
-	*order = COrder::NewActionReturnGoods(goal);
+	*order = COrder::NewActionReturnGoods(unit, goal);
 	ClearSavedAction(unit);
 }
 
@@ -628,9 +626,7 @@ void CommandCancelTraining(CUnit &unit, int slot, const CUnitType *type)
 	if (slot == -1) {
 		// Cancel All training
 		while (unit.CurrentAction() == UnitActionTrain) {
-			unit.Player->AddCostsFactor(
-				unit.CurrentOrder()->Arg1.Type->Stats[unit.Player->Index].Costs,
-				CancelTrainingCostsFactor);
+			unit.CurrentOrder()->Cancel(unit);
 			RemoveOrder(unit, 0);
 		}
 		if (unit.Player == ThisPlayer && unit.Selected) {
@@ -643,16 +639,13 @@ void CommandCancelTraining(CUnit &unit, int slot, const CUnitType *type)
 		// Order has moved, we are not training
 		return;
 	} else if (unit.Orders[slot]->Action == UnitActionTrain) {
+		COrder_Train& order = *static_cast<COrder_Train*>(unit.Orders[slot]);
 		// Still training this order, same unit?
-		if (type && unit.Orders[slot]->Arg1.Type != type) {
+		if (type && &order.GetUnitType() != type) {
 			// Different unit being trained
 			return;
 		}
-		DebugPrint("Cancel training\n");
-
-		unit.Player->AddCostsFactor(
-			unit.Orders[slot]->Arg1.Type->Stats[unit.Player->Index].Costs,
-			CancelTrainingCostsFactor);
+		order.Cancel(unit);
 		RemoveOrder(unit, slot);
 
 		// Update interface.
@@ -711,10 +704,7 @@ void CommandCancelUpgradeTo(CUnit &unit)
 {
 	// Check if unit is still upgrading? (NETWORK!)
 	if (unit.CurrentAction() == UnitActionUpgradeTo) {
-		unit.Player->AddCostsFactor(
-			unit.CurrentOrder()->Arg1.Type->Stats[unit.Player->Index].Costs,
-			CancelUpgradeCostsFactor);
-
+		unit.CurrentOrder()->Cancel(unit);
 		RemoveOrder(unit, 0);
 		if (Selected) {
 			SelectedUnitChanged();
@@ -820,23 +810,18 @@ void CommandDiplomacy(int player, int state, int opponent)
 {
 	switch (state) {
 		case DiplomacyNeutral:
-			Players[player].Enemy &= ~(1 << opponent);
-			Players[player].Allied &= ~(1 << opponent);
+			Players[player].SetDiplomacyNeutralWith(Players[opponent]);
 			break;
 		case DiplomacyAllied:
-			Players[player].Enemy &= ~(1 << opponent);
-			Players[player].Allied |= 1 << opponent;
+			Players[player].SetDiplomacyAlliedWith(Players[opponent]);
 			break;
 		case DiplomacyEnemy:
-			Players[player].Enemy |= 1 << opponent;
-			Players[player].Allied &= ~(1 << opponent);
+			Players[player].SetDiplomacyEnemyWith(Players[opponent]);
 			break;
 		case DiplomacyCrazy:
-			Players[player].Enemy |= 1 << opponent;
-			Players[player].Allied |= 1 << opponent;
+			Players[player].SetDiplomacyCrazyWith(Players[opponent]);
 			break;
 	}
-	// FIXME: Should we display a message?
 }
 
 /**
@@ -858,9 +843,9 @@ void CommandSharedVision(int player, bool state, int opponent)
 	// Compute Before and after.
 	const int before = Players[player].IsBothSharedVision(Players[opponent]);
 	if (state == false) {
-		Players[player].SharedVision &= ~(1 << opponent);
+		Players[player].UnshareVisionWith(Players[opponent]);
 	} else {
-		Players[player].SharedVision |= (1 << opponent);
+		Players[player].ShareVisionWith(Players[opponent]);
 	}
 	const int after = Players[player].IsBothSharedVision(Players[opponent]);
 
@@ -907,16 +892,15 @@ void CommandQuit(int player)
 	Players[player].Type = PlayerNeutral;
 	for (int i = 0; i < NumPlayers; ++i) {
 		if (i != player && Players[i].Team != Players[player].Team) {
-			Players[i].Allied &= ~(1 << player);
-			Players[i].Enemy &= ~(1 << player);
-			Players[player].Enemy &= ~(1 << i);
-			Players[player].Allied &= ~(1 << i);
+			Players[i].SetDiplomacyNeutralWith(Players[player]);
+			Players[player].SetDiplomacyNeutralWith(Players[i]);
 			//  We clear Shared vision by sending fake shared vision commands.
 			//  We do this because Shared vision is a bit complex.
 			CommandSharedVision(i, 0, player);
 			CommandSharedVision(player, 0, i);
 			// Remove Selection from Quit Player
-			ChangeTeamSelectedUnits(Players[player], NULL, 0, 0);
+			std::vector<CUnit*> empty;
+			ChangeTeamSelectedUnits(Players[player], empty, 0);
 		}
 	}
 

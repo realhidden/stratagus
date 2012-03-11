@@ -51,7 +51,7 @@ class CUpgrade;
 	/// init upgrade/allow structures
 extern void InitUpgrades();
 	/// save the upgrades
-extern void SaveUpgrades(CFile *file);
+extern void SaveUpgrades(CFile &file);
 	/// cleanup upgrade module
 extern void CleanUpgrades();
 
@@ -92,9 +92,6 @@ extern int UnitIdAllowed(const CPlayer &player, int id);
 
 extern char UpgradeIdAllowed(const CPlayer &player, int id);
 extern char UpgradeIdentAllowed(const CPlayer &player, const std::string &ident);
-
-	/// Check if the upgrade is researched.
-extern int UpgradeIdentAvailable(const CPlayer &player, const std::string &ident);
 
 //@}
 

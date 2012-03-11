@@ -37,18 +37,119 @@
 #include <stdlib.h>
 
 #include "stratagus.h"
-#include "unittype.h"
+
+#include "action/action_board.h"
+
 #include "animation.h"
-#include "player.h"
-#include "unit.h"
-#include "actions.h"
-#include "interface.h"
-#include "pathfinder.h"
+#include "iolib.h"
 #include "map.h"
+#include "pathfinder.h"
+#include "player.h"
+#include "script.h"
+#include "ui.h"
+#include "unit.h"
+#include "unittype.h"
+
+
+enum {
+	State_Init = 0,
+	State_MoveToTransporterMax = 200, // Range from previous
+	State_WaitForTransporter = 201,
+	State_EnterTransporter = 202
+};
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
+
+/* static */ COrder* COrder::NewActionBoard(CUnit &unit)
+{
+	COrder_Board *order = new COrder_Board;
+
+	order->SetGoal(&unit);
+	order->Range = 1;
+
+	return order;
+}
+
+/* virtual */ void COrder_Board::Save(CFile &file, const CUnit &unit) const
+{
+	file.printf("{\"action-board\",");
+
+	if (this->Finished) {
+		file.printf(" \"finished\", ");
+	}
+	file.printf(" \"range\", %d,", this->Range);
+	if (this->HasGoal()) {
+		CUnit &goal = *this->GetGoal();
+		if (goal.Destroyed) {
+			/* this unit is destroyed so it's not in the global unit
+			 * array - this means it won't be saved!!! */
+			printf ("FIXME: storing destroyed Goal - loading will fail.\n");
+		}
+		file.printf(" \"goal\", \"%s\",", UnitReference(goal).c_str());
+	}
+	file.printf(" \"state\", %d", this->State);
+
+	file.printf("}");
+}
+
+/* virtual */ bool COrder_Board::ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit)
+{
+	if (!strcmp("state", value)) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		this->State = LuaToNumber(l, -1);
+		lua_pop(l, 1);
+	} else if (!strcmp("range", value)) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		this->Range = LuaToNumber(l, -1);
+		lua_pop(l, 1);
+	} else if (!strcmp(value, "tile")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		CclGetPos(l, &this->goalPos.x , &this->goalPos.y);
+		lua_pop(l, 1);
+	} else {
+		return false;
+	}
+	return true;
+}
+
+/* virtual */ PixelPos COrder_Board::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+{
+	PixelPos targetPos;
+
+	if (this->HasGoal()) {
+		targetPos = vp.MapToScreenPixelPos(this->GetGoal()->GetMapPixelPosCenter());
+	} else {
+		targetPos = vp.TilePosToScreen_Center(this->goalPos);
+	}
+	Video.FillCircleClip(ColorGreen, lastScreenPos, 2);
+	Video.DrawLineClip(ColorGreen, lastScreenPos, targetPos);
+	Video.FillCircleClip(ColorGreen, targetPos, 3);
+	return targetPos;
+}
+
+/* virtual */ void COrder_Board::UpdatePathFinderData(PathFinderInput& input)
+{
+	input.SetMinRange(0);
+	input.SetMaxRange(this->Range);
+
+	Vec2i tileSize;
+	if (this->HasGoal()) {
+		CUnit *goal = this->GetGoal();
+		tileSize.x = goal->Type->TileWidth;
+		tileSize.y = goal->Type->TileHeight;
+		input.SetGoal(goal->tilePos, tileSize);
+	} else {
+		tileSize.x = 0;
+		tileSize.y = 0;
+		input.SetGoal(this->goalPos, tileSize);
+	}
+}
+
 
 /**
 **  Move to transporter.
@@ -58,18 +159,15 @@
 **  @return      >0 remaining path length, 0 wait for path, -1
 **               reached goal, -2 can't reach the goal.
 */
-static int MoveToTransporter(CUnit &unit)
+int COrder_Board::MoveToTransporter(CUnit &unit)
 {
 	const Vec2i oldPos = unit.tilePos;
 	const int res = DoActionMove(unit);
 
 	// We have to reset a lot, or else they will circle each other and stuff.
 	if (oldPos != unit.tilePos) {
-		unit.CurrentOrder()->Range = 1;
-		unit.CurrentOrder()->NewResetPath();
+		this->Range = 1;
 	}
-	// New code has this as default.
-	Assert(unit.CurrentAction() == UnitActionBoard);
 	return res;
 }
 
@@ -80,49 +178,47 @@ static int MoveToTransporter(CUnit &unit)
 **
 **  @return      True if ship arrived/present, False otherwise.
 */
-static int WaitForTransporter(CUnit &unit)
+bool COrder_Board::WaitForTransporter(CUnit &unit)
 {
 
 	if (unit.Wait) {
 		unit.Wait--;
-		return 0;
+		return false;
 	}
 
-	CUnit *trans = unit.CurrentOrder()->GetGoal();
+	const CUnit *trans = this->GetGoal();
 
 	if (!trans || !CanTransport(*trans, unit)) {
 		// FIXME: destination destroyed??
 		unit.Wait = 6;
-		return 0;
+		return false;
 	}
 
 	if (!trans->IsVisibleAsGoal(*unit.Player)) {
 		DebugPrint("Transporter Gone\n");
-		unit.CurrentOrder()->ClearGoal();
+		this->ClearGoal();
 		unit.Wait = 6;
-		return 0;
+		return false;
 	}
 
 	if (unit.MapDistanceTo(*trans) == 1) {
 		// enter transporter
-		return 1;
+		return true;
 	}
 
-	//
 	// FIXME: any enemies in range attack them, while waiting.
-	//
 
 	// n0b0dy: This means we have to search with a smaller range.
 	// It happens only when you reach the shore,and the transporter
 	// is not there. The unit searches with a big range, so it thinks
 	// it's there. This is why we reset the search. The transporter
 	// should be a lot closer now, so it's not as bad as it seems.
-	unit.SubAction = 0;
-	unit.CurrentOrder()->Range = 1;
+	this->State = State_Init;
+	this->Range = 1;
 	// Uhh wait a bit.
 	unit.Wait = 10;
 
-	return 0;
+	return false;
 }
 
 /**
@@ -130,26 +226,19 @@ static int WaitForTransporter(CUnit &unit)
 **
 **  @param unit  Pointer to unit.
 */
-static void EnterTransporter(CUnit &unit)
+static void EnterTransporter(CUnit &unit, COrder_Board &order)
 {
-	CUnit *transporter;
+	CUnit *transporter = order.GetGoal();
 
-	unit.ClearAction();
+	Assert(transporter != NULL);
 
-	transporter = unit.CurrentOrder()->GetGoal();
 	if (!transporter->IsVisibleAsGoal(*unit.Player)) {
 		DebugPrint("Transporter gone\n");
-		unit.CurrentOrder()->ClearGoal();
 		return;
 	}
 
-	unit.CurrentOrder()->ClearGoal();
-
-	//
-	// Place the unit inside the transporter.
-	//
-
 	if (transporter->BoardCount < transporter->Type->MaxOnBoard) {
+		// Place the unit inside the transporter.
 		unit.Remove(transporter);
 		transporter->BoardCount++;
 		unit.Boarded = 1;
@@ -166,62 +255,53 @@ static void EnterTransporter(CUnit &unit)
 	DebugPrint("No free slot in transporter\n");
 }
 
-/**
-**  The unit boards a transporter.
-**
-**  @todo FIXME: While waiting for the transporter the units must defend themselves.
-**
-**  @param unit  Pointer to unit.
-*/
-void HandleActionBoard(COrder& order, CUnit &unit)
+/* virtual */ void COrder_Board::Execute(CUnit &unit)
 {
-	switch (unit.SubAction) {
+	switch (this->State) {
 		// Wait for transporter
-		case 201:
-			if (WaitForTransporter(unit)) {
-				unit.SubAction = 202;
+		case State_WaitForTransporter:
+			if (this->WaitForTransporter(unit)) {
+				this->State = State_EnterTransporter;
 			} else {
 				UnitShowAnimation(unit, unit.Type->Animations->Still);
 			}
 			break;
-		// Enter transporter
-		case 202:
-			EnterTransporter(unit);
-			break;
-		// Move to transporter
-		case 0:
+
+		case State_EnterTransporter: {
+			EnterTransporter(unit, *this);
+			this->Finished = true;
+			return ;
+		}
+		case State_Init:
 			if (unit.Wait) {
 				unit.Wait--;
 				return;
 			}
-			order.NewResetPath();
-			unit.SubAction = 1;
+			this->State = 1;
 			// FALL THROUGH
-		default:
-			if (unit.SubAction <= 200) {
-				int i;
+		default: { // Move to transporter
+			if (this->State <= State_MoveToTransporterMax) {
+				const int pathRet = MoveToTransporter(unit);
 				// FIXME: if near transporter wait for enter
-				if ((i = MoveToTransporter(unit))) {
-					if (i == PF_UNREACHABLE) {
-						if (++unit.SubAction == 200) {
-							unit.ClearAction();
-							order.ClearGoal();
+				if (pathRet) {
+					if (pathRet == PF_UNREACHABLE) {
+						if (++this->State == State_MoveToTransporterMax) {
+							this->Finished = true;
+							return;
 						} else {
-							//
 							// Try with a bigger range.
-							//
-							if (order.CheckRange()) {
-								order.Range++;
-								unit.SubAction--;
-							}
+							this->Range++;
+							this->State--;
 						}
-					} else if (i == PF_REACHED) {
-						unit.SubAction = 201;
+					} else if (pathRet == PF_REACHED) {
+						this->State = State_WaitForTransporter;
 					}
 				}
 			}
 			break;
+		}
 	}
 }
+
 
 //@}

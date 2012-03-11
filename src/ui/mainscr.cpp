@@ -42,24 +42,29 @@
 #include <sstream>
 
 #include "stratagus.h"
-#include "video.h"
+
+#include "action/action_built.h"
+#include "action/action_research.h"
+#include "action/action_train.h"
+#include "action/action_upgradeto.h"
 #include "font.h"
-#include "sound.h"
-#include "unitsound.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
-#include "upgrade.h"
 #include "icons.h"
 #include "interface.h"
-#include "ui.h"
 #include "map.h"
+#include "menus.h"
+#include "network.h"
+#include "player.h"
+#include "sound.h"
+#include "spells.h"
 #include "tileset.h"
 #include "trigger.h"
-#include "network.h"
-#include "menus.h"
-#include "spells.h"
-#include "actions.h"
+#include "ui.h"
+#include "unit.h"
+#include "unitsound.h"
+#include "unittype.h"
+#include "upgrade.h"
+#include "video.h"
+
 #ifdef DEBUG
 #include "../ai/ai_local.h"
 #endif
@@ -589,6 +594,48 @@ void CContentTypeCompleteBar::Draw(const CUnit &unit, CFont *) const
 	}
 }
 
+static void DrawUnitInfo_Training(const CUnit &unit)
+{
+	if (unit.Orders.size() == 1 || unit.Orders[1]->Action != UnitActionTrain) {
+		if (!UI.SingleTrainingText.empty()) {
+			CLabel label(UI.SingleTrainingFont);
+			label.Draw(UI.SingleTrainingTextX, UI.SingleTrainingTextY,
+				UI.SingleTrainingText);
+		}
+		if (UI.SingleTrainingButton) {
+			const COrder_Train &order = *static_cast<COrder_Train*>(unit.CurrentOrder());
+			const unsigned int flags = (ButtonAreaUnderCursor == ButtonAreaTraining && ButtonUnderCursor == 0) ?
+					(IconActive | (MouseButtons & LeftButton)) : 0;
+
+			order.GetUnitType().Icon.Icon->DrawUnitIcon(
+				UI.SingleTrainingButton->Style, flags,
+				UI.SingleTrainingButton->X, UI.SingleTrainingButton->Y, "");
+		}
+	} else {
+		if (!UI.TrainingText.empty()) {
+			CLabel label(UI.TrainingFont);
+			label.Draw(UI.TrainingTextX, UI.TrainingTextY,
+				UI.TrainingText);
+		}
+		if (!UI.TrainingButtons.empty()) {
+			for (size_t i = 0; i < unit.Orders.size()
+				&& i < UI.TrainingButtons.size(); ++i) {
+				if (unit.Orders[i]->Action == UnitActionTrain) {
+					const COrder_Train &order = *static_cast<COrder_Train*>(unit.Orders[i]);
+
+					const int flag = (ButtonAreaUnderCursor == ButtonAreaTraining
+							&& static_cast<size_t>(ButtonUnderCursor) == i) ?
+							(IconActive | (MouseButtons & LeftButton)) : 0;
+
+					order.GetUnitType().Icon.Icon->DrawUnitIcon(
+						 UI.TrainingButtons[i].Style, flag,
+						UI.TrainingButtons[i].X, UI.TrainingButtons[i].Y, "");
+				}
+			}
+		}
+	}
+}
+
 
 
 /**
@@ -640,85 +687,40 @@ static void DrawUnitInfo(CUnit &unit)
 		const int flag = (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == 0) ?
 				(IconActive | (MouseButtons & LeftButton)) : 0;
 
-		type.Icon.Icon->DrawUnitIcon(unit.Player, UI.SingleSelectedButton->Style, flag, x, y, "");
+		type.Icon.Icon->DrawUnitIcon(UI.SingleSelectedButton->Style, flag, x, y, "");
 	}
 
 	if (unit.Player != ThisPlayer && !ThisPlayer->IsAllied(*unit.Player) )
 	{
 		return;
 	}
-	CLabel label(GetGameFont());
 
 	//
 	//  Show progress if they are selected.
 	//
 	if (NumSelected == 1 && Selected[0] == &unit) {
 		switch (unit.CurrentAction()) {
-
-			//
-			//  Building training units.
-			//
-			case UnitActionTrain:
-				if (unit.Orders.size() == 1 || unit.Orders[1]->Action != UnitActionTrain) {
-					if (!UI.SingleTrainingText.empty()) {
-						label.SetFont(UI.SingleTrainingFont);
-						label.Draw(UI.SingleTrainingTextX, UI.SingleTrainingTextY,
-							UI.SingleTrainingText);
-					}
-					if (UI.SingleTrainingButton) {
-						unit.CurrentOrder()->Arg1.Type->Icon.Icon->DrawUnitIcon(unit.Player,
-							UI.SingleTrainingButton->Style,
-							(ButtonAreaUnderCursor == ButtonAreaTraining &&
-								ButtonUnderCursor == 0) ?
-								(IconActive | (MouseButtons & LeftButton)) : 0,
-							UI.SingleTrainingButton->X, UI.SingleTrainingButton->Y, "");
-					}
-				} else {
-					if (!UI.TrainingText.empty()) {
-						label.SetFont(UI.TrainingFont);
-						label.Draw(UI.TrainingTextX, UI.TrainingTextY,
-							UI.TrainingText);
-					}
-					if (!UI.TrainingButtons.empty()) {
-						for (size_t i = 0; i < unit.Orders.size()
-							&& i < UI.TrainingButtons.size(); ++i) {
-							if (unit.Orders[i]->Action == UnitActionTrain) {
-								const int flag = (ButtonAreaUnderCursor == ButtonAreaTraining
-										&& static_cast<size_t>(ButtonUnderCursor) == i) ?
-										(IconActive | (MouseButtons & LeftButton)) : 0;
-
-								unit.Orders[i]->Arg1.Type->Icon.Icon->DrawUnitIcon(unit.Player,
-									 UI.TrainingButtons[i].Style, flag,
-									UI.TrainingButtons[i].X, UI.TrainingButtons[i].Y, "");
-							}
-						}
-					}
-				}
-			return;
-
-			//
-			//  Building upgrading to better type.
-			//
-			case UnitActionUpgradeTo:
+			case UnitActionTrain: { //  Building training units.
+				DrawUnitInfo_Training(unit);
+				return;
+			}
+			case UnitActionUpgradeTo: { //  Building upgrading to better type.
 				if (UI.UpgradingButton) {
-					unit.CurrentOrder()->Arg1.Type->Icon.Icon->DrawUnitIcon(unit.Player,
+					const COrder_UpgradeTo &order = *static_cast<COrder_UpgradeTo*>(unit.CurrentOrder());
+					order.GetUnitType().Icon.Icon->DrawUnitIcon(
 						UI.UpgradingButton->Style,
 						(ButtonAreaUnderCursor == ButtonAreaUpgrading &&
 							ButtonUnderCursor == 0) ?
 							(IconActive | (MouseButtons & LeftButton)) : 0,
 						UI.UpgradingButton->X, UI.UpgradingButton->Y, "");
 				}
-			return;
-
-			//
-			//  Building research new technology.
-			//
-			case UnitActionResearch:
-			{
+				return;
+			}
+			case UnitActionResearch: { //  Building research new technology.
 				if (UI.ResearchingButton) {
 					COrder_Research &order = *static_cast<COrder_Research *>(unit.CurrentOrder());
 
-					order.GetUpgrade().Icon->DrawUnitIcon(unit.Player,
+					order.GetUpgrade().Icon->DrawUnitIcon(
 						UI.ResearchingButton->Style,
 						(ButtonAreaUnderCursor == ButtonAreaResearching &&
 							ButtonUnderCursor == 0) ?
@@ -728,7 +730,7 @@ static void DrawUnitInfo(CUnit &unit)
 				return;
 			}
 			default:
-			break;
+				break;
 		}
 	}
 
@@ -741,7 +743,7 @@ static void DrawUnitInfo(CUnit &unit)
 
 		for (int i = 0; i < unit.InsideCount; ++i, uins = uins->NextContained) {
 			if (uins->Boarded && j < UI.TransportingButtons.size()) {
-				uins->Type->Icon.Icon->DrawUnitIcon(unit.Player, UI.TransportingButtons[j].Style,
+				uins->Type->Icon.Icon->DrawUnitIcon(UI.TransportingButtons[j].Style,
 					(ButtonAreaUnderCursor == ButtonAreaTransporting && static_cast<size_t>(ButtonUnderCursor) == j) ?
 						(IconActive | (MouseButtons & LeftButton)) : 0,
 					UI.TransportingButtons[j].X, UI.TransportingButtons[j].Y, "");
@@ -1182,8 +1184,10 @@ void ShiftMessagesEvent()
 **  @note FIXME: vladi: I know this can be just separated func w/o msg but
 **               it is handy to stick all in one call, someone?
 */
-void SetMessageEvent(int x, int y, const char *fmt, ...)
+void SetMessageEvent(const Vec2i& pos, const char *fmt, ...)
 {
+	Assert(Map.Info.IsPointOnMap(pos));
+
 	char temp[128];
 	va_list va;
 
@@ -1197,13 +1201,11 @@ void SetMessageEvent(int x, int y, const char *fmt, ...)
 		ShiftMessagesEvent();
 	}
 
-	if (x != -1) {
-		strcpy_s(MessagesEvent[MessagesEventCount], sizeof(MessagesEvent[MessagesEventCount]), temp);
-		MessagesEventX[MessagesEventCount] = x;
-		MessagesEventY[MessagesEventCount] = y;
-		MessagesEventIndex = MessagesEventCount;
-		++MessagesEventCount;
-	}
+	strcpy_s(MessagesEvent[MessagesEventCount], sizeof(MessagesEvent[MessagesEventCount]), temp);
+	MessagesEventX[MessagesEventCount] = pos.x;
+	MessagesEventY[MessagesEventCount] = pos.y;
+	MessagesEventIndex = MessagesEventCount;
+	++MessagesEventCount;
 }
 
 /**
@@ -1489,7 +1491,7 @@ static void DrawInfoPanelMultipleSelected()
 		CUIButton *button = &UI.SelectedButtons[i];
 		bool mouseOver = (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == i);
 
-		Selected[i]->Type->Icon.Icon->DrawUnitIcon(ThisPlayer, button->Style,
+		Selected[i]->Type->Icon.Icon->DrawUnitIcon(button->Style,
 			mouseOver ? (IconActive | (MouseButtons & LeftButton)) : 0,
 			button->X, button->Y, "");
 		UiDrawLifeBar(*Selected[i], button->X, button->Y);
@@ -1545,8 +1547,7 @@ static void DrawInfoPanelNoneSelected()
 	label.Draw(x + 110, y, CYCLES_PER_SECOND * VideoSyncSpeed / 100);
 	y += 20;
 
-	if( y + PlayerMax * GetGameFont()->Height() > Video.Height )
-	{
+	if (y + PlayerMax * GetGameFont()->Height() > Video.Height) {
 		x = 16;
 		y = 30;
 	}
@@ -1554,9 +1555,9 @@ static void DrawInfoPanelNoneSelected()
 	GetDefaultTextColors(nc, rc);
 	for (int i = 0; i < PlayerMax - 1; ++i) {
 		if (Players[i].Type != PlayerNobody) {
-			if (ThisPlayer->Allied & (1 << Players[i].Index)) {
+			if (ThisPlayer->IsAllied(Players[i])) {
 				label.SetNormalColor(FontGreen);
-			} else if (ThisPlayer->Enemy & (1 << Players[i].Index)) {
+			} else if (ThisPlayer->IsEnemy(Players[i])) {
 				label.SetNormalColor(FontRed);
 			} else {
 				label.SetNormalColor(nc);

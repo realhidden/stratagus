@@ -188,7 +188,7 @@ public:
 };
 
 	// forces
-#define AI_MAX_FORCES 10                    /// How many forces are supported
+#define AI_MAX_FORCES 50                    /// How many forces are supported
 
 /**
 **  AI force manager.
@@ -444,7 +444,7 @@ extern int AiFindWall(AiForce *force);
 	/// Send explorers around the map
 extern void AiSendExplorers();
 	/// Enemy units in distance
-extern int AiEnemyUnitsInDistance(const CPlayer *player, const CUnitType *type,
+extern int AiEnemyUnitsInDistance(const CPlayer &player, const CUnitType *type,
 	const Vec2i& pos, unsigned range);
 
 //

@@ -663,6 +663,8 @@ static int CclDefineUnitType(lua_State *l)
 			type->Explosion.Missile = NULL;
 		} else if (!strcmp(value, "DeathExplosion")) {
 			type->DeathExplosion = new LuaCallback(l, -1);
+		} else if (!strcmp(value, "OnHit")) {
+			type->OnHit = new LuaCallback(l, -1);
 		} else if (!strcmp(value, "Type")) {
 			value = LuaToString(l, -1);
 			if (!strcmp(value, "land")) {
@@ -1633,7 +1635,21 @@ static void ParseAnimationFrame(lua_State *l, const char *str,
 					*next++ = '\0';
 				}
 			}
-		anim->D.IfVar.Type = atoi(op2);
+		if (!strcmp(op2,">=")) {
+			anim->D.IfVar.Type = 1;
+		} else if (!strcmp(op2,">")) {
+			anim->D.IfVar.Type = 2;
+		} else if (!strcmp(op2,"<=")) {
+			anim->D.IfVar.Type = 3;
+		} else if (!strcmp(op2,"<")) {
+			anim->D.IfVar.Type = 4;
+		} else if (!strcmp(op2,"==")) {
+			anim->D.IfVar.Type = 5;
+		} else if (!strcmp(op2,"!=")) {
+			anim->D.IfVar.Type = 6;
+		} else {
+			anim->D.IfVar.Type = atoi(op2);
+		} 
 		op2 = next;
 		while (*op2 == ' ') {
 			++op2;
@@ -2155,27 +2171,6 @@ static int CclDefineDecorations(lua_State *l)
 
 
 // ----------------------------------------------------------------------------
-
-
-/* virtual */ void COrder::UpdateUnitVariables(CUnit &unit) const
-{
-	switch (unit.CurrentAction()) {
-		// Training
-		case UnitActionTrain:
-			unit.Variable[TRAINING_INDEX].Value = unit.CurrentOrder()->Data.Train.Ticks;
-			unit.Variable[TRAINING_INDEX].Max =
-				unit.CurrentOrder()->Arg1.Type->Stats[unit.Player->Index].Costs[TimeCost];
-		break;
-		// UpgradeTo
-		case UnitActionUpgradeTo:
-			unit.Variable[UPGRADINGTO_INDEX].Value = unit.CurrentOrder()->Data.UpgradeTo.Ticks;
-			unit.Variable[UPGRADINGTO_INDEX].Max =
-				unit.CurrentOrder()->Arg1.Type->Stats[unit.Player->Index].Costs[TimeCost];
-		break;
-		default:
-		break;
-	}
-}
 
 /**
 **  Update unit variables which are not user defined.

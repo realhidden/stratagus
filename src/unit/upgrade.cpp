@@ -36,27 +36,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "stratagus.h"
-
 #include <string>
 #include <vector>
 #include <map>
 
+#include "stratagus.h"
+
 #include "upgrade.h"
-#include "player.h"
+
+#include "action/action_train.h"
 #include "depend.h"
 #include "interface.h"
+#include "iolib.h"
 #include "map.h"
+#include "player.h"
 #include "script.h"
-#include "spells.h"
 #include "unit.h"
 #include "unittype.h"
-#include "actions.h"
-#include "iolib.h"
-
-#include "myendian.h"
-
 #include "util.h"
 
 /*----------------------------------------------------------------------------
@@ -167,35 +163,35 @@ void CleanUpgrades()
 **
 **  @param file  Output file.
 */
-void SaveUpgrades(CFile *file)
+void SaveUpgrades(CFile &file)
 {
-	file->printf("\n-- -----------------------------------------\n");
-	file->printf("-- MODULE: upgrades\n\n");
+	file.printf("\n-- -----------------------------------------\n");
+	file.printf("-- MODULE: upgrades\n\n");
 
 	//
 	//  Save the allow
 	//
 	for (std::vector<CUnitType *>::size_type i = 0; i < UnitTypes.size(); ++i) {
-		file->printf("DefineUnitAllow(\"%s\", ", UnitTypes[i]->Ident.c_str());
+		file.printf("DefineUnitAllow(\"%s\", ", UnitTypes[i]->Ident.c_str());
 		for (int p = 0; p < PlayerMax; ++p) {
 			if (p) {
-				file->printf(", ");
+				file.printf(", ");
 			}
-			file->printf("%d", Players[p].Allow.Units[i]);
+			file.printf("%d", Players[p].Allow.Units[i]);
 		}
-		file->printf(")\n");
+		file.printf(")\n");
 	}
-	file->printf("\n");
+	file.printf("\n");
 
 	//
 	//  Save the upgrades
 	//
 	for (std::vector<CUpgrade *>::size_type j = 0; j < AllUpgrades.size(); ++j) {
-		file->printf("DefineAllow(\"%s\", \"", AllUpgrades[j]->Ident.c_str());
+		file.printf("DefineAllow(\"%s\", \"", AllUpgrades[j]->Ident.c_str());
 		for (int p = 0; p < PlayerMax; ++p) {
-			file->printf("%c", Players[p].Allow.Upgrades[j]);
+			file.printf("%c", Players[p].Allow.Upgrades[j]);
 		}
-		file->printf("\")\n");
+		file.printf("\")\n");
 	}
 }
 
@@ -485,16 +481,12 @@ static void ConvertUnitTypeTo(CPlayer &player, const CUnitType &src, CUnitType &
 		//
 		} else {
 			for (size_t j = 0; j < unit.Orders.size(); ++j) {
-				if (unit.Orders[j]->Action == UnitActionTrain
-					&& unit.Orders[j]->Arg1.Type == &src) {
-						if (j == 0) {
-							// Must Adjust Ticks to the fraction that was trained
-							unit.CurrentOrder()->Data.Train.Ticks =
-								unit.CurrentOrder()->Data.Train.Ticks *
-								dst.Stats[player.Index].Costs[TimeCost] /
-								src.Stats[player.Index].Costs[TimeCost];
-						}
-					unit.Orders[j]->Arg1.Type = &dst;
+				if (unit.Orders[j]->Action == UnitActionTrain) {
+					COrder_Train &order = *static_cast<COrder_Train *>(unit.Orders[j]);
+
+					if (&order.GetUnitType() == &src) {
+						order.ConvertUnitType(unit, dst);
+					}
 				}
 			}
 		}
@@ -512,15 +504,11 @@ static void ConvertUnitTypeTo(CPlayer &player, const CUnitType &src, CUnitType &
 */
 static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 {
-	int z;                      // iterator on upgrade or unittype.
-	int pn;                     // player number.
-	int varModified;            // 0 if variable is not modified.
-	int numunits;               // number of unit of the current type.
-	CUnit *unitupgrade[UnitMax]; // array of unit of the current type
-
 	Assert(um);
-	pn = player.Index;
-	for (z = 0; z < UpgradeMax; ++z) {
+
+	int pn = player.Index;
+
+	for (int z = 0; z < UpgradeMax; ++z) {
 		// allow/forbid upgrades for player.  only if upgrade is not acquired
 
 		// FIXME: check if modify is allowed
@@ -539,7 +527,7 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 		}
 	}
 
-	for (z = 0; z < UnitTypeMax; ++z) {
+	for (int z = 0; z < UnitTypeMax; ++z) {
 		// add/remove allowed units
 
 		// FIXME: check if modify is allowed
@@ -554,9 +542,11 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 			// If Sight range is upgraded, we need to change EVERY unit
 			// to the new range, otherwise the counters get confused.
 			if (um->Modifier.Variables[SIGHTRANGE_INDEX].Value) {
-				numunits = FindUnitsByType(*UnitTypes[z], unitupgrade);
-				for (numunits--; numunits >= 0; --numunits) {
-					CUnit &unit = *unitupgrade[numunits];
+				std::vector<CUnit*> unitupgrade;
+
+				FindUnitsByType(*UnitTypes[z], unitupgrade);
+				for (size_t j = 0; j != unitupgrade.size(); ++j) {
+					CUnit &unit = *unitupgrade[j];
 					if (unit.Player->Index == pn && !unit.Removed) {
 						MapUnmarkUnitSight(unit);
 						unit.CurrentSightRange = UnitTypes[z]->Stats[pn].Variables[SIGHTRANGE_INDEX].Max +
@@ -570,7 +560,7 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 				UnitTypes[z]->Stats[pn].Costs[j] += um->Modifier.Costs[j];
 			}
 
-			varModified = 0;
+			int varModified = 0;
 			for (unsigned int j = 0; j < UnitTypeVar.GetNumberVariable(); j++) {
 				varModified |= um->Modifier.Variables[j].Value
 					| um->Modifier.Variables[j].Max
@@ -591,10 +581,12 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 
 			// And now modify ingame units
 			if (varModified) {
-				numunits = FindUnitsByType(*UnitTypes[z], unitupgrade);
-				numunits--; // Change to 0 Start not 1 start
-				for (; numunits >= 0; --numunits) {
-					CUnit &unit = *unitupgrade[numunits];
+				std::vector<CUnit*> unitupgrade;
+
+				FindUnitsByType(*UnitTypes[z], unitupgrade);
+				for (size_t j = 0; j != unitupgrade.size(); ++j) {
+					CUnit &unit = *unitupgrade[j];
+
 					if (unit.Player->Index != player.Index) {
 						continue;
 					}
@@ -741,37 +733,8 @@ char UpgradeIdentAllowed(const CPlayer &player, const std::string &ident)
 	if ((id = UpgradeIdByIdent(ident)) != -1) {
 		return UpgradeIdAllowed(player, id);
 	}
-	DebugPrint("Fix your code, wrong idenifier `%s'\n" _C_ ident.c_str());
+	DebugPrint("Fix your code, wrong identifier `%s'\n" _C_ ident.c_str());
 	return '-';
-}
-
-/*----------------------------------------------------------------------------
---  Check availablity
-----------------------------------------------------------------------------*/
-
-/**
-**  Check if upgrade (also spells) available for the player.
-**
-**  @param player  Player pointer.
-**  @param ident   Upgrade ident.
-*/
-int UpgradeIdentAvailable(const CPlayer &player, const std::string &ident)
-{
-	int allow;
-
-#if 0
-	//
-	//  Check dependencies
-	//
-	if (!CheckDependByIdent(player, ident)) {
-		return 0;
-	}
-#endif
-	//
-	//  Allowed by level
-	//
-	allow = UpgradeIdentAllowed(player, ident);
-	return allow == 'R' || allow == 'X';
 }
 
 //@}

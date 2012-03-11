@@ -41,6 +41,7 @@
 #include <ctype.h>
 
 #include "stratagus.h"
+
 #include "tileset.h"
 #include "video.h"
 #include "map.h"
@@ -62,6 +63,7 @@
 #include "spells.h"
 #include "widgets.h"
 #include "actions.h"
+#include "action/action_train.h"
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -1731,12 +1733,10 @@ void UIHandleButtonDown(unsigned button)
 						ThisPlayer->IsTeamed(*Selected[0])) {
 					if (static_cast<size_t>(ButtonUnderCursor) < Selected[0]->Orders.size() &&
 						Selected[0]->Orders[ButtonUnderCursor]->Action == UnitActionTrain) {
-						DebugPrint("Cancel slot %d %s\n" _C_
-							ButtonUnderCursor _C_
-							Selected[0]->Orders[ButtonUnderCursor]->Arg1.Type->Ident.c_str());
-						SendCommandCancelTraining(*Selected[0],
-							ButtonUnderCursor,
-							Selected[0]->Orders[ButtonUnderCursor]->Arg1.Type);
+						const COrder_Train& order = *static_cast<COrder_Train*>(Selected[0]->Orders[ButtonUnderCursor]);
+
+						DebugPrint("Cancel slot %d %s\n" _C_ ButtonUnderCursor _C_ order.GetUnitType().Ident.c_str());
+						SendCommandCancelTraining(*Selected[0], ButtonUnderCursor, &order.GetUnitType());
 					}
 				}
 			//

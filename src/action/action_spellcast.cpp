@@ -42,39 +42,59 @@
 #include <stdlib.h>
 
 #include "stratagus.h"
-#include "video.h"
-#include "unittype.h"
+
+#include "action/action_spellcast.h"
+
 #include "animation.h"
-#include "player.h"
-#include "unit.h"
-#include "missile.h"
-#include "actions.h"
-#include "pathfinder.h"
-#include "sound.h"
-#include "tileset.h"
-#include "map.h"
-#include "spells.h"
-#include "interface.h"
 #include "iolib.h"
+#include "missile.h"
+#include "pathfinder.h"
+#include "player.h"
 #include "script.h"
+#include "sound.h"
+#include "spells.h"
+#include "ui.h"
+#include "unit.h"
+#include "unittype.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* virtual */ COrder_SpellCast *COrder_SpellCast::Clone() const
+/* static */ COrder* COrder::NewActionSpellCast(SpellType &spell, const Vec2i &pos, CUnit *target)
 {
-	return new COrder_SpellCast(*this);
+	COrder_SpellCast *order = new COrder_SpellCast;
+
+	order->Range = spell.Range;
+	if (target) {
+		// Destination could be killed.
+		// Should be handled in action, but is not possible!
+		// Unit::Refs is used as timeout counter.
+		if (target->Destroyed) {
+			// FIXME: where check if spell needs a unit as destination?
+			// FIXME: target->Type is now set to 0. maybe we shouldn't bother.
+			const Vec2i diag = {order->Range, order->Range};
+			order->goalPos = target->tilePos /* + target->Type->GetHalfTileSize() */ - diag;
+			order->Range <<= 1;
+		} else {
+			order->SetGoal(target);
+		}
+	} else {
+		order->goalPos = pos;
+	}
+	order->SetSpell(spell);
+
+	return order;
 }
 
 /* virtual */ void COrder_SpellCast::Save(CFile &file, const CUnit &unit) const
 {
 	file.printf("{\"action-spell-cast\",");
 
+	if (this->Finished) {
+		file.printf(" \"finished\", ");
+	}
 	file.printf(" \"range\", %d,", this->Range);
-	file.printf(" \"width\", %d,", this->Width);
-	file.printf(" \"height\", %d,", this->Height);
-	file.printf(" \"min-range\", %d,", this->MinRange);
 	if (this->HasGoal()) {
 		CUnit &goal = *this->GetGoal();
 		if (goal.Destroyed) {
@@ -86,9 +106,9 @@
 	}
 	file.printf(" \"tile\", {%d, %d},", this->goalPos.x, this->goalPos.y);
 
-	file.printf(" \"spell\", \"%s\",\n  ", this->Spell->Ident.c_str());
+	file.printf("\"state\", %d", this->State);
+	file.printf(" \"spell\", \"%s\"", this->Spell->Ident.c_str());
 
-	SaveDataMove(file);
 	file.printf("}");
 }
 
@@ -99,12 +119,59 @@
 		lua_rawgeti(l, -1, j + 1);
 		this->Spell = SpellTypeByIdent(LuaToString(l, -1));
 		lua_pop(l, 1);
+	} else if (!strcmp(value, "range")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		this->Range = LuaToNumber(l, -1);
+		lua_pop(l, 1);
+	} else if (!strcmp(value, "state")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		this->State = LuaToNumber(l, -1);
+		lua_pop(l, 1);
+	} else if (!strcmp(value, "tile")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		CclGetPos(l, &this->goalPos.x , &this->goalPos.y);
+		lua_pop(l, 1);
 	} else {
 		return false;
 	}
 	return true;
 }
 
+/* virtual */ PixelPos COrder_SpellCast::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+{
+	PixelPos targetPos;
+
+	if (this->HasGoal()) {
+		targetPos = vp.MapToScreenPixelPos(this->GetGoal()->GetMapPixelPosCenter());
+	} else {
+		targetPos = vp.TilePosToScreen_Center(this->goalPos);
+	}
+	Video.FillCircleClip(ColorBlue, lastScreenPos, 2);
+	Video.DrawLineClip(ColorBlue, lastScreenPos, targetPos);
+	Video.FillCircleClip(ColorBlue, targetPos, 3);
+	return targetPos;
+}
+
+/* virtual */ void COrder_SpellCast::UpdatePathFinderData(PathFinderInput& input)
+{
+	input.SetMinRange(0);
+	input.SetMaxRange(this->Range);
+
+	Vec2i tileSize;
+	if (this->HasGoal()) {
+		CUnit *goal = this->GetGoal();
+		tileSize.x = goal->Type->TileWidth;
+		tileSize.y = goal->Type->TileHeight;
+		input.SetGoal(goal->tilePos, tileSize);
+	} else {
+		tileSize.x = 0;
+		tileSize.y = 0;
+		input.SetGoal(this->goalPos, tileSize);
+	}
+}
 
 /**
 **  Call when animation step is "attack"
@@ -148,68 +215,61 @@ static void AnimateActionSpellCast(CUnit &unit, COrder_SpellCast &order)
 **
 **  @param unit  Unit, for that the spell cast is handled.
 */
-static void SpellMoveToTarget(CUnit &unit)
+bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 {
-	CUnit *goal;
-	int err;
-
 	// Unit can't move
-	err = 1;
+	int err = 1;
 	if (unit.CanMove()) {
 		err = DoActionMove(unit);
 		if (unit.Anim.Unbreakable) {
-			return;
+			return false;
 		}
 	}
 
 	// when reached DoActionMove changes unit action
 	// FIXME: use return codes from pathfinder
-	COrderPtr order = unit.CurrentOrder();
-	goal = order->GetGoal();
+	CUnit *goal = this->GetGoal();
 
-	if (goal && unit.MapDistanceTo(*goal) <= order->Range) {
+	if (goal && unit.MapDistanceTo(*goal) <= this->Range) {
 		// there is goal and it is in range
 		unit.State = 0;
 		UnitHeadingFromDeltaXY(unit, goal->tilePos + goal->Type->GetHalfTileSize() - unit.tilePos);
-		unit.SubAction++; // cast the spell
-		return;
-	} else if (!goal && unit.MapDistanceTo(order->goalPos.x, order->goalPos.y) <= order->Range) {
+		this->State++; // cast the spell
+		return false;
+	} else if (!goal && unit.MapDistanceTo(this->goalPos.x, this->goalPos.y) <= this->Range) {
 		// there is no goal and target spot is in range
-		UnitHeadingFromDeltaXY(unit, order->goalPos - unit.tilePos);
-		unit.SubAction++; // cast the spell
-		return;
+		UnitHeadingFromDeltaXY(unit, this->goalPos - unit.tilePos);
+		this->State++; // cast the spell
+		return false;
 	} else if (err == PF_UNREACHABLE) {
-		//
 		// goal/spot unreachable and out of range -- give up
-		//
-		unit.ClearAction();
 		unit.State = 0;
-		order->ClearGoal(); // Release references
+		return true;
 	}
-	Assert(!unit.Type->Vanishes && !unit.Destroyed);
+	return false;
 }
 
 
-/* virtual */ bool COrder_SpellCast::Execute(CUnit &unit)
+/* virtual */ void COrder_SpellCast::Execute(CUnit &unit)
 {
 	COrder_SpellCast &order = *this;
 
 	if (unit.Wait) {
 		unit.Wait--;
-		return false;
+		return ;
 	}
 	const SpellType &spell = order.GetSpell();
-	switch (unit.SubAction) {
+	switch (this->State) {
 		case 0:
 			// Check if we can cast the spell.
 			if (!CanCastSpell(unit, &spell, order.GetGoal(), order.goalPos.x, order.goalPos.y)) {
 				// Notify player about this problem
 				if (unit.Variable[MANA_INDEX].Value < spell.ManaCost) {
-					unit.Player->Notify(NotifyYellow, unit.tilePos.x, unit.tilePos.y,
+					unit.Player->Notify(NotifyYellow, unit.tilePos,
 						_("%s: not enough mana for spell: %s"),
 						unit.Type->Name.c_str(), spell.Name.c_str());
 				} else {
-					unit.Player->Notify(NotifyYellow, unit.tilePos.x, unit.tilePos.y,
+					unit.Player->Notify(NotifyYellow, unit.tilePos,
 						_("%s: can't cast spell: %s"),
 						unit.Type->Name.c_str(), spell.Name.c_str());
 				}
@@ -217,28 +277,29 @@ static void SpellMoveToTarget(CUnit &unit)
 				if (unit.Player->AiEnabled) {
 					DebugPrint("FIXME: do we need an AI callback?\n");
 				}
-				return true;
+				this->Finished = true;
+				return ;
 			}
 			// FIXME FIXME FIXME: Check if already in range and skip straight to 2(casting)
-			if (!spell.IsCasterOnly()) {
-				unit.CurrentOrder()->NewResetPath();
-			}
 			unit.ReCast = 0; // repeat spell on next pass? (defaults to `no')
-			unit.SubAction = 1;
+			this->State = 1;
 			// FALL THROUGH
 		case 1:                         // Move to the target.
 			if (spell.Range && spell.Range != INFINITE_RANGE) {
-				SpellMoveToTarget(unit);
-				break;
+				if (SpellMoveToTarget(unit) == true) {
+					this->Finished = true;
+					return ;
+				}
+				return ;
 			} else {
-				unit.SubAction = 2;
+				this->State = 2;
 			}
 			// FALL THROUGH
 		case 2:                         // Cast spell on the target.
 			if (!spell.IsCasterOnly()) {
 				AnimateActionSpellCast(unit, *this);
 				if (unit.Anim.Unbreakable) {
-					return false;
+					return ;
 				}
 			} else {
 				// FIXME: what todo, if unit/goal is removed?
@@ -249,35 +310,20 @@ static void SpellMoveToTarget(CUnit &unit)
 					unit.ReCast = SpellCast(unit, &spell, goal, order.goalPos.x, order.goalPos.y);
 				}
 			}
+			// Check, if goal has moved (for ReCast)
+			if (unit.ReCast && order.GetGoal() && unit.MapDistanceTo(*order.GetGoal()) > this->Range) {
+				this->State = 0;
+				return;
+			}
 			if (!unit.ReCast && unit.CurrentAction() != UnitActionDie) {
-				return true;
+				this->Finished = true;
+				return ;
 			}
 			break;
 
 		default:
-			unit.SubAction = 0; // Reset path, than move to target
+			this->State = 0; // Reset path, than move to target
 			break;
-	}
-	return false;
-}
-
-/* virtual */ void COrder_SpellCast::Cancel(CUnit&)
-{
-}
-
-
-/**
-**  Unit casts a spell!
-**
-**  @param unit  Unit, for that the spell cast is handled.
-*/
-void HandleActionSpellCast(COrder& order, CUnit &unit)
-{
-	Assert(order.Action == UnitActionSpellCast);
-
-	if (order.Execute(unit)) {
-		order.ClearGoal();
-		unit.ClearAction();
 	}
 }
 

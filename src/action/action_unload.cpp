@@ -37,17 +37,91 @@
 #include <stdlib.h>
 
 #include "stratagus.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
-#include "actions.h"
+
+#include "action/action_unload.h"
+
+#include "iolib.h"
 #include "map.h"
-#include "interface.h"
 #include "pathfinder.h"
+#include "player.h"
+#include "script.h"
+#include "ui.h"
+#include "unit.h"
+#include "unittype.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
+
+/* static */ COrder* COrder::NewActionUnload(const Vec2i &pos, CUnit *what)
+{
+	COrder_Unload *order = new COrder_Unload;
+
+	order->goalPos = pos;
+	if (what && !what->Destroyed) {
+		order->SetGoal(what);
+	}
+	return order;
+}
+
+/* virtual */ void COrder_Unload::Save(CFile &file, const CUnit &unit) const
+{
+	file.printf("{\"action-unload\",");
+	if (this->Finished) {
+		file.printf(" \"finished\", ");
+	}
+	if (this->HasGoal()) {
+		CUnit &goal = *this->GetGoal();
+		if (goal.Destroyed) {
+			/* this unit is destroyed so it's not in the global unit
+			 * array - this means it won't be saved!!! */
+			printf ("FIXME: storing destroyed Goal - loading will fail.\n");
+		}
+		file.printf(" \"goal\", \"%s\",", UnitReference(goal).c_str());
+	}
+	file.printf(" \"tile\", {%d, %d}, ", this->goalPos.x, this->goalPos.y);
+	file.printf("\"state\", %d", this->State);
+	file.printf("}");
+}
+
+/* virtual */ bool COrder_Unload::ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit)
+{
+	if (!strcmp("state", value)) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		this->State = LuaToNumber(l, -1);
+		lua_pop(l, 1);
+	} else if (!strcmp(value, "tile")) {
+		++j;
+		lua_rawgeti(l, -1, j + 1);
+		CclGetPos(l, &this->goalPos.x , &this->goalPos.y);
+		lua_pop(l, 1);
+	} else {
+		return false;
+	}
+	return true;
+}
+
+/* virtual */ PixelPos COrder_Unload::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+{
+	const PixelPos targetPos = vp.TilePosToScreen_Center(this->goalPos);
+
+	Video.FillCircleClip(ColorGreen, lastScreenPos, 2);
+	Video.DrawLineClip(ColorGreen, lastScreenPos, targetPos);
+	Video.FillCircleClip(ColorGreen, targetPos, 3);
+	return targetPos;
+}
+
+/* virtual */ void COrder_Unload::UpdatePathFinderData(PathFinderInput& input)
+{
+	input.SetMinRange(0);
+	input.SetMaxRange(0);
+
+	const Vec2i tileSize = {0, 0};
+
+	input.SetGoal(this->goalPos, tileSize);
+}
+
 
 /**
 **  Find a free position close to startPos
@@ -114,7 +188,7 @@ static bool FindUnloadPosition(const CUnit &transporter, const CUnit &unit, cons
 **
 **  @param unit  Unit to drop out.
 **
-**  @return      True if unit can be unloaded.
+**  @return      True if unit is unloaded.
 **
 **  @bug         FIXME: Place unit only on fields reachable from the transporter
 */
@@ -125,11 +199,12 @@ static int UnloadUnit(CUnit &transporter, CUnit &unit)
 
 	Assert(unit.Removed);
 	if (!FindUnloadPosition(transporter, unit, transporter.tilePos, maxRange, &pos)) {
-		return 0;
+		return false;
 	}
 	unit.Boarded = 0;
 	unit.Place(pos);
-	return 1;
+	transporter.BoardCount--;
+	return true;
 }
 
 /**
@@ -265,38 +340,36 @@ static int MoveToDropZone(CUnit &unit)
 /**
 **  Make one or more unit leave the transporter.
 **
-**  @param unit  Pointer to unit.
+**  @return false if action should continue
 */
-static void LeaveTransporter(CUnit &transporter)
+bool COrder_Unload::LeaveTransporter(CUnit &transporter)
 {
 	int stillonboard = 0;
-	CUnit *goal = transporter.CurrentOrder()->GetGoal();
-	//
+
 	// Goal is the specific unit unit that you want to unload.
 	// This can be NULL, in case you want to unload everything.
-	//
-	if (goal) {
-		if (goal->Destroyed) {
+	if (this->HasGoal()) {
+		CUnit &goal = *this->GetGoal();
+
+		if (goal.Destroyed) {
 			DebugPrint("destroyed unit unloading?\n");
-			transporter.CurrentOrder()->ClearGoal();
-			return;
+			this->ClearGoal();
+			return true;
 		}
 		transporter.CurrentOrder()->ClearGoal();
-		goal->tilePos = transporter.tilePos;
 		// Try to unload the unit. If it doesn't work there is no problem.
-		if (UnloadUnit(transporter, *goal)) {
-			transporter.BoardCount--;
+		if (UnloadUnit(transporter, goal)) {
+			this->ClearGoal();
+		} else {
+			++stillonboard;
 		}
 	} else {
 		// Unload all units.
-		goal = transporter.UnitInside;
+		CUnit *goal = transporter.UnitInside;
 		for (int i = transporter.InsideCount; i; --i, goal = goal->NextContained) {
 			if (goal->Boarded) {
-				goal->tilePos = transporter.tilePos;
 				if (!UnloadUnit(transporter, *goal)) {
 					++stillonboard;
-				} else {
-					transporter.BoardCount--;
 				}
 			}
 		}
@@ -309,67 +382,62 @@ static void LeaveTransporter(CUnit &transporter)
 	if (stillonboard) {
 		// We tell it to unload at it's current position. This can't be done,
 		// so it will search for a piece of free coast nearby.
-		transporter.CurrentOrder()->Action = UnitActionUnload;
-		transporter.CurrentOrder()->ClearGoal();
-		transporter.CurrentOrder()->goalPos = transporter.tilePos;
-		transporter.SubAction = 0;
+		this->State = 0;
+		return false;
 	} else {
-		transporter.ClearAction();
+		return true;
 	}
 }
 
-/**
-**  The transporter unloads a unit.
-**
-**  @param unit  Pointer to unit.
-*/
-void HandleActionUnload(COrder& order, CUnit &unit)
+/* virtual */ void COrder_Unload::Execute(CUnit &unit)
 {
 	const int maxSearchRange = 20;
 
 	if (!unit.CanMove()) {
-		unit.SubAction = 2;
+		this->State = 2;
 	}
-	switch (unit.SubAction) {
+	switch (this->State) {
 		case 0: // Choose destination
-			if (!order.HasGoal()) {
+			if (!this->HasGoal()) {
 				Vec2i pos;
 
-				if (!ClosestFreeDropZone(unit, order.goalPos, maxSearchRange, &pos)) {
-					// Sorry... I give up.
-					unit.ClearAction();
-					return;
+				if (!ClosestFreeDropZone(unit, this->goalPos, maxSearchRange, &pos)) {
+					this->Finished = true;
+					return ;
 				}
-				order.goalPos = pos;
+				this->goalPos = pos;
 			}
 
-			unit.CurrentOrder()->NewResetPath();
-			unit.SubAction = 1;
+			this->State = 1;
 			// follow on next case
 		case 1: // Move unit to destination
 			// The Goal is the unit that we have to unload.
-			if (!unit.CurrentOrder()->HasGoal()) {
+			if (!this->HasGoal()) {
 				const int moveResult = MoveToDropZone(unit);
 
 				// We have to unload everything
 				if (moveResult) {
 					if (moveResult == PF_REACHED) {
-						if (++unit.SubAction == 1) {
-							unit.ClearAction();
+						if (++this->State == 1) {
+							this->Finished = true;
+							return ;
 						}
 					} else {
-						unit.SubAction = 2;
+						this->State = 2;
 					}
 				}
-				break;
+				return ;
 			}
-		case 2: // Leave the transporter
+		case 2: { // Leave the transporter
 			// FIXME: show still animations ?
-			LeaveTransporter(unit);
-			if (unit.CanMove() && unit.CurrentAction() != UnitActionStill) {
-				HandleActionUnload(*unit.CurrentOrder() , unit);
+			if (LeaveTransporter(unit)) {
+				this->Finished = true;
+				return ;
 			}
-			break;
+			return ;
+		}
+		default:
+			return ;
 	}
 }
 

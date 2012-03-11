@@ -147,6 +147,10 @@ void CUnit::Init()
 	Player = NULL;
 	Stats = NULL;
 	CurrentSightRange = 0;
+
+	pathFinderData = new PathFinderData;
+	pathFinderData->input.SetUnit(*this);
+
 	Colors = NULL;
 	IX = 0;
 	IY = 0;
@@ -170,17 +174,14 @@ void CUnit::Init()
 	GroupId = 0;
 	LastGroup = 0;
 	ResourcesHeld = 0;
-	SubAction = 0;
 	Wait = 0;
 	State = 0;
 	Blink = 0;
 	Moving = 0;
 	ReCast = 0;
 	CacheLock = 0;
-	GuardLock = 0;
 	memset(&Anim, 0, sizeof(Anim));
 	CurrentResource = 0;
-	OrderFlush = 0;
 	Orders.clear();
 	delete SavedOrder;
 	SavedOrder = NULL;
@@ -205,7 +206,6 @@ void CUnit::Release(bool final)
 
 	Assert(Type); // already free.
 	Assert(Orders.size() == 1);
-	Assert(!CurrentOrder()->HasGoal());
 	// Must be removed before here
 	Assert(Removed);
 
@@ -249,6 +249,7 @@ void CUnit::Release(bool final)
 
 	Type = NULL;
 
+	delete pathFinderData;
 	delete[] AutoCastSpell;
 	delete[] Variable;
 	for (std::vector<COrder *>::iterator order = Orders.begin(); order != Orders.end(); ++order) {
@@ -266,10 +267,8 @@ unsigned int CUnit::CurrentAction() const
 
 void CUnit::ClearAction()
 {
-	delete CurrentOrder();
-	Orders[0] = COrder::NewActionStill();
+	Orders[0]->Finished = true;
 
-	SubAction = 0;
 	if (Selected) {
 		SelectedUnitChanged();
 	}
@@ -373,16 +372,14 @@ bool CUnit::RestoreOrder()
 
 	// Restart order state.
 	this->State = 0;
-	this->SubAction = 0;
 
 	// Cannot delete this->Orders[0] since it is generally that order
 	// which call this method.
+	this->Orders[0]->Finished = true;
+
 
 	//copy
-	this->Orders[0] = this->SavedOrder;
-	this->CurrentResource = this->SavedOrder->CurrentResource;
-
-	this->CurrentOrder()->NewResetPath();
+	this->Orders.insert(this->Orders.begin() + 1, this->SavedOrder);
 
 	this->SavedOrder = NULL;
 	return true;
@@ -396,9 +393,11 @@ bool CUnit::RestoreOrder()
 bool CUnit::StoreOrder(COrder* order)
 {
 	Assert(order);
-	Assert(order->HasGoal() || Map.Info.IsPointOnMap(order->goalPos));
 
 	if (this->SavedOrder != NULL) {
+		return false;
+	}
+	if (order && order->Finished == true) {
 		return false;
 	}
 	// Save current order to come back or to continue it.
@@ -411,47 +410,43 @@ bool CUnit::StoreOrder(COrder* order)
 **
 **  @param player  player which have the unit.
 */
-void CUnit::AssignToPlayer(CPlayer *player)
+void CUnit::AssignToPlayer(CPlayer &player)
 {
-	CUnitType *type;  // type of unit.
+	CUnitType &type = *Type;
 
-	Assert(player);
-	type = Type;
 
-	//
 	// Build player unit table
-	//
-	if (!type->Vanishes && CurrentAction() != UnitActionDie) {
-		PlayerSlot = player->Units + player->TotalNumUnits++;
+	if (!type.Vanishes && CurrentAction() != UnitActionDie) {
+		PlayerSlot = player.Units + player.TotalNumUnits++;
 		if (!SaveGameLoading) {
 			// If unit is dieing, it's already been lost by all players
 			// don't count again
-			if (type->Building) {
+			if (type.Building) {
 				// FIXME: support more races
-				if (!type->Wall && type != UnitTypeOrcWall && type != UnitTypeHumanWall) {
-					player->TotalBuildings++;
+				if (!type.Wall && &type != UnitTypeOrcWall && &type != UnitTypeHumanWall) {
+					player.TotalBuildings++;
 				}
 			} else {
-				player->TotalUnits++;
+				player.TotalUnits++;
 			}
 		}
 		*PlayerSlot = this;
 
-		player->UnitTypesCount[type->Slot]++;
-		player->Demand += type->Demand; // food needed
+		player.UnitTypesCount[type.Slot]++;
+		player.Demand += type.Demand; // food needed
 	}
 
 
 	// Don't Add the building if it's dieing, used to load a save game
-	if (type->Building && CurrentAction() != UnitActionDie) {
+	if (type.Building && CurrentAction() != UnitActionDie) {
 		// FIXME: support more races
-		if (!type->Wall && type != UnitTypeOrcWall && type != UnitTypeHumanWall) {
-			player->NumBuildings++;
+		if (!type.Wall && &type != UnitTypeOrcWall && &type != UnitTypeHumanWall) {
+			player.NumBuildings++;
 		}
 	}
-	Player = player;
-	Stats = &type->Stats[Player->Index];
-	Colors = &player->UnitColors;
+	Player = &player;
+	Stats = &type.Stats[Player->Index];
+	Colors = &player.UnitColors;
 	if (!SaveGameLoading) {
 		if (UnitTypeVar.GetNumberVariable()) {
 			Assert(Variable);
@@ -485,7 +480,7 @@ CUnit *MakeUnit(CUnitType &type, CPlayer *player)
 	unit->Init(type);
 	// Only Assign if a Player was specified
 	if (player) {
-		unit->AssignToPlayer(player);
+		unit->AssignToPlayer(*player);
 	}
 
 	// Increase the max resources limit
@@ -641,7 +636,7 @@ void UpdateUnitSightRange(CUnit &unit)
 #endif
 	// FIXME : these values must be configurable.
 	if (unit.Constructed) { // Units under construction have no sight range.
-		unit.CurrentSightRange = 0;
+		unit.CurrentSightRange = 1;
 	} else if (!unit.Container) { // proper value.
 		unit.CurrentSightRange = unit.Stats->Variables[SIGHTRANGE_INDEX].Max;
 	} else { // value of it container.
@@ -793,17 +788,6 @@ static void UnitInXY(CUnit &unit, const Vec2i &pos)
 	unit.tilePos = pos;
 	unit.Offset = Map.getIndex(pos);
 
-	if (!unit.Container) {
-		//Only Top Units
-		const CMapField *const mf = Map.Field(unit.Offset);
-		const CPlayer *const p = unit.Player;
-		for (int player = 0; player < NumPlayers; ++player) {
-			if(player != p->Index && mf->Guard[player] && p->IsEnemy(player)) {
-				Players[player].AutoAttackTargets.InsertS(&unit);
-				unit.RefsIncrease();
-			}
-		}
-	}
 	for (int i = unit.InsideCount; i--; unit_inside = unit_inside->NextContained) {
 		UnitInXY(*unit_inside, pos);
 	}
@@ -843,7 +827,6 @@ void CUnit::Place(const Vec2i &pos)
 	Assert(Removed);
 
 	if (Container) {
-		MapUnmarkUnitGuard(*this);
 		MapUnmarkUnitSight(*this);
 		RemoveUnitFromContainer(*this);
 	}
@@ -908,7 +891,6 @@ void CUnit::Remove(CUnit *host)
 	Map.Remove(*this);
 	MapUnmarkUnitSight(*this);
 	UnmarkUnitFieldFlags(*this);
-	MapUnmarkUnitGuard(*this);
 
 	if (host) {
 		AddInContainer(*host);
@@ -954,104 +936,81 @@ void UnitLost(CUnit &unit)
 {
 	CUnit *temp;
 	CBuildRestrictionOnTop *b;
-	const CUnitType *type;
-	CPlayer *player = unit.Player;
+	CPlayer &player = *unit.Player;
 
-	Assert(player);  // Next code didn't support no player!
+	Assert(&player);  // Next code didn't support no player!
 
-	//
 	//  Call back to AI, for killed or lost units.
-	//
 	if (Editor.Running == EditorNotRunning){
-		if (player && player->AiEnabled) {
+		if (player.AiEnabled) {
 			AiUnitKilled(unit);
 		} else {
-			//
 			//  Remove unit from its groups
-			//
 			if (unit.GroupId) {
 				RemoveUnitFromGroups(unit);
 			}
 		}
 	}
 
-	//
 	//  Remove the unit from the player's units table.
-	//
-	type = unit.Type;
-	if (player && !type->Vanishes) {
+
+	const CUnitType &type = *unit.Type;
+	if (!type.Vanishes) {
 		Assert(*unit.PlayerSlot == &unit);
-		temp = player->Units[--player->TotalNumUnits];
+		temp = player.Units[--player.TotalNumUnits];
 		temp->PlayerSlot = unit.PlayerSlot;
 		*unit.PlayerSlot = temp;
-		player->Units[player->TotalNumUnits] = NULL;
+		player.Units[player.TotalNumUnits] = NULL;
 
-		if (unit.Type->Building) {
+		if (type.Building) {
 			// FIXME: support more races
-			if (!type->Wall && type != UnitTypeOrcWall && type != UnitTypeHumanWall) {
-				player->NumBuildings--;
+			if (!type.Wall && &type != UnitTypeOrcWall && &type != UnitTypeHumanWall) {
+				player.NumBuildings--;
 			}
 		}
-
 		if (unit.CurrentAction() != UnitActionBuilt) {
-			player->UnitTypesCount[type->Slot]--;
+			player.UnitTypesCount[type.Slot]--;
 		}
 	}
 
-
-	//
 	//  Handle unit demand. (Currently only food supported.)
-	//
-	player->Demand -= type->Demand;
+	player.Demand -= type.Demand;
 
-	//
 	//  Update information.
-	//
 	if (unit.CurrentAction() != UnitActionBuilt) {
-		player->Supply -= type->Supply;
+		player.Supply -= type.Supply;
 		// Decrease resource limit
 		for (int i = 0; i < MaxCosts; ++i) {
-			if (unit.Player->MaxResources[i] != -1 && type->_Storing[i]) {
-				const int newMaxValue = unit.Player->MaxResources[i] - type->_Storing[i];
+			if (player.MaxResources[i] != -1 && type._Storing[i]) {
+				const int newMaxValue = player.MaxResources[i] - type._Storing[i];
 
-				unit.Player->MaxResources[i] = std::max(0, newMaxValue);
-				unit.Player->SetResource(i, unit.Player->Resources[i]);
+				player.MaxResources[i] = std::max(0, newMaxValue);
+				player.SetResource(i, player.Resources[i]);
 			}
 		}
-		//
 		//  Handle income improvements, look if a player loses a building
 		//  which have given him a better income, find the next best
 		//  income.
-		//
 		for (int i = 1; i < MaxCosts; ++i) {
-			if (player->Incomes[i] && type->ImproveIncomes[i] == player->Incomes[i]) {
-				int m;
-				int j;
+			if (player.Incomes[i] && type.ImproveIncomes[i] == player.Incomes[i]) {
+				int m = DefaultIncomes[i];
 
-				m = DefaultIncomes[i];
-				for (j = 0; j < player->TotalNumUnits; ++j) {
-					if (m < player->Units[j]->Type->ImproveIncomes[i]) {
-						m = player->Units[j]->Type->ImproveIncomes[i];
-					}
+				for (int j = 0; j < player.TotalNumUnits; ++j) {
+					m = std::max(m, player.Units[j]->Type->ImproveIncomes[i]);
 				}
-				player->Incomes[i] = m;
+				player.Incomes[i] = m;
 			}
 		}
 	}
 
-	//
 	//  Handle order cancels.
-	//
 	unit.CurrentOrder()->Cancel(unit);
 
-	DebugPrint("%d: Lost %s(%d)\n"
-		_C_ unit.Player->Index
-		_C_ unit.Type->Ident.c_str()
-		_C_ UnitNumber(unit));
+	DebugPrint("%d: Lost %s(%d)\n" _C_ player.Index _C_ type.Ident.c_str() _C_ UnitNumber(unit));
 
 	// Destroy resource-platform, must re-make resource patch.
 	if ((b = OnTopDetails(unit, NULL)) != NULL) {
-		if (b->ReplaceOnDie && (unit.Type->GivesResource && unit.ResourcesHeld != 0)) {
+		if (b->ReplaceOnDie && (type.GivesResource && unit.ResourcesHeld != 0)) {
 			temp = MakeUnitAndPlace(unit.tilePos, *b->Parent, &Players[PlayerNumNeutral]);
 			if (temp == NoUnitP) {
 				DebugPrint("Unable to allocate Unit");
@@ -1060,9 +1019,9 @@ void UnitLost(CUnit &unit)
 			}
 		}
 	}
-	Assert(player->NumBuildings <= UnitMax);
-	Assert(player->TotalNumUnits <= UnitMax);
-	Assert(player->UnitTypesCount[type->Slot] <= UnitMax);
+	Assert(player.NumBuildings <= UnitMax);
+	Assert(player.TotalNumUnits <= UnitMax);
+	Assert(player.UnitTypesCount[type.Slot] <= UnitMax);
 }
 
 /**
@@ -1078,7 +1037,7 @@ void UnitClearOrders(CUnit &unit)
 	}
 	unit.Orders.clear();
 	unit.Orders.push_back(COrder::NewActionStill());
-	unit.SubAction = unit.State = 0;
+	unit.State = 0;
 }
 
 /**
@@ -1089,29 +1048,23 @@ void UnitClearOrders(CUnit &unit)
 */
 void UpdateForNewUnit(const CUnit &unit, int upgrade)
 {
-	const CUnitType *type = unit.Type;
-	CPlayer *player = unit.Player;
+	const CUnitType &type = *unit.Type;
+	CPlayer &player = *unit.Player;
 
-	//
 	// Handle unit supply and max resources.
 	// Note an upgraded unit can't give more supply.
-	//
 	if (!upgrade) {
-		player->Supply += type->Supply;
+		player.Supply += type.Supply;
 		for (int i = 0; i < MaxCosts; ++i) {
-			if (unit.Player->MaxResources[i] != -1 && type->_Storing[i]) {
-				unit.Player->MaxResources[i] += type->_Storing[i];
+			if (player.MaxResources[i] != -1 && type._Storing[i]) {
+				player.MaxResources[i] += type._Storing[i];
 			}
 		}
 	}
 
-	//
 	// Update resources
-	//
 	for (int u = 1; u < MaxCosts; ++u) {
-		if (player->Incomes[u] < unit.Type->ImproveIncomes[u]) {
-			player->Incomes[u] = unit.Type->ImproveIncomes[u];
-		}
+		player.Incomes[u] = std::max(player.Incomes[u], type.ImproveIncomes[u]);
 	}
 }
 
@@ -1152,8 +1105,7 @@ void NearestOfUnit(const CUnit &unit, const Vec2i& pos, Vec2i *dpos)
 static void UnitFillSeenValues(CUnit &unit)
 {
 	// Seen values are undefined for visible units.
-	unit.Seen.Y = unit.tilePos.y;
-	unit.Seen.X = unit.tilePos.x;
+	unit.Seen.tilePos = unit.tilePos;
 	unit.Seen.IY = unit.IY;
 	unit.Seen.IX = unit.IX;
 	unit.Seen.Frame = unit.Frame;
@@ -1162,23 +1114,6 @@ static void UnitFillSeenValues(CUnit &unit)
 
 	unit.CurrentOrder()->FillSeenValues(unit);
 }
-
-class SamePlayerAndTypeAs
-{
-public:
-	explicit SamePlayerAndTypeAs(const CUnit &unit) :
-		player(unit.Player), type(unit.Type)
-	{}
-
-	bool operator() (const CUnit *unit) const
-	{
-		return (unit->Player == player && unit->Type == type);
-	}
-
-private:
-	const CPlayer *player;
-	const CUnitType *type;
-};
 
 // Wall unit positions
 enum {
@@ -1217,7 +1152,7 @@ void CorrectWallDirections(CUnit &unit)
 			flags |= dirFlag;
 		} else {
 			const CUnitCache &unitCache = Map.Field(pos)->UnitCache;
-			const CUnit *neighboor = unitCache.find(SamePlayerAndTypeAs(unit));
+			const CUnit *neighboor = unitCache.find(HasSamePlayerAndTypeAs(unit));
 
 			if (neighboor != NULL) {
 				flags |= dirFlag;
@@ -1245,7 +1180,7 @@ void CorrectWallNeighBours(CUnit &unit)
 			continue;
 		}
 		CUnitCache &unitCache = Map.Field(pos)->UnitCache;
-		CUnit *neighboor = unitCache.find(SamePlayerAndTypeAs(unit));
+		CUnit *neighboor = unitCache.find(HasSamePlayerAndTypeAs(unit));
 
 		if (neighboor != NULL) {
 			CorrectWallDirections(*neighboor);
@@ -1594,39 +1529,6 @@ bool CUnit::IsVisibleInViewport(const CViewport *vp) const
 }
 
 /**
-**  Returns true, if unit is visible on current map view (any viewport).
-**
-**  @return  True if visible, false otherwise.
-*/
-bool CUnit::IsVisibleOnScreen() const
-{
-	for (CViewport *vp = UI.Viewports; vp < UI.Viewports + UI.NumViewports; ++vp) {
-		if (IsVisibleInViewport(vp)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-/**
-**  Get area of map tiles covered by unit, including its displacement.
-**
-**  @param sx  Out: Top left X tile map postion.
-**  @param sy  Out: Top left Y tile map postion.
-**  @param ex  Out: Bottom right X tile map postion.
-**  @param ey  Out: Bottom right Y tile map postion.
-**
-**  @return    sx,sy,ex,ey defining area in Map
-*/
-void CUnit::GetMapArea(int *sx, int *sy, int *ex, int *ey) const
-{
-	*sx = tilePos.x - (IX < 0);
-	*ex = *sx + Type->TileWidth - !IX;
-	*sy = tilePos.y - (IY < 0);
-	*ey = *sy + Type->TileHeight - !IY;
-}
-
-/**
 **  Change the unit's owner
 **
 **  @param newplayer  New owning player.
@@ -1665,11 +1567,9 @@ void CUnit::ChangeOwner(CPlayer &newplayer)
 	*PlayerSlot = this;
 
 	MapUnmarkUnitSight(*this);
-	MapUnmarkUnitGuard(*this);
 	Player = &newplayer;
 	Stats = &Type->Stats[newplayer.Index];
 	UpdateUnitSightRange(*this);
-	MapMarkUnitGuard(*this);
 	MapMarkUnitSight(*this);
 
 	//  Must change food/gold and other.
@@ -1791,13 +1691,11 @@ static void ChangePlayerOwner(CPlayer &oldplayer, CPlayer &newplayer)
 */
 void RescueUnits()
 {
-	CUnit *table[UnitMax];
-	CUnit *around[UnitMax];
-	int n;
-
 	if (NoRescueCheck) {  // all possible units are rescued
 		return;
 	}
+	CUnit *table[UnitMax];
+
 	NoRescueCheck = true;
 
 	//  Look if player could be rescued.
@@ -1818,23 +1716,13 @@ void RescueUnits()
 					continue;
 				}
 
-				if (unit->Type->UnitType == UnitTypeLand) {
-					n = Map.Select(
-							unit->tilePos.x - 1, unit->tilePos.y - 1,
-							unit->tilePos.x + unit->Type->TileWidth + 1,
-							unit->tilePos.y + unit->Type->TileHeight + 1, around);
-				} else {
-					n = Map.Select(
-							unit->tilePos.x - 2, unit->tilePos.y - 2,
-							unit->tilePos.x + unit->Type->TileWidth + 2,
-							unit->tilePos.y + unit->Type->TileHeight + 2, around);
-				}
-				//
+				std::vector<CUnit *> around;
+
+				Map.SelectAroundUnit(*unit, 1, around);
+
 				//  Look if ally near the unit.
-				//
-				for (int i = 0; i < n; ++i) {
+				for (size_t i = 0; i != around.size(); ++i) {
 					if (around[i]->Type->CanAttack && unit->IsAllied(*around[i])) {
-						//
 						//  City center converts complete race
 						//  NOTE: I use a trick here, centers could
 						//        store gold. FIXME!!!
@@ -2150,27 +2038,12 @@ void DropOutAll(const CUnit &source)
 
 	for (int i = source.InsideCount; i; --i, unit = unit->NextContained) {
 		DropOutOnSide(*unit, LookingW, &source);
-		Assert(!unit->CurrentOrder()->HasGoal());
-		unit->CurrentOrder()->Action = UnitActionStill;
-		unit->SubAction = 0;
 	}
 }
 
 /*----------------------------------------------------------------------------
   -- Finding units
   ----------------------------------------------------------------------------*/
-
-/**
-**  Find the closest piece of wood for an unit.
-**
-**  @param unit    The unit.
-**  @param pos     OUT: Map position of tile.
-*/
-int FindWoodInSight(const CUnit &unit, Vec2i *pos)
-{
-	return FindTerrainType(unit.Type->MovementMask, 0, MapFieldForest, 9999,
-		unit.Player, unit.tilePos, pos);
-}
 
 /**
 **  Find the closest piece of terrain with the given flags.
@@ -2194,7 +2067,7 @@ int FindWoodInSight(const CUnit &unit, Vec2i *pos)
 **  @return            True if wood was found.
 */
 int FindTerrainType(int movemask, int resmask, int rvresult, int range,
-	const CPlayer *player, const Vec2i &startPos, Vec2i *terrainPos)
+	const CPlayer &player, const Vec2i &startPos, Vec2i *terrainPos)
 {
 	const Vec2i offset[] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
 	Vec2i *points;
@@ -2241,7 +2114,7 @@ int FindTerrainType(int movemask, int resmask, int rvresult, int range,
 				 *	AI players (our exploration code is too week for real
 				 *	competition with human players)
 				 */
-				if (*m || (player && !player->AiEnabled &&!Map.IsFieldExplored(*player, pos))) {
+				if (*m || (!player.AiEnabled &&!Map.IsFieldExplored(player, pos))) {
 					continue;
 				}
 				// Look if found what was required.
@@ -2777,6 +2650,7 @@ PixelPos CUnit::GetMapPixelPosCenter() const
 */
 void LetUnitDie(CUnit &unit)
 {
+	unit.Variable[HP_INDEX].Value = std::min(0,unit.Variable[HP_INDEX].Value);
 	unit.Moving = 0;
 	unit.TTL = 0;
 	unit.Anim.Unbreakable = 0;
@@ -2837,7 +2711,6 @@ void LetUnitDie(CUnit &unit)
 	// Unit has death animation.
 
 	// Not good: UnitUpdateHeading(unit);
-	unit.SubAction = 0;
 	unit.State = 0;
 	delete unit.Orders[0];
 	unit.Orders[0] = COrder::NewActionDie();
@@ -2962,8 +2835,7 @@ void HitUnit(CUnit *attacker, CUnit &target, int damage)
 				}
 			}
 		}
-		target.Player->Notify(NotifyRed, target.tilePos.x, target.tilePos.y,
-			_("%s attacked"), target.Type->Name.c_str());
+		target.Player->Notify(NotifyRed, target.tilePos, _("%s attacked"), target.Type->Name.c_str());
 
 		if (attacker && !target.Type->Building) {
 			if (target.Player->AiEnabled) {
@@ -3035,6 +2907,15 @@ void HitUnit(CUnit *attacker, CUnit &target, int damage)
 		MakeLocalMissile(*mtype, targetPixelCenter, targetPixelCenter + offset)->Damage = -damage;
 	}
 
+	// OnHit callback
+	if (type->OnHit) {
+		const int slot = target.Slot;
+
+		type->OnHit->pushPreamble();
+		type->OnHit->pushInteger(slot);
+		type->OnHit->run();
+	}
+
 	// Show impact missiles
 	if (target.Variable[SHIELD_INDEX].Value > 0
 		&& !target.Type->Impact[ANIMATIONS_DEATHTYPES + 1].Name.empty()) { // shield impact
@@ -3051,7 +2932,7 @@ void HitUnit(CUnit *attacker, CUnit &target, int damage)
 
 		if (fire) {
 			const PixelDiff offset = {0, -PixelTileSize.y};
-			Missile *missile = MakeMissile(*fire, targetPixelCenter - offset, targetPixelCenter - offset);
+			Missile *missile = MakeMissile(*fire, targetPixelCenter + offset, targetPixelCenter + offset);
 
 			target.RefsIncrease();
 			missile->SourceUnit = &target;
@@ -3295,17 +3176,17 @@ int CanTransport(const CUnit &transporter, const CUnit &unit)
 /**
 **  Check if the player is an enemy
 **
-**  @param x  Player to check
+**  @param player  Player to check
 */
 bool CUnit::IsEnemy(const CPlayer &player) const
 {
-	return (this->Player->Enemy & (1 << player.Index)) != 0;
+	return this->Player->IsEnemy(player);
 }
 
 /**
 **  Check if the unit is an enemy
 **
-**  @param x  Unit to check
+**  @param unit  Unit to check
 */
 bool CUnit::IsEnemy(const CUnit &unit) const
 {
@@ -3315,11 +3196,11 @@ bool CUnit::IsEnemy(const CUnit &unit) const
 /**
 **  Check if the player is an ally
 **
-**  @param x  Player to check
+**  @param player  Player to check
 */
 bool CUnit::IsAllied(const CPlayer &player) const
 {
-	return (this->Player->Allied & (1 << player.Index)) != 0;
+	return this->Player->IsAllied(player);
 }
 
 /**
@@ -3339,7 +3220,7 @@ bool CUnit::IsAllied(const CUnit &unit) const
 */
 bool CUnit::IsSharedVision(const CPlayer &player) const
 {
-	return (this->Player->SharedVision & (1 << player.Index)) != 0;
+	return this->Player->IsSharedVision(player);
 }
 
 /**
@@ -3359,8 +3240,7 @@ bool CUnit::IsSharedVision(const CUnit &unit) const
 */
 bool CUnit::IsBothSharedVision(const CPlayer &player) const
 {
-	return (this->Player->SharedVision & (1 << player.Index)) != 0 &&
-		(player.SharedVision & (1 << this->Player->Index)) != 0;
+	return this->Player->IsBothSharedVision(player);
 }
 
 /**
@@ -3435,18 +3315,6 @@ void CleanUnits()
 				continue;
 			}
 			if (!unit->Destroyed) {
-				if (unit->CurrentAction() == UnitActionResource) {
-					ResourceInfo *resinfo = unit->Type->ResInfo[unit->CurrentResource];
-					if (resinfo && !resinfo->TerrainHarvester) {
-						CUnit *mine = unit->CurrentOrder()->Arg1.Resource.Mine;
-						if (mine && !mine->Destroyed) {
-							unit->DeAssignWorkerFromMine(*mine);
-							mine->RefsDecrease();
-							unit->CurrentOrder()->Arg1.Resource.Mine = NULL;
-						}
-					}
-				}
-				unit->CurrentOrder()->ClearGoal();
 				if (!unit->Removed) {
 					unit->Remove(NULL);
 				}

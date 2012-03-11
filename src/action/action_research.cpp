@@ -37,32 +37,47 @@
 #include <stdlib.h>
 
 #include "stratagus.h"
-#include "sound.h"
-#include "unitsound.h"
-#include "unittype.h"
-#include "animation.h"
-#include "player.h"
-#include "unit.h"
-#include "actions.h"
-#include "upgrade_structs.h"
-#include "upgrade.h"
+
+#include "action/action_research.h"
+
 #include "ai.h"
+#include "animation.h"
 #include "iolib.h"
 #include "script.h"
+#include "sound.h"
+#include "player.h"
+#include "unit.h"
+#include "unitsound.h"
+#include "unittype.h"
+#include "upgrade_structs.h"
+#include "upgrade.h"
+
+/// How many resources the player gets back if canceling research
+#define CancelResearchCostsFactor  100
+
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* virtual */ COrder_Research *COrder_Research::Clone() const
+/* static */ COrder* COrder::NewActionResearch(CUnit &unit, CUpgrade &upgrade)
 {
-	return new COrder_Research(*this);
+	COrder_Research *order = new COrder_Research();
+
+	// FIXME: if you give quick an other order, the resources are lost!
+	unit.Player->SubCosts(upgrade.Costs);
+
+	order->SetUpgrade(upgrade);
+	return order;
 }
 
 /* virtual */ void COrder_Research::Save(CFile &file, const CUnit &unit) const
 {
 	file.printf("{\"action-research\"");
 
+	if (this->Finished) {
+		file.printf(" \"finished\", ");
+	}
 	if (this->Upgrade) {
 		file.printf(", \"upgrade\", \"%s\"", this->Upgrade->Ident.c_str());
 	}
@@ -83,6 +98,12 @@
 }
 
 
+
+/* virtual */ PixelPos COrder_Research::Show(const CViewport& , const PixelPos& lastScreenPos) const
+{
+	return lastScreenPos;
+}
+
 /* virtual */ void COrder_Research::UpdateUnitVariables(CUnit &unit) const
 {
 	unit.Variable[RESEARCH_INDEX].Value = unit.Player->UpgradeTimers.Upgrades[this->Upgrade->ID];
@@ -94,7 +115,7 @@
 **
 **  @return true when finished.
 */
-/* virtual */ bool COrder_Research::Execute(CUnit &unit)
+/* virtual */ void COrder_Research::Execute(CUnit &unit)
 {
 	const CUpgrade &upgrade = this->GetUpgrade();
 	const CUnitType &type = *unit.Type;
@@ -104,18 +125,17 @@
 		UnitShowAnimation(unit, type.Animations->Still);
 	if (unit.Wait) {
 		unit.Wait--;
-		return false;
+		return ;
 	}
 #if 0
 	if (unit.Anim.Unbreakable) {
-		return false;
+		return ;
 	}
 #endif
 	CPlayer &player = *unit.Player;
 	player.UpgradeTimers.Upgrades[upgrade.ID] += SpeedResearch;
 	if (player.UpgradeTimers.Upgrades[upgrade.ID] >= upgrade.Costs[TimeCost]) {
-		player.Notify(NotifyGreen, unit.tilePos.x, unit.tilePos.y,
-			_("%s: research complete"), type.Name.c_str());
+		player.Notify(NotifyGreen, unit.tilePos, _("%s: research complete"), type.Name.c_str());
 		if (&player == ThisPlayer) {
 			CSound *sound = GameSounds.ResearchComplete[player.Race].Sound;
 
@@ -127,10 +147,10 @@
 			AiResearchComplete(unit, &upgrade);
 		}
 		UpgradeAcquire(player, &upgrade);
-		return true;
+		this->Finished = true;
+		return ;
 	}
 	unit.Wait = CYCLES_PER_SECOND / 6;
-	return false;
 }
 
 /* virtual */ void COrder_Research::Cancel(CUnit &unit)
@@ -139,21 +159,6 @@
 	unit.Player->UpgradeTimers.Upgrades[upgrade.ID] = 0;
 
 	unit.Player->AddCostsFactor(upgrade.Costs, CancelResearchCostsFactor);
-}
-
-
-/**
-**  Unit researches!
-**
-**  @param unit  Pointer of researching unit.
-*/
-void HandleActionResearch(COrder& order, CUnit &unit)
-{
-	Assert(order.Action == UnitActionResearch);
-
-	if (order.Execute(unit)) {
-		unit.ClearAction();
-	}
 }
 
 //@}

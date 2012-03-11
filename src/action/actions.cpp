@@ -41,17 +41,18 @@
 #include "stratagus.h"
 
 #include "actions.h"
-#include "video.h"
-#include "unittype.h"
+
 #include "animation.h"
-#include "player.h"
-#include "unit.h"
-#include "missile.h"
-#include "interface.h"
+#include "commands.h"
 #include "map.h"
+#include "missile.h"
+#include "pathfinder.h"
+#include "player.h"
 #include "sound.h"
 #include "spells.h"
-#include "commands.h"
+#include "unit.h"
+#include "unittype.h"
+#include "video.h"
 
 //SpawnMissile flags
 #define ANIM_SM_DAMAGE 1
@@ -83,525 +84,9 @@
 unsigned SyncHash; /// Hash calculated to find sync failures
 
 
-extern void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type);
-
-
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
-
-/* static */ COrder* COrder::NewActionAttack(const CUnit &attacker, CUnit &target)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionAttack;
-
-	if (target.Destroyed) {
-		order->goalPos = target.tilePos + target.Type->GetHalfTileSize();
-	} else {
-		// Removed, Dying handled by action routine.
-		order->SetGoal(&target);
-		order->Range = attacker.Stats->Variables[ATTACKRANGE_INDEX].Max;
-		order->MinRange = attacker.Type->MinAttackRange;
-	}
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionAttack(const CUnit &attacker, const Vec2i &dest)
-{
-	Assert(Map.Info.IsPointOnMap(dest));
-
-	COrder *order = new COrder;
-
-	order->Action = UnitActionAttack;
-
-	if (Map.WallOnMap(dest) && Map.IsFieldExplored(*attacker.Player, dest)) {
-		// FIXME: look into action_attack.cpp about this ugly problem
-		order->goalPos = dest;
-		order->Range = attacker.Stats->Variables[ATTACKRANGE_INDEX].Max;
-		order->MinRange = attacker.Type->MinAttackRange;
-	} else {
-		order->goalPos = dest;
-	}
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionAttackGround(const CUnit &attacker, const Vec2i &dest)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionAttackGround;
-	order->goalPos = dest;
-	order->Range = attacker.Stats->Variables[ATTACKRANGE_INDEX].Max;
-	order->MinRange = attacker.Type->MinAttackRange;
-
-	return order;
-}
-
-
-/* static */ COrder* COrder::NewActionBoard(CUnit &unit)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionBoard;
-	order->SetGoal(&unit);
-	order->Range = 1;
-
-	return order;
-}
-
-
-/* static */ COrder* COrder::NewActionBuild(const CUnit &builder, const Vec2i &pos, CUnitType &building)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionBuild;
-
-	order->goalPos = pos;
-	order->Width = building.TileWidth;
-	order->Height = building.TileHeight;
-	if (building.BuilderOutside) {
-		order->Range = builder.Type->RepairRange;
-	} else {
-		// If building inside, but be next to stop
-		if (building.ShoreBuilding && builder.Type->UnitType == UnitTypeLand) {
-				// Peon won't dive :-)
-			order->Range = 1;
-		}
-	}
-	order->Arg1.Type = &building;
-	if (building.BuilderOutside) {
-		order->MinRange = 1;
-	}
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionBuilt(CUnit &builder, CUnit &unit)
-{
-	COrder_Built* order = new COrder_Built();
-
-	order->Action = UnitActionBuilt;
-
-	// Make sure the bulding doesn't cancel itself out right away.
-
-	order->Data.Progress = 0;//FIXME ? 100 : 0
-	unit.Variable[HP_INDEX].Value = 1;
-	if (unit.Variable[SHIELD_INDEX].Max) {
-		unit.Variable[SHIELD_INDEX].Value = 1;
-	}
-	order->UpdateConstructionFrame(unit);
-
-	if (unit.Type->BuilderOutside == false) {
-		order->Data.Worker = &builder;
-	}
-	return order;
-}
-
-
-/* static */ COrder* COrder::NewActionDie()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionDie;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionFollow(CUnit &dest)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionFollow;
-	// Destination could be killed.
-	// Should be handled in action, but is not possible!
-	// Unit::Refs is used as timeout counter.
-	if (dest.Destroyed) {
-		order->goalPos = dest.tilePos + dest.Type->GetHalfTileSize();
-	} else {
-		order->SetGoal(&dest);
-		order->Range = 1;
-	}
-
-	return order;
-}
-
-
-/* static */ COrder* COrder::NewActionMove(const Vec2i &pos)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionMove;
-	order->goalPos = pos;
-
-	return order;
-}
-
-
-/* static */ COrder* COrder::NewActionPatrol(const Vec2i &currentPos, const Vec2i &dest)
-{
-	Assert(Map.Info.IsPointOnMap(currentPos));
-	Assert(Map.Info.IsPointOnMap(dest));
-
-	COrder *order = new COrder;
-
-	order->Action = UnitActionPatrol;
-	order->goalPos = dest;
-	order->Arg1.Patrol = currentPos;
-
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionRepair(CUnit &unit, CUnit &target)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionRepair;
-	if (target.Destroyed) {
-		order->goalPos = target.tilePos + target.Type->GetHalfTileSize();
-	} else {
-		order->SetGoal(&target);
-		order->Range = unit.Type->RepairRange;
-	}
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionRepair(const Vec2i &pos)
-{
-	Assert(Map.Info.IsPointOnMap(pos));
-
-	COrder *order = new COrder;
-
-	order->Action = UnitActionRepair;
-	order->goalPos = pos;
-	return order;
-}
-
-
-
-/* static */ COrder* COrder::NewActionResearch(CUnit &unit, CUpgrade &upgrade)
-{
-	COrder_Research *order = new COrder_Research();
-
-	order->Action = UnitActionResearch;
-
-	// FIXME: if you give quick an other order, the resources are lost!
-	unit.Player->SubCosts(upgrade.Costs);
-
-	order->SetUpgrade(upgrade);
-
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionResource(CUnit &harvester, const Vec2i &pos)
-{
-	COrder *order = new COrder;
-	Vec2i ressourceLoc;
-
-	order->Action = UnitActionResource;
-
-	//  Find the closest piece of wood next to a tile where the unit can move
-	if (!FindTerrainType(0, (harvester.Type->MovementMask), 1, 20, harvester.Player, pos, &ressourceLoc)) {
-		DebugPrint("FIXME: Give up???\n");
-	}
-	// Max Value > 1
-	if ((MyAbs(ressourceLoc.x - pos.x) | MyAbs(ressourceLoc.y - pos.y)) > 1) {
-		if (!FindTerrainType(0, MapFieldForest, 0, 20, harvester.Player, ressourceLoc, &ressourceLoc)) {
-			DebugPrint("FIXME: Give up???\n");
-		}
-	} else {
-		// The destination is next to a reachable tile.
-		ressourceLoc = pos;
-	}
-	order->goalPos = ressourceLoc;
-	order->Range = 1;
-
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionResource(CUnit &mine)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionResource;
-	order->SetGoal(&mine);
-	order->Range = 1;
-
-	return order;
-}
-
-
-
-/* static */ COrder* COrder::NewActionReturnGoods(CUnit *depot)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionReturnGoods;
-	// Destination could be killed. NETWORK!
-	if (depot && !depot->Destroyed) {
-		order->SetGoal(depot);
-	}
-	order->Range = 1;
-
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionSpellCast(SpellType &spell, const Vec2i &pos, CUnit *target)
-{
-	COrder_SpellCast *order = new COrder_SpellCast;
-
-	order->Action = UnitActionSpellCast;
-
-	order->Range = spell.Range;
-	if (target) {
-		// Destination could be killed.
-		// Should be handled in action, but is not possible!
-		// Unit::Refs is used as timeout counter.
-		if (target->Destroyed) {
-			// FIXME: where check if spell needs a unit as destination?
-			// FIXME: target->Type is now set to 0. maybe we shouldn't bother.
-			const Vec2i diag = {order->Range, order->Range};
-			order->goalPos = target->tilePos /* + target->Type->GetHalfTileSize() */ - diag;
-			order->Range <<= 1;
-		} else {
-			order->SetGoal(target);
-		}
-	} else {
-		order->goalPos = pos;
-	}
-	order->SetSpell(spell);
-
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionStandGround()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionStandGround;
-	return order;
-}
-
-
-/* static */ COrder* COrder::NewActionStill()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionStill;
-	return order;
-}
-
-
-
-
-/* static */ COrder* COrder::NewActionTrain(CUnit &trainer, CUnitType &type)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionTrain;
-	order->Arg1.Type = &type;
-	// FIXME: if you give quick an other order, the resources are lost!
-	trainer.Player->SubUnitType(type);
-
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionTransformInto(CUnitType &type)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionTransformInto;
-
-	order->Arg1.Type = &type;
-
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionUnload(const Vec2i &pos, CUnit *what)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionUnload;
-	order->goalPos = pos;
-	if (what && !what->Destroyed) {
-		order->SetGoal(what);
-	}
-
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionUpgradeTo(CUnit &unit, CUnitType &type)
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionUpgradeTo;
-
-	// FIXME: if you give quick an other order, the resources are lost!
-	unit.Player->SubUnitType(type);
-	order->Arg1.Type = &type;
-
-	return order;
-}
-
-#if 1 // currently needed for parsing
-/* static */ COrder* COrder::NewActionAttack()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionAttack;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionAttackGround()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionAttackGround;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionBoard()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionBoard;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionBuild()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionBuild;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionBuilt()
-{
-	COrder *order = new COrder_Built;
-
-	order->Action = UnitActionBuilt;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionFollow()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionFollow;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionMove()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionMove;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionPatrol()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionPatrol;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionRepair()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionRepair;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionResearch()
-{
-	COrder_Research *order = new COrder_Research;
-
-	order->Action = UnitActionResearch;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionResource()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionResource;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionReturnGoods()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionReturnGoods;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionSpellCast()
-{
-	COrder *order = new COrder_SpellCast;
-
-	order->Action = UnitActionSpellCast;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionTrain()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionTrain;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionTransformInto()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionTransformInto;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionUnload()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionUnload;
-	return order;
-}
-
-/* static */ COrder* COrder::NewActionUpgradeTo()
-{
-	COrder *order = new COrder;
-
-	order->Action = UnitActionUpgradeTo;
-	return order;
-}
-
-#endif
-
-
-
-COrder* COrder::Clone() const
-{
-	COrder *clone = new COrder();
-
-	clone->Action = this->Action;
-	clone->Range = this->Range;
-	clone->MinRange = this->MinRange;
-	clone->Width = this->Width;
-	clone->Height = this->Height;
-	clone->CurrentResource = this->CurrentResource;
-	clone->SetGoal(this->Goal);
-	clone->goalPos = this->goalPos;
-	memcpy(&clone->Arg1, &this->Arg1, sizeof (clone->Arg1));
-	memcpy(&clone->Data, &this->Data, sizeof (clone->Data));
-	//FIXME: Hardcoded wood
-	if (clone->Action == UnitActionResource && clone->Arg1.Resource.Mine) {
-		clone->Arg1.Resource.Mine->RefsIncrease();
-	}
-	return clone;
-}
 
 COrder::~COrder()
 {
@@ -609,47 +94,6 @@ COrder::~COrder()
 		Goal->RefsDecrease();
 		Goal = NoUnitP;
 	}
-	if (Action == UnitActionResource && Arg1.Resource.Mine) {
-		Arg1.Resource.Mine->RefsDecrease();
-		Arg1.Resource.Mine = NoUnitP;
-	}
-}
-
-void COrder::ReleaseRefs(CUnit &unit)
-{
-	// Release pending references.
-	if (this->Action == UnitActionResource) {
-		CUnit *mine = this->Arg1.Resource.Mine;
-
-		if (mine) {
-			unit.DeAssignWorkerFromMine(*mine);
-			mine->RefsDecrease();
-			this->Arg1.Resource.Mine = NULL;
-
-		}
-	}
-	if (this->HasGoal()) {
-		// If mining decrease the active count on the resource.
-		if (this->Action == UnitActionResource) {
-			if (unit.SubAction == 60 /* SUB_GATHER_RESOURCE */ ) {
-				CUnit *goal = this->GetGoal();
-
-				goal->Resource.Active--;
-				Assert(goal->Resource.Active >= 0);
-			}
-		}
-		// Still shouldn't have a reference unless attacking
-		Assert(!(this->Action == UnitActionStill && !unit.SubAction));
-		this->ClearGoal();
-	}
-#ifdef DEBUG
-	 else {
-		if (unit.CurrentResource &&
-			!unit.Type->ResInfo[unit.CurrentResource]->TerrainHarvester) {
-			Assert(this->Action != UnitActionResource);
-		}
-	}
-#endif
 }
 
 void COrder::SetGoal(CUnit *const new_goal)
@@ -671,10 +115,16 @@ void COrder::ClearGoal()
 	Goal = NULL;
 }
 
-
-bool COrder::CheckRange() const
+void COrder::UpdatePathFinderData_NotCalled(PathFinderInput& input)
 {
-	return (Range <= Map.Info.MapWidth || Range <= Map.Info.MapHeight);
+	Assert(false); // should not be called.
+
+	// Don't move
+	input.SetMinRange(0);
+	input.SetMaxRange(0);
+	const Vec2i tileSize = {0, 0};
+	input.SetGoal(input.GetUnit()->tilePos, tileSize);
+
 }
 
 /* virtual */ void COrder::FillSeenValues(CUnit &unit) const
@@ -686,51 +136,8 @@ bool COrder::CheckRange() const
 	unit.Seen.CFrame = NULL;
 }
 
-bool COrder::OnAiHitUnit(CUnit &unit, CUnit *attacker, int /*damage*/)
+/* virtual */ bool COrder::OnAiHitUnit(CUnit &unit, CUnit *attacker, int /*damage*/)
 {
-	Assert(unit.CurrentOrder() == this);
-
-	switch (Action) {
-		case UnitActionTrain:
-		case UnitActionUpgradeTo:
-		case UnitActionResearch:
-		case UnitActionBuilt:
-		case UnitActionBuild:
-		case UnitActionTransformInto:
-		case UnitActionBoard:
-		case UnitActionUnload:
-		case UnitActionReturnGoods:
-			// Unit is working ?
-			// Maybe AI should cancel action and save resources ???
-			return true;
-		case UnitActionResource:
-			if (unit.SubAction >= 65) {
-				//Normal return to depot
-				return true;
-			}
-			if (unit.SubAction > 55  &&
-				unit.ResourcesHeld > 0) {
-				//escape to Depot with this what you have;
-				Data.ResWorker.DoneHarvesting = 1;
-				return true;
-			}
-		break;
-		case UnitActionAttack:
-		{
-			CUnit *goal = GetGoal();
-			if (goal) {
-				if (goal == attacker ||
-					(goal->CurrentAction() == UnitActionAttack &&
-					goal->CurrentOrder()->GetGoal() == &unit))
-				{
-					//we already fight with one of attackers;
-					return true;
-				}
-			}
-		}
-		default:
-		break;
-	}
 	return false;
 }
 
@@ -738,25 +145,12 @@ bool COrder::OnAiHitUnit(CUnit &unit, CUnit *attacker, int /*damage*/)
 /** Called when unit is killed.
 **  warn the AI module.
 */
-void COrder::AiUnitKilled(CUnit& unit)
+/* virtual */ void COrder::AiUnitKilled(CUnit& unit)
 {
 	switch (Action) {
 		case UnitActionStill:
 		case UnitActionAttack:
 		case UnitActionMove:
-			break;
-		case UnitActionBuilt:
-			DebugPrint("%d: %d(%s) killed, under construction!\n" _C_
-				unit.Player->Index _C_ UnitNumber(unit) _C_ unit.Type->Ident.c_str());
-			AiReduceMadeInBuilt(*unit.Player->Ai, *unit.Type);
-			break;
-		case UnitActionBuild:
-			DebugPrint("%d: %d(%s) killed, with order %s!\n" _C_
-				unit.Player->Index _C_ UnitNumber(unit) _C_
-				unit.Type->Ident.c_str() _C_ Arg1.Type->Ident.c_str());
-			if (!HasGoal()) {
-				AiReduceMadeInBuilt(*unit.Player->Ai, *Arg1.Type);
-			}
 			break;
 		default:
 			DebugPrint("FIXME: %d: %d(%s) killed, with order %d!\n" _C_
@@ -771,10 +165,18 @@ void COrder::AiUnitKilled(CUnit& unit)
 */
 /* virtual */ void COrder::OnAnimationAttack(CUnit &unit)
 {
-	Assert(unit.CurrentOrder() == this);
+	if (unit.Type->CanAttack == false) {
+		return;
+	}
+	CUnit* goal = AttackUnitsInRange(unit);
 
-	FireMissile(unit);
-	UnHideUnit(unit); // unit is invisible until attacks
+	if (goal != NULL) {
+		const Vec2i invalidPos = {-1, -1};
+
+		FireMissile(unit, goal, invalidPos);
+		UnHideUnit(unit); // unit is invisible until attacks
+	}
+	// Fixme : Auto select position to attack ?
 }
 
 /*----------------------------------------------------------------------------
@@ -1058,7 +460,13 @@ int ParseAnimInt(CUnit *unit, const char *parseint)
 		}
 		return GetPlayerData(ParseAnimPlayer(*unit, cur), next + 1, arg + 1);
 	} else if (s[0] == 'r') { //random value
-		return SyncRand(atoi(cur));
+		char* next = strchr(cur, '.');
+		if (next == NULL) {
+			return SyncRand(atoi(cur));
+		} else {
+			*next = '\0';
+			return atoi(cur) + SyncRand(atoi(next + 1));
+		}
 	}
 	return atoi(parseint);
 }
@@ -1230,19 +638,19 @@ int UnitShowAnimationScaled(CUnit &unit, const CAnimation *anim, int scale)
 					CUnit &target = *goal->CurrentOrder()->GetGoal();
 
 					if (flags & ANIM_SM_PIXEL) {
-						dest.x = target.tilePos.x * PixelTileSize.x + target.IX;
-						dest.y = target.tilePos.y * PixelTileSize.y + target.IY;
+						dest.x = target.tilePos.x * PixelTileSize.x + target.IX + destx;
+						dest.y = target.tilePos.y * PixelTileSize.y + target.IY + desty;
 					} else {
-						dest.x = target.tilePos.x * PixelTileSize.x + PixelTileSize.x / 2;
-						dest.y = target.tilePos.y * PixelTileSize.y + PixelTileSize.y / 2;
+						dest.x = (target.tilePos.x + destx) * PixelTileSize.x + target.Type->TileWidth * PixelTileSize.x / 2;
+						dest.y = (target.tilePos.y + desty) * PixelTileSize.y + target.Type->TileHeight * PixelTileSize.y / 2;
 					}
 				} else {
 					if ((flags & ANIM_SM_PIXEL)) {
 						dest.x = goal->tilePos.x * PixelTileSize.x + goal->IX + destx;
 						dest.y = goal->tilePos.y * PixelTileSize.y + goal->IY + desty;
 					} else {
-						dest.x = (unit.tilePos.x + destx) * PixelTileSize.x + PixelTileSize.x / 2;
-						dest.y = (unit.tilePos.y + desty) * PixelTileSize.y + PixelTileSize.y / 2;
+						dest.x = (goal->tilePos.x + destx) * PixelTileSize.x + goal->Type->TileWidth * PixelTileSize.x / 2;
+						dest.y = (goal->tilePos.y + desty) * PixelTileSize.y + goal->Type->TileHeight * PixelTileSize.y / 2;
 					}
 				}
 				const int dist = goal->MapDistanceTo(dest.x, dest.y);
@@ -1254,7 +662,7 @@ int UnitShowAnimationScaled(CUnit &unit, const CAnimation *anim, int scale)
 					if (flags & ANIM_SM_DAMAGE) {
 						missile->SourceUnit = &unit;
 					}
-					if ((flags & ANIM_SM_TOTARGET) && unit.CurrentOrder()->HasGoal()) {
+					if ((flags & ANIM_SM_TOTARGET) && goal->CurrentOrder()->HasGoal()) {
 						missile->TargetUnit = goal->CurrentOrder()->GetGoal();
 					} else {
 						missile->TargetUnit = goal;
@@ -1272,12 +680,12 @@ int UnitShowAnimationScaled(CUnit &unit, const CAnimation *anim, int scale)
 				const Vec2i pos = { unit.tilePos.x + offX, unit.tilePos.y + offY};
 				CUnitType *type = UnitTypeByIdent(unit.Anim.Anim->D.SpawnUnit.Unit);
 				Vec2i resPos;
-				//DebugPrint("Creating a %s\n" _C_ unittype.Name.c_str());
+				DebugPrint("Creating a %s\n" _C_ type->Name.c_str());
 				FindNearestDrop(*type, pos, resPos, LookingW);
 				if (MapDistance(pos, resPos) <= range) {
 					CUnit *target = MakeUnit(*type, &player);
 					if (target != NoUnitP) {
-						target->tilePos = pos;
+						target->tilePos = resPos;
 						target->Place(resPos);
 						//DropOutOnSide(*target, LookingW, NULL);
 					} else {
@@ -1504,140 +912,6 @@ int UnitShowAnimationScaled(CUnit &unit, const CAnimation *anim, int scale)
 ----------------------------------------------------------------------------*/
 
 /**
-**  Unit does nothing!
-**
-**  @param unit  Unit pointer for none action.
-*/
-static void HandleActionNone(COrder&, CUnit &unit)
-{
-	DebugPrint("FIXME: Should not happen!\n");
-	DebugPrint("FIXME: Unit (%d) %s has action none.!\n" _C_
-		UnitNumber(unit) _C_ unit.Type->Ident.c_str());
-}
-
-/**
-**  Unit has not written function.
-**
-**  @param unit  Unit pointer for not written action.
-*/
-static void HandleActionNotWritten(COrder&, CUnit &unit)
-{
-	DebugPrint("FIXME: Not written!\n");
-	DebugPrint("FIXME: Unit (%d) %s has action %d.!\n" _C_
-		UnitNumber(unit) _C_ unit.Type->Ident.c_str() _C_ unit.CurrentAction());
-}
-
-/**
-**  Jump table for actions.
-**
-**  @note can move function into unit structure.
-*/
-static void (*HandleActionTable[256])(COrder&, CUnit &) = {
-	HandleActionNone,
-	HandleActionStill,
-	HandleActionStandGround,
-	HandleActionFollow,
-	HandleActionMove,
-	HandleActionAttack,
-	HandleActionAttack, // HandleActionAttackGround,
-	HandleActionDie,
-	HandleActionSpellCast,
-	HandleActionTrain,
-	HandleActionUpgradeTo,
-	HandleActionResearch,
-	HandleActionBuilt,
-	HandleActionBoard,
-	HandleActionUnload,
-	HandleActionPatrol,
-	HandleActionBuild,
-	HandleActionRepair,
-	HandleActionResource,
-	HandleActionReturnGoods,
-	HandleActionTransformInto,
-	HandleActionNotWritten,
-
-	// Enough for the future ?
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-	HandleActionNotWritten, HandleActionNotWritten, HandleActionNotWritten,
-};
-
-/**
 **  Increment a unit's health
 **
 **  @param unit  the unit to operate on
@@ -1717,11 +991,6 @@ static void HandleBuffs(CUnit &unit, int amount)
 	}
 }
 
-static void RunAction(COrder &order, CUnit &unit)
-{
-	HandleActionTable[order.Action](order, unit);
-}
-
 
 /**
 **  Handle the action of a unit.
@@ -1733,43 +1002,42 @@ static void HandleUnitAction(CUnit &unit)
 	// If current action is breakable proceed with next one.
 	if (!unit.Anim.Unbreakable) {
 		if (unit.CriticalOrder != NULL) {
-			RunAction(*unit.CriticalOrder, unit);
+			unit.CriticalOrder->Execute(unit);
 			delete unit.CriticalOrder;
 			unit.CriticalOrder = NULL;
 		}
 
+		if (unit.Orders[0]->Finished && unit.Orders[0]->Action != UnitActionStill
+			&& unit.Orders.size() == 1) {
+
+			delete unit.Orders[0];
+			unit.Orders[0] = COrder::NewActionStill();
+			unit.State = 0;
+			if (IsOnlySelected(unit)) { // update display for new action
+				SelectedUnitChanged();
+			}
+		}
+
 		// o Look if we have a new order and old finished.
 		// o Or the order queue should be flushed.
-		if (unit.Orders.size() > 1
-			&& (unit.CurrentAction() == UnitActionStill || unit.OrderFlush)) {
-
+		if (unit.Orders[0]->Finished && unit.Orders.size() > 1) {
 			if (unit.Removed) { // FIXME: johns I see this as an error
 				DebugPrint("Flushing removed unit\n");
 				// This happens, if building with ALT+SHIFT.
 				return;
 			}
-			COrderPtr order = unit.CurrentOrder();
 
-			order->ReleaseRefs(unit);
-
-			unit.OrderFlush = 0;
 			delete unit.Orders[0];
 			unit.Orders.erase(unit.Orders.begin());
 
-			//
-			// Note subaction 0 should reset.
-			//
-			unit.SubAction = unit.State = 0;
+			unit.State = 0;
 			unit.Wait = 0;
-
 			if (IsOnlySelected(unit)) { // update display for new action
 				SelectedUnitChanged();
 			}
 		}
 	}
-
-	// Select action.
-	RunAction(*unit.CurrentOrder(), unit);
+	unit.Orders[0]->Execute(unit);
 }
 
 /**
@@ -1913,7 +1181,7 @@ void UnitActions()
 		SyncHash = (SyncHash << 5) | (SyncHash >> 27);
 		SyncHash ^= unit.Orders.size() > 0 ? unit.CurrentAction() << 18 : 0;
 		SyncHash ^= unit.State << 12;
-		SyncHash ^= unit.SubAction << 6;
+//		SyncHash ^= unit.SubAction << 6;
 		SyncHash ^= unit.Refs << 3;
 	}
 }

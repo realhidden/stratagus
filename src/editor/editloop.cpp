@@ -318,6 +318,8 @@ void EditTiles(const Vec2i &pos, int tile, int size)
 */
 static void EditorActionPlaceUnit(const Vec2i &pos, CUnitType &type, CPlayer *player)
 {
+	Assert(Map.Info.IsPointOnMap(pos));
+
 	if (type.Neutral) {
 		player = &Players[PlayerNumNeutral];
 	}
@@ -331,21 +333,17 @@ static void EditorActionPlaceUnit(const Vec2i &pos, CUnitType &type, CPlayer *pl
 
 	CBuildRestrictionOnTop *b = OnTopDetails(*unit, NULL);
 	if (b && b->ReplaceOnBuild) {
-		CUnit *table[UnitMax];
+		CUnitCache &unitCache = Map.Field(pos)->UnitCache;
+		CUnitCache::iterator it = std::find_if(unitCache.begin(), unitCache.end(), HasSameTypeAs(*b->Parent));
 
-		//FIXME: rb: use tile functor find here.
-		int n = Map.Select(pos, table);
-		while (n--) {
-			if (table[n]->Type == b->Parent) {
-				unit->ResourcesHeld = table[n]->ResourcesHeld; // We capture the value of what is beneath.
-				table[n]->Remove(NULL); // Destroy building beneath
-				UnitLost(*table[n]);
-				UnitClearOrders(*table[n]);
-				table[n]->Release();
-				break;
-			}
+		if (it != unitCache.end()) {
+			CUnit &replacedUnit = **it;
+			unit->ResourcesHeld = replacedUnit.ResourcesHeld; // We capture the value of what is beneath.
+			replacedUnit.Remove(NULL); // Destroy building beneath
+			UnitLost(replacedUnit);
+			UnitClearOrders(replacedUnit);
+			replacedUnit.Release();
 		}
-
 	}
 	if (unit != NoUnitP) {
 		if (type.GivesResource) {
@@ -804,14 +802,14 @@ static void DrawEditorPanel()
 	icon = Editor.Select.Icon;
 	Assert(icon);
 	// FIXME: wrong button style
-	icon->DrawUnitIcon(Players, UI.SingleSelectedButton->Style,
+	icon->DrawUnitIcon(UI.SingleSelectedButton->Style,
 		(ButtonUnderCursor == SelectButton ? IconActive : 0) |
 			(Editor.State == EditorSelecting ? IconSelected : 0),
 		x, y, "");
 	icon = Editor.Units.Icon;
 	Assert(icon);
 	// FIXME: wrong button style
-	icon->DrawUnitIcon(Players, UI.SingleSelectedButton->Style,
+	icon->DrawUnitIcon(UI.SingleSelectedButton->Style,
 		(ButtonUnderCursor == UnitButton ? IconActive : 0) |
 			(Editor.State == EditorEditUnit ? IconSelected : 0),
 		x + UNIT_ICON_X, y + UNIT_ICON_Y, "");
@@ -825,7 +823,7 @@ static void DrawEditorPanel()
 	if (Editor.StartUnit) {
 		icon = Editor.StartUnit->Icon.Icon;
 		Assert(icon);
-		icon->DrawUnitIcon(Players, UI.SingleSelectedButton->Style,
+		icon->DrawUnitIcon(UI.SingleSelectedButton->Style,
 			(ButtonUnderCursor == StartButton ? IconActive : 0) |
 				(Editor.State == EditorSetStartLocation ? IconSelected : 0),
 			x + START_ICON_X, y + START_ICON_Y, "");
@@ -839,8 +837,15 @@ static void DrawEditorPanel()
 			Video.DrawRectangleClip(ColorGray, x - 1, y - 1, IconHeight, IconHeight);
 		}
 		Video.FillRectangleClip(ColorBlack, x, y, IconHeight - 2, IconHeight - 2);
-		Video.DrawLineClip(PlayerColors[Editor.SelectedPlayer][0], x, y, x + IconHeight - 2, y + IconHeight - 2);
-		Video.DrawLineClip(PlayerColors[Editor.SelectedPlayer][0], x, y + IconHeight - 2, x + IconHeight - 2, y);
+
+		const PixelPos lt = {x, y};
+		const PixelPos lb = {x, y + IconHeight - 2};
+		const PixelPos rt = {x + IconHeight - 2, y};
+		const PixelPos rb = {x + IconHeight - 2, y + IconHeight - 2};
+		const Uint32 color = PlayerColors[Editor.SelectedPlayer][0];
+
+		Video.DrawLineClip(color, lt, rb);
+		Video.DrawLineClip(color, rt, lb);
 		PopClipping();
 	}
 
@@ -941,19 +946,19 @@ static void DrawStartLocations()
 
 		for (int i = 0; i < PlayerMax; i++) {
 			if (Map.Info.PlayerType[i] != PlayerNobody && Map.Info.PlayerType[i] != PlayerNeutral) {
-				const Vec2i startTilePos = {Players[i].StartX, Players[i].StartY};
-				const PixelPos startScreenPos = vp->TilePosToScreen_TopLeft(startTilePos);
+				const PixelPos startScreenPos = vp->TilePosToScreen_TopLeft(Players[i].StartPos);
 
 				if (type) {
 					DrawUnitType(*type, type->Sprite, i, 0, startScreenPos.x, startScreenPos.y);
 				} else { // Draw a cross
-					const int x = startScreenPos.x;
-					const int y = startScreenPos.y;
-					const int w = PixelTileSize.x;
-					const int h = PixelTileSize.y;
+					const PixelPos lt = startScreenPos;
+					const PixelPos lb = {startScreenPos.x, startScreenPos.y + PixelTileSize.y};
+					const PixelPos rt = {startScreenPos.x + PixelTileSize.x, startScreenPos.y};
+					const PixelPos rb = startScreenPos + PixelTileSize;
+					const Uint32 color = PlayerColors[i][0];
 
-					Video.DrawLineClip(PlayerColors[i][0], x, y, x + w, y + h);
-					Video.DrawLineClip(PlayerColors[i][0], x, y + h, x + w, y);
+					Video.DrawLineClip(color, lt, rb);
+					Video.DrawLineClip(color, lb, rt);
 				}
 			}
 		}
@@ -1336,8 +1341,7 @@ static void EditorCallbackButtonDown(unsigned button)
 					}
 				}
 			} else if (Editor.State == EditorSetStartLocation) {
-				Players[Editor.SelectedPlayer].StartX = tilePos.x;
-				Players[Editor.SelectedPlayer].StartY = tilePos.y;
+				Players[Editor.SelectedPlayer].StartPos = tilePos;
 			}
 		} else if (MouseButtons & MiddleButton) {
 			// enter move map mode

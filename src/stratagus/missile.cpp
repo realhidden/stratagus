@@ -375,30 +375,33 @@ static PixelPos GetPixelPosFromCenterTile(const Vec2i& tilePos)
 **
 **  @param unit  Unit that fires the missile.
 */
-void FireMissile(CUnit &unit)
-{
-	CUnit *goal = unit.CurrentOrder()->GetGoal();
-
+void FireMissile(CUnit &unit, CUnit *goal, const Vec2i& goalPos)
+{	
+	Vec2i newgoalPos = goalPos;
 	// Goal dead?
 	if (goal) {
-		// Better let the caller/action handle this.
-		if (goal->Destroyed) {
-			DebugPrint("destroyed unit\n");
-			return;
+		Assert(!unit.Type->Missile.Missile->AlwaysFire || unit.Type->Missile.Missile->Range);
+		bool dead = goal->Destroyed || goal->Removed || goal->CurrentAction() == UnitActionDie;
+		if (!unit.Type->Missile.Missile->AlwaysFire) {
+			// Better let the caller/action handle this.
+			if ( goal->Destroyed) {
+				DebugPrint("destroyed unit\n");
+				return;
+			}
+			if (goal->Removed || goal->CurrentAction() == UnitActionDie) {
+				return;
+			}
+		} else if (dead) {
+			newgoalPos = goal->tilePos;
+			goal = NoUnitP;
 		}
-		if (goal->Removed || goal->CurrentAction() == UnitActionDie) {
-			return;
-		}
-		// FIXME: Some missile hit the field of the target and all units on it.
-		// FIXME: goal is already dead, but missile could hit others?
+
 	}
 
 	// No missile hits immediately!
 	if (unit.Type->Missile.Missile->Class == MissileClassNone) {
 		// No goal, take target coordinates
 		if (!goal) {
-			const Vec2i& goalPos = unit.CurrentOrder()->goalPos;
-
 			if (Map.WallOnMap(goalPos)) {
 				if (Map.HumanWallOnMap(goalPos)) {
 					Map.HitWall(goalPos,
@@ -437,7 +440,7 @@ void FireMissile(CUnit &unit)
 		// If Firing from inside a Bunker
 		NearestOfUnit(*goal, GetFirstContainer(unit)->tilePos, &dpos);
 	} else {
-		dpos = unit.CurrentOrder()->goalPos;
+		dpos = newgoalPos;
 		// FIXME: Can this be too near??
 	}
 
@@ -943,11 +946,11 @@ static void MissileHit(Missile &missile)
 		//
 		// Hits all units in range.
 		//
-		const int range = mtype.Range;
-		CUnit *table[UnitMax];
-		const int n = Map.Select(pos.x - range + 1, pos.y - range + 1, pos.x + range, pos.y + range, table);
+		const Vec2i range = {mtype.Range - 1, mtype.Range - 1};
+		std::vector<CUnit *> table;
+		Map.Select(pos - range, pos + range, table);
 		Assert(missile.SourceUnit != NULL);
-		for (int i = 0; i < n; ++i) {
+		for (size_t i = 0; i != table.size(); ++i) {
 			CUnit &goal = *table[i];
 			//
 			// Can the unit attack the this unit-type?
@@ -955,10 +958,14 @@ static void MissileHit(Missile &missile)
 			// Also check CorrectSphashDamage so land explosions can't hit the air units
 			//
 			if (CanTarget(missile.SourceUnit->Type, goal.Type)
-				&& (mtype.CorrectSphashDamage == false
-					|| goal.Type->UnitType == missile.TargetUnit->Type->UnitType)
+				&& ((missile.SourceUnit->CurrentOrder()->Action != UnitActionAttackGround &&
+						(mtype.CorrectSphashDamage == false 
+						|| goal.Type->UnitType == missile.TargetUnit->Type->UnitType))
+					|| (missile.SourceUnit->CurrentOrder()->Action == UnitActionAttackGround &&
+						(mtype.CorrectSphashDamage == false 
+						|| goal.Type->UnitType == missile.SourceUnit->Type->UnitType)))
 				&& (mtype.FriendlyFire == false
-					|| (missile.TargetUnit->Player->Index != missile.SourceUnit->Player->Index))) {
+					|| (goal.Player->Index != missile.SourceUnit->Player->Index))) {
 				int splash = goal.MapDistanceTo(pos.x, pos.y);
 
 				if (splash) {
@@ -1273,7 +1280,7 @@ MissileType::MissileType(const std::string &ident) :
 	Ident(ident), Transparency(0),
 	DrawLevel(0), SpriteFrames(0), NumDirections(0),
 	CorrectSphashDamage(false), Flip(false), CanHitOwner(false), FriendlyFire(false),
-	Class(), NumBounces(0), StartDelay(0), Sleep(0), Speed(0),
+	AlwaysFire(false), Class(), NumBounces(0), StartDelay(0), Sleep(0), Speed(0),
 	Range(0), SplashFactor(0), ImpactMissile(NULL),
 	SmokeMissile(NULL), ImpactParticle(NULL), G(NULL)
 {
@@ -1574,13 +1581,9 @@ void MissileFlameShield::Action()
 		return;
 	}
 
-	CUnit* table[UnitMax];
-	const int n = Map.Select(upos.x - 1, upos.y - 1, upos.x + 1 + 1, upos.y + 1 + 1, table);
-	for (int i = 0; i < n; ++i) {
-		if (table[i] == unit) {
-			// cannot hit target unit
-			continue;
-		}
+	std::vector<CUnit*> table;
+	Map.SelectAroundUnit(*unit, 1, table);
+	for (size_t i = 0; i != table.size(); ++i) {
 		if (table[i]->CurrentAction() != UnitActionDie) {
 			HitUnit(this->SourceUnit, *table[i], this->Damage);
 		}
@@ -1745,34 +1748,25 @@ void MissileDeathCoil::Action()
 			//
 			// No target unit -- try enemies in range 5x5 // Must be parametrable
 			//
-			int ec = 0;  // enemy count
-			CUnit* table[UnitMax];
-			const int x = this->destination.x / PixelTileSize.x;
-			const int y = this->destination.y / PixelTileSize.y;
-			const int n = Map.Select(x - 2, y - 2, x + 2 + 1, y + 2 + 1, table);
+			std::vector<CUnit*> table;
+			const Vec2i destPos = {this->destination.x / PixelTileSize.x, this->destination.y / PixelTileSize.y};
+			const Vec2i range = {2, 2};
+			Map.Select(destPos - range, destPos + range, table, IsEnemyWith(*source.Player));
 
-			if (n == 0) {
+			if (table.empty()) {
 				return;
 			}
-			// calculate organic enemy count
-			for (int i = 0; i < n; ++i) {
-				ec += (source.IsEnemy(*table[i])
-				/*&& table[i]->Type->Organic != 0*/);
+			const size_t n = table.size();  // enemy count
+			const int damage = std::min<int>(1, this->Damage / n);
+
+			// disperse damage between them
+			for (size_t i = 0; i != n; ++i) {
+				HitUnit(&source, *table[i], damage);
 			}
-			if (ec > 0)  {
-				// yes organic enemies found
-				for (int i = 0; i < n; ++i) {
-					if (source.IsEnemy(*table[i])/* && table[i]->Type->Organic != 0*/) {
-						// disperse damage between them
-						// NOTE: 1 is the minimal damage
-						HitUnit(&source, *table[i], this->Damage / ec);
-					}
-				}
-				if (source.CurrentAction() != UnitActionDie) {
-					source.Variable[HP_INDEX].Value += this->Damage;
-					if (source.Variable[HP_INDEX].Value > source.Variable[HP_INDEX].Max) {
-						source.Variable[HP_INDEX].Value = source.Variable[HP_INDEX].Max;
-					}
+			if (source.CurrentAction() != UnitActionDie) {
+				source.Variable[HP_INDEX].Value += this->Damage;
+				if (source.Variable[HP_INDEX].Value > source.Variable[HP_INDEX].Max) {
+					source.Variable[HP_INDEX].Value = source.Variable[HP_INDEX].Max;
 				}
 			}
 		}

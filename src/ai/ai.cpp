@@ -146,6 +146,7 @@
 #include "ai.h"
 #include "ai_local.h"
 
+#include "action/action_attack.h"
 #include "player.h"
 #include "unit.h"
 #include "unittype.h"
@@ -281,7 +282,7 @@ static void SaveAiPlayer(CFile &file, int plynr, const PlayerAi &ai)
 
 	//  All forces
 	for (size_t i = 0; i < ai.Force.Size(); ++i) {
-		file.printf("  \"force\", {%d, %s%s%s", i,
+		file.printf("  \"force\", {%d, %s%s%s", (int) i,
 			ai.Force[i].Completed ? "\"complete\"," : "\"recruit\",",
 			ai.Force[i].Attacking ? " \"attack\"," : "",
 			ai.Force[i].Defending ? " \"defend\"," : "");
@@ -418,29 +419,19 @@ static void SaveAiPlayer(CFile &file, int plynr, const PlayerAi &ai)
 }
 
 /**
-**  Save state of player AIs.
-**
-**  @param file  Output file.
-*/
-static void SaveAiPlayers(CFile &file)
-{
-	for (int p = 0; p < PlayerMax; ++p) {
-		if (Players[p].Ai) {
-			SaveAiPlayer(file, p, *Players[p].Ai);
-		}
-	}
-}
-
-/**
 **  Save state of AI to file.
 **
 **  @param file  Output file.
 */
-void SaveAi(CFile *file)
+void SaveAi(CFile &file)
 {
-	file->printf("\n--- -----------------------------------------\n");
+	file.printf("\n--- -----------------------------------------\n");
 
-	SaveAiPlayers(*file);
+	for (int i = 0; i < PlayerMax; ++i) {
+		if (Players[i].Ai) {
+			SaveAiPlayer(file, i, *Players[i].Ai);
+		}
+	}
 
 	DebugPrint("FIXME: Saving lua function definition isn't supported\n");
 }
@@ -450,7 +441,7 @@ void SaveAi(CFile *file)
 **
 **  @param player  The player structure pointer.
 */
-void AiInit(CPlayer *player)
+void AiInit(CPlayer &player)
 {
 	PlayerAi *pai = new PlayerAi;
 
@@ -459,11 +450,9 @@ void AiInit(CPlayer *player)
 		exit(0);
 	}
 
-	pai->Player = player;
-	CAiType *ait = NULL;
+	pai->Player = &player;
 
-	DebugPrint("%d - %p - looking for class %s\n" _C_
-		player->Index _C_ (void *)player _C_ player->AiName.c_str());
+	DebugPrint("%d - looking for class %s\n" _C_ player.Index _C_ player.AiName.c_str());
 	//MAPTODO print the player name (player->Name) instead of the pointer
 
 	//  Search correct AI type.
@@ -472,29 +461,30 @@ void AiInit(CPlayer *player)
 		DebugPrint("AI: Look at the DefineAi() documentation.\n");
 		Exit(0);
 	}
-	int i;
+	size_t i;
+	CAiType *ait = NULL;
 
-	for (i = 0; i < (int)AiTypes.size(); ++i) {
+	for (i = 0; i < AiTypes.size(); ++i) {
 		ait = AiTypes[i];
-		if (!ait->Race.empty() && ait->Race != PlayerRaces.Name[player->Race]) {
+		if (!ait->Race.empty() && ait->Race != PlayerRaces.Name[player.Race]) {
 			continue;
 		}
-		if (!player->AiName.empty() && ait->Class != player->AiName) {
+		if (!player.AiName.empty() && ait->Class != player.AiName) {
 			continue;
 		}
 		break;
 	}
-	if (i == (int)AiTypes.size()) {
+	if (i == AiTypes.size()) {
 		DebugPrint("AI: Found no matching ai scripts at all!\n");
 		// FIXME: surely we can do something better than exit
 		exit(0);
 	}
-	if (player->AiName.empty()) {
+	if (player.AiName.empty()) {
 		DebugPrint("AI: not found!!!!!!!!!!\n");
 		DebugPrint("AI: Using fallback:\n");
 	}
-	DebugPrint("AI: %s:%s with %s:%s\n" _C_ PlayerRaces.Name[player->Race].c_str() _C_
-		!ait->Race.empty() ? ait->Race.c_str() : "All" _C_ player->AiName.c_str() _C_ ait->Class.c_str());
+	DebugPrint("AI: %s:%s with %s:%s\n" _C_ PlayerRaces.Name[player.Race].c_str() _C_
+		!ait->Race.empty() ? ait->Race.c_str() : "All" _C_ player.AiName.c_str() _C_ ait->Class.c_str());
 
 	pai->AiType = ait;
 	pai->Script = ait->Script;
@@ -503,7 +493,7 @@ void AiInit(CPlayer *player)
 	pai->Collect[WoodCost] = 50;
 	pai->Collect[OilCost] = 0;
 
-	player->Ai = pai;
+	player.Ai = pai;
 }
 
 /**
@@ -707,23 +697,30 @@ void AiHelpMe(const CUnit *attacker, CUnit &defender)
 			// if brother is idle or attack no-agressive target and
 			// can attack our attacker then ask for help
 			// FIXME ad support for help from Coward type units
-			if (aiunit.IsAgressive() && (aiunit.IsIdle() ||
-				!(aiunit.CurrentAction() == UnitActionAttack &&
-				aiunit.CurrentOrder()->HasGoal() &&
-				aiunit.CurrentOrder()->GetGoal()->IsAgressive()))
-				&& CanTarget(aiunit.Type, attacker->Type)) {
-				CommandAttack(aiunit, attacker->tilePos, const_cast<CUnit*>(attacker), FlushCommands);
-				if (aiunit.SavedOrder == NULL) {
-					COrder *savedOrder = COrder::NewActionAttack(aiunit, aiunit.tilePos);
+			if (aiunit.IsAgressive() && CanTarget(aiunit.Type, attacker->Type)) {
+				bool shouldAttack = aiunit.IsIdle();
 
-					if (aiunit.StoreOrder(savedOrder) == false) {
-						delete savedOrder;
-						savedOrder = NULL;
+				if (aiunit.CurrentAction() == UnitActionAttack) {
+					COrder_Attack& orderAttack = *static_cast<COrder_Attack*>(aiunit.CurrentOrder());
+
+					if (orderAttack.GetGoal() == NULL || orderAttack.GetGoal()->IsAgressive() == false) {
+						shouldAttack = true;
+					}
+				}
+
+				if (shouldAttack) {
+					CommandAttack(aiunit, attacker->tilePos, const_cast<CUnit*>(attacker), FlushCommands);
+					if (aiunit.SavedOrder == NULL) {
+						COrder *savedOrder = COrder::NewActionAttack(aiunit, aiunit.tilePos);
+
+						if (aiunit.StoreOrder(savedOrder) == false) {
+							delete savedOrder;
+							savedOrder = NULL;
+						}
 					}
 				}
 			}
 		}
-
 		if (!aiForce.Defending && aiForce.State > 0) {
 			DebugPrint("%d: %d(%s) belong to attacking force, don't defend it\n" _C_
 				defender.Player->Index _C_ UnitNumber(defender) _C_ defender.Type->Ident.c_str());
@@ -806,7 +803,7 @@ void AiWorkComplete(CUnit *unit, CUnit &what)
 **  @param unit  Pointer to unit what builds the building.
 **  @param what  Pointer to unit-type.
 */
-void AiCanNotBuild(CUnit &unit, const CUnitType &what)
+void AiCanNotBuild(const CUnit &unit, const CUnitType &what)
 {
 	DebugPrint("%d: %d(%s) Can't build %s at %d,%d\n" _C_
 		unit.Player->Index _C_ UnitNumber(unit) _C_ unit.Type->Ident.c_str() _C_
@@ -861,11 +858,8 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 		if (!blocker.IsIdle()) {
 			continue;
 		}
-		if (blocker.Player != unit.Player) {
-			// Not allied
-			if (!(blocker.Player->Allied & (1 << unit.Player->Index))) {
-				continue;
-			}
+		if (blocker.Player != unit.Player && blocker.Player->IsAllied(*unit.Player) == false) {
+			continue;
 		}
 		const CUnitType &blockertype = *blocker.Type;
 
@@ -937,29 +931,15 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 */
 void AiCanNotMove(CUnit &unit)
 {
-	Vec2i goalPos;
-	int gw, gh;
+	const Vec2i &goalPos = unit.pathFinderData->input.GetGoalPos();
+	const int minrange = unit.pathFinderData->input.GetMinRange();
+	const int maxrange = unit.pathFinderData->input.GetMaxRange();
+	const int gw = unit.pathFinderData->input.GetGoalSize().x;
+	const int gh = unit.pathFinderData->input.GetGoalSize().y;
+
 	AiPlayer = unit.Player->Ai;
-	const COrderPtr order = unit.CurrentOrder();
-	const int minrange = order->MinRange;
-	const int maxrange = order->Range;
-
-	if (order->HasGoal()) {
-		CUnit &goal = *order->GetGoal();
-		gw = goal.Type->TileWidth;
-		gh = goal.Type->TileHeight;
-		goalPos = goal.tilePos;
-	} else {
-		// Take care of non square goals :)
-		// If goal is non square, range states a non-existant goal rather
-		// than a tile.
-		gw = order->Width;
-		gh = order->Height;
-		goalPos = order->goalPos;
-	}
-
-	if (unit.Type->UnitType == UnitTypeFly ||
-			PlaceReachable(unit, goalPos.x, goalPos.y, gw, gh, minrange, maxrange)) {
+	if (unit.Type->UnitType == UnitTypeFly
+		|| PlaceReachable(unit, goalPos.x, goalPos.y, gw, gh, minrange, maxrange)) {
 		// Path probably closed by unit here
 		AiMoveUnitInTheWay(unit);
 	}
@@ -1034,9 +1014,9 @@ void AiResearchComplete(CUnit &unit, const CUpgrade *what)
 **
 **  @param player  The player structure pointer.
 */
-void AiEachCycle(CPlayer *player)
+void AiEachCycle(CPlayer &player)
 {
-	AiPlayer = player->Ai;
+	AiPlayer = player.Ai;
 }
 
 /**
@@ -1044,9 +1024,9 @@ void AiEachCycle(CPlayer *player)
 **
 **  @param player  The player structure pointer.
 */
-void AiEachSecond(CPlayer *player)
+void AiEachSecond(CPlayer &player)
 {
-	AiPlayer = player->Ai;
+	AiPlayer = player.Ai;
 #ifdef DEBUG
 	if (!AiPlayer) {
 		return;

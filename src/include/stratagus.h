@@ -97,6 +97,14 @@
 #define UNUSED(var) (var)
 #endif
 
+#ifdef __GNUC__
+#define PRINTF_VAARG_ATTRIBUTE(a, b) __attribute__((format (printf, a, b)))
+#else
+#define PRINTF_VAARG_ATTRIBUTE(a, b)
+#endif
+
+
+
 /*============================================================================
 ==  Debug definitions
 ============================================================================*/
@@ -276,7 +284,7 @@ extern void DrawMapArea();              /// Draw the map area
 extern void GameMainLoop();             /// Game main loop
 
 	/// Show load progress
-extern void ShowLoadProgress(const char *fmt, ...);
+extern void ShowLoadProgress(const char *fmt, ...) PRINTF_VAARG_ATTRIBUTE(1, 2);
 
 struct DisplayAutoLocker {
 	DisplayAutoLocker();
@@ -285,21 +293,6 @@ struct DisplayAutoLocker {
 
 extern const int CPU_NUM;
 extern bool CanAccessFile(const char *filename);
-
-/*============================================================================
-==  Misc
-============================================================================*/
-
-// @todo configurable. maybe we could move it into one big global
-// @todo settings struct?
-	/// How many resources the player gets back if canceling building
-#define CancelBuildingCostsFactor  75
-	/// How many resources the player gets back if canceling training
-#define CancelTrainingCostsFactor  100
-	/// How many resources the player gets back if canceling research
-#define CancelResearchCostsFactor  100
-	/// How many resources the player gets back if canceling upgrade
-#define CancelUpgradeCostsFactor   100
 
 //@}
 

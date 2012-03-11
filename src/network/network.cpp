@@ -836,30 +836,21 @@ void NetworkSendSelection(CUnit **units, int count)
 */
 static void NetworkProcessSelection(CNetworkPacket *packet, int player)
 {
-	CUnit *units[UnitMax];
-	NetworkSelectionHeader *header;
-	CNetworkSelection *selection;
-	int adjust;
-	int count;
-	int unitcount;
-
-	header = (NetworkSelectionHeader *)&(packet->Header);
-	//
-	// Create Unit Array
-	//
-	count = header->NumberSent;
-	adjust = (header->Add << 1) | header->Remove;
-	unitcount = 0;
+	NetworkSelectionHeader *header = (NetworkSelectionHeader *)&(packet->Header);
+	const size_t count = header->NumberSent;
+	const int adjust = (header->Add << 1) | header->Remove;
+	std::vector<CUnit *> units;
 
 	for (int i = 0; header->Type[i] == MessageSelection; ++i) {
-		selection = (CNetworkSelection *)&(packet->Command[i]);
-		for (int j = 0; j < 4 && unitcount < count; ++j) {
-			units[unitcount++] = Units[ntohs(selection->Unit[j])];
+		CNetworkSelection *selection = (CNetworkSelection *)&(packet->Command[i]);
+
+		for (int j = 0; j < 4 && units.size() < count; ++j) {
+			units.push_back(Units[ntohs(selection->Unit[j])]);
 		}
 	}
-	Assert(count == unitcount);
+	Assert(count == units.size());
 
-	ChangeTeamSelectedUnits(Players[player], units, adjust, count);
+	ChangeTeamSelectedUnits(Players[player], units, adjust);
 }
 
 /**
@@ -1165,7 +1156,7 @@ static void ParseNetworkCommand(const CNetworkCommandQueue *ncq)
 			if (ply != NetworkSyncSeeds[GameCycle & 0xFF] ||
 					ntohs(ncq->Data.Unit) != NetworkSyncHashs[GameCycle & 0xFF]) {
 
-				SetMessage(_("Network out of sync"));
+				SetMessage("%s", _("Network out of sync"));
 				DebugPrint("\nNetwork out of sync %x!=%x! %d!=%d! Cycle %lu\n\n" _C_
 					ply _C_ NetworkSyncSeeds[GameCycle & 0xFF] _C_
 					ntohs(ncq->Data.Unit) _C_ NetworkSyncHashs[GameCycle & 0xFF] _C_ GameCycle);
@@ -1414,7 +1405,7 @@ void NetworkRecover()
 				NetworkIn[n & 0xFF][Hosts[i].PlyNr][0].Type = MessageQuit;
 				NetworkIn[n & 0xFF][Hosts[i].PlyNr][0].Data = nc;
 				PlayerQuit[Hosts[i].PlyNr] = 1;
-				SetMessage(_("Timed out"));
+				SetMessage("%s", _("Timed out"));
 
 				ncq = &NetworkIn[n & 0xFF][Hosts[i].PlyNr][0];
 				np.Header.Cycle = ncq->Time & 0xFF;

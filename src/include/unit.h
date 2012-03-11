@@ -269,12 +269,6 @@
 **  in a harvester.
 **  @todo continue documentation
 **
-**  CUnit::SubAction
-**
-**  This is an action private variable, it is zero on the first
-**  entry of an action. Must be set to zero, if an action finishes.
-**  It should only be used inside of actions.
-**
 **  CUnit::Wait
 **
 **  The unit is forced too wait for that many cycles. Be carefull,
@@ -300,12 +294,6 @@
 **
 **  Pointer to the original owner of a unit. It will be NULL if
 **  the unit was not rescued.
-**
-**
-**  CUnit::OrderFlush
-**
-**  A flag, which tells the unit to stop with the current order
-**  and immediately start with the next order.
 **
 **  CUnit::Orders
 **
@@ -365,6 +353,7 @@ class CUnit;
 class CUnitType;
 class CUnitStats;
 class CPlayer;
+class PathFinderData;
 class SpellType;
 class CUnitColors;
 class CConstructionFrame;
@@ -436,8 +425,7 @@ enum UnitVoiceGroup {
 	VoiceDocking,           /// only for transport reaching coast
 	VoiceRepairing,         /// repairing
 	VoiceHarvesting,        /// harvesting
-	VoiceAttack,             /// Attack command
-	VoiceExtraDying             /// extra deaths
+	VoiceAttack             /// Attack command
 };
 
 /**
@@ -465,7 +453,7 @@ enum _directions_ {
 	/// The big unit structure
 class CUnit {
 public:
-	CUnit() : SavedOrder(NULL), NewOrder(NULL), CriticalOrder(NULL) { Init(); }
+	CUnit() : pathFinderData(NULL), SavedOrder(NULL), NewOrder(NULL), CriticalOrder(NULL) { Init(); }
 
 	void Init();
 	// @note int is faster than shorts
@@ -501,6 +489,9 @@ public:
 	CUnitStats *Stats;             /// Current unit stats
 	int         CurrentSightRange; /// Unit's Current Sight Range
 
+// Pathfinding stuff:
+	PathFinderData *pathFinderData;
+
 // DISPLAY:
 	int         Frame;      /// Image frame: <0 is mirrored
 	CUnitColors *Colors;    /// Player colors
@@ -514,7 +505,6 @@ public:
 
 	unsigned char DamagedType;   /// Index of damage type of unit which damaged this unit
 	unsigned long Attacked; /// gamecycle unit was last attacked
-	unsigned SubAction : 8; /// sub-action of unit
 	unsigned State : 8;     /// action state
 	unsigned Blink : 3;     /// Let selection rectangle blink
 	unsigned Moving : 1;    /// The unit is moving
@@ -531,7 +521,6 @@ public:
 	unsigned Active : 1;         /// Unit is active for AI
 	unsigned Boarded : 1;        /// Unit is on board a transporter.
 	unsigned CacheLock : 1;        /// Unit is on lock by unitcache operations.
-	unsigned GuardLock : 1;        /// Unit is on lock by guard operations.
 
 	/** set to random 1..100 when MakeUnit()
 	** used for fancy buildings
@@ -547,8 +536,7 @@ public:
 		const CConstructionFrame  *CFrame;           /// Seen construction frame
 		int                 Frame;                   /// last seen frame/stage of buildings
 		CUnitType          *Type;                    /// Pointer to last seen unit-type
-		int                 X;                       /// Last unit->X Seen
-		int                 Y;                       /// Last unit->Y Seen
+		Vec2i               tilePos;                 /// Last unit->tilePos Seen
 		signed char         IX;                      /// Seen X image displacement to map position
 		signed char         IY;                      /// seen Y image displacement to map position
 		unsigned            Constructed : 1;         /// Unit seen construction
@@ -574,11 +562,11 @@ public:
 	} Anim;
 
 
-	char OrderFlush;            /// cancel current order, take next
 	std::vector<COrder *> Orders; /// orders to process
 	COrder *SavedOrder;         /// order to continue after current
 	COrder *NewOrder;           /// order for new trained units
 	COrder *CriticalOrder;      /// order to do as possible in breakable animation.
+
 	char *AutoCastSpell;        /// spells to auto cast
 
 	CUnit *Goal; /// Generic/Teleporter goal pointer
@@ -605,7 +593,7 @@ public:
 	/// Initialize unit structure with default values
 	void Init(CUnitType &type);
 	/// Assign unit to player
-	void AssignToPlayer(CPlayer *player);
+	void AssignToPlayer(CPlayer &player);
 
 	/// Draw a single unit
 	void Draw(const CViewport *vp) const;
@@ -710,12 +698,6 @@ public:
 
 	/// Returns true if unit is visible in an viewport. Only for ThisPlayer.
 	bool IsVisibleInViewport(const CViewport *vp) const;
-
-	/// Returns true, if unit is visible on current map view (any viewport).
-	bool IsVisibleOnScreen() const;
-
-	/// @todo more docu
-	void GetMapArea(int *sx, int *sy, int *ex, int *ey) const;
 
 	bool IsEnemy(const CPlayer &player) const;
 	bool IsEnemy(const CUnit &unit) const;
@@ -840,15 +822,12 @@ class CUnitDrawProxy {
 	void DrawDecorationAt(int x, int y) const;
 public:
 
-	CUnitDrawProxy(): Variable(0) {}
+	CUnitDrawProxy(): Variable(NULL) {}
 	~CUnitDrawProxy() {
-		if (Variable) {
-			delete[] Variable;
-		}
+		delete[] Variable;
 	}
 
-	int X;
-	int Y;
+	Vec2i tilePos;
 	int frame;
 	int TeamSelected; //unit->TeamSelected
 	int GroupId; //unit->GroupId
@@ -861,7 +840,7 @@ public:
 	unsigned int Selected:1; //unit->Selected
 	unsigned int ResourcesHeld:1;      /// isResources Held by a unit
 	unsigned int state: 2;
-	unsigned int Blink: 3;	//unit->Blink
+	unsigned int Blink: 3; //unit->Blink
 
 	const CConstructionFrame *cframe;
 	const CUnitType *Type;
@@ -1077,9 +1056,7 @@ extern CUnit *FindIdleWorker(const CPlayer &player, const CUnit *last);
 
 	/// Find the neareast piece of terrain with specific flags.
 extern int FindTerrainType(int movemask, int resmask, int rvresult, int range,
-		const CPlayer *player, const Vec2i &startPos, Vec2i *pos);
-	/// Find the nearest piece of wood in sight range
-extern int FindWoodInSight(const CUnit &unit, Vec2i *pos);
+		const CPlayer &player, const Vec2i &startPos, Vec2i *pos);
 
 	/// @todo more docu
 extern CUnit *UnitOnScreen(CUnit *unit, int x, int y);
@@ -1106,12 +1083,10 @@ extern std::string UnitReference(const CUnit &unit);
 	/// Generate a unit reference, a printable unique string for unit
 extern std::string UnitReference(const CUnitPtr &unit);
 
-	/// Save an order
-extern void SaveOrder(const COrder &order, const CUnit &unit, CFile *file);
 	/// save unit-structure
-extern void SaveUnit(const CUnit &unit, CFile *file);
+extern void SaveUnit(const CUnit &unit, CFile &file);
 	/// save all units
-extern void SaveUnits(CFile *file);
+extern void SaveUnits(CFile &file);
 
 	/// Initialize unit module
 extern void InitUnits();
@@ -1143,16 +1118,17 @@ extern void CleanDecorations();
 	/// Draw unit's shadow
 extern void DrawShadow(const CUnitType &type, int frame, int x, int y);
 	/// Draw all units visible on map in viewport
-extern int FindAndSortUnits(const CViewport *vp, CUnit *table[]);
+extern int FindAndSortUnits(const CViewport *vp, std::vector<CUnit *>& table);
 extern int FindAndSortUnits(const CViewport *vp, CUnitDrawProxy table[]);
 	/// Show a unit's orders.
 extern void ShowOrder(const CUnit &unit);
 
 // in unit_find.cpp
-	/// Find all units of this type
-extern int FindUnitsByType(const CUnitType &type, CUnit **table);
+
+extern void FindUnitsByType(const CUnitType &type, std::vector<CUnit *>& units);
+
 	/// Find all units of this type of the player
-extern int FindPlayerUnitsByType(const CPlayer &, const CUnitType &, CUnit **);
+extern void FindPlayerUnitsByType(const CPlayer &player, const CUnitType &type, std::vector<CUnit *>&units);
 	/// Return any unit on that map tile
 extern CUnit *UnitOnMapTile(const Vec2i &pos, unsigned int type);// = -1);
 	/// Return possible attack target on that map area
@@ -1170,15 +1146,12 @@ extern CUnit *AttackUnitsInRange(const CUnit &unit);
 	/// Find best enemy in reaction range to attack
 extern CUnit *AttackUnitsInReactRange(const CUnit &unit);
 
-extern CUnit *
-AutoAttackUnitsInDistance(const CUnit &unit, int range, CUnitCache &autotargets);
-
 // in groups.c
 
 	/// Initialize data structures for groups
 extern void InitGroups();
 	/// Save groups
-extern void SaveGroups(CFile *file);
+extern void SaveGroups(CFile &file);
 	/// Cleanup groups
 extern void CleanGroups();
 
@@ -1198,8 +1171,6 @@ extern void SetGroup(CUnit **units, int nunits, int num);
 extern void RemoveUnitFromGroups(CUnit &unit);
 	/// Register CCL group features
 extern void GroupCclRegister();
-	/// ask group members for help
-extern void GroupHelpMe(CUnit *attacker, CUnit &defender);
 extern int IsGroupTainted(int num);
 
 // in selection.c
@@ -1213,10 +1184,8 @@ extern void SaveSelection();
 extern void RestoreSelection();
 	/// Clear current selection
 extern void UnSelectAll();
-	/// Select group as selection
-extern void ChangeSelectedUnits(CUnit **units, int num_units);
 	/// Changed TeamUnit Selection
-extern void ChangeTeamSelectedUnits(CPlayer &player, CUnit **units, int adjust, int count);
+extern void ChangeTeamSelectedUnits(CPlayer &player, const std::vector<CUnit *> &units, int adjust);
 	/// Add a unit to selection
 extern int SelectUnit(CUnit &unit);
 	/// Select one unit as selection
@@ -1251,7 +1220,7 @@ extern int AddSelectedAirUnitsInRectangle(int tx, int ty, int w, int h);
 	/// Init selections
 extern void InitSelections();
 	/// Save current selection state
-extern void SaveSelections(CFile *file);
+extern void SaveSelections(CFile &file);
 	/// Clean up selections
 extern void CleanSelections();
 	/// Register CCL selection features
@@ -1260,7 +1229,7 @@ extern void SelectionCclRegister();
 // in ccl_unit.c
 
 	/// Parse order
-extern void CclParseOrder(lua_State *l, const CUnit &unit, COrderPtr order);
+extern void CclParseOrder(lua_State *l, CUnit &unit, COrderPtr order);
 	/// register CCL units features
 extern void UnitCclRegister();
 

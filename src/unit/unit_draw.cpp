@@ -36,34 +36,29 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vector>
 
 #include "stratagus.h"
 
-#include <vector>
-
-#include "video.h"
-#include "sound.h"
-#include "unitsound.h"
-#include "editor.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
-#include "tileset.h"
-#include "map.h"
+#include "actions.h"
+#include "action/action_build.h"
+#include "action/action_built.h"
+#include "action/action_upgradeto.h"
 #include "construct.h"
 #include "cursor.h"
-#include "interface.h"
+#include "editor.h"
 #include "font.h"
-#include "ui.h"
-#include "actions.h"
+#include "interface.h"
+#include "map.h"
+#include "player.h"
 #include "script.h"
-
-/*----------------------------------------------------------------------------
---  Definitions
-----------------------------------------------------------------------------*/
-static inline int s_min(int a, int b) { return a < b ? a : b; }
-static inline int s_max(int a, int b) { return a > b ? a : b; }
-
+#include "sound.h"
+#include "tileset.h"
+#include "unit.h"
+#include "unitsound.h"
+#include "unittype.h"
+#include "ui.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 -- Variables
@@ -189,8 +184,7 @@ void DrawUnitSelection(const CViewport *vp, const CUnit &unit)
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionNone(Uint32, int, int,
-	int, int)
+void DrawSelectionNone(Uint32, int, int, int, int)
 {
 }
 
@@ -201,11 +195,10 @@ void DrawSelectionNone(Uint32, int, int,
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionCircle(Uint32 color, int x1, int y1,
-	int x2, int y2)
+void DrawSelectionCircle(Uint32 color, int x1, int y1, int x2, int y2)
 {
 	Video.DrawCircleClip(color, (x1 + x2) / 2, (y1 + y2) / 2,
-		s_min((x2 - x1) / 2, (y2 - y1) / 2) + 2);
+		std::min((x2 - x1) / 2, (y2 - y1) / 2) + 2);
 }
 
 /**
@@ -215,13 +208,12 @@ void DrawSelectionCircle(Uint32 color, int x1, int y1,
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionCircleWithTrans(Uint32 color, int x1, int y1,
-	int x2, int y2)
+void DrawSelectionCircleWithTrans(Uint32 color, int x1, int y1, int x2, int y2)
 {
 	Video.FillTransCircleClip(color, (x1 + x2) / 2, (y1 + y2) / 2,
-		s_min((x2 - x1) / 2, (y2 - y1) / 2), 95);
+		std::min((x2 - x1) / 2, (y2 - y1) / 2), 95);
 	Video.DrawCircleClip(color, (x1 + x2) / 2, (y1 + y2) / 2,
-		s_min((x2 - x1) / 2, (y2 - y1) / 2));
+		std::min((x2 - x1) / 2, (y2 - y1) / 2));
 }
 
 /**
@@ -231,8 +223,7 @@ void DrawSelectionCircleWithTrans(Uint32 color, int x1, int y1,
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionRectangle(Uint32 color, int x1, int y1,
-	int x2, int y2)
+void DrawSelectionRectangle(Uint32 color, int x1, int y1, int x2, int y2)
 {
 	Video.DrawRectangleClip(color, x1, y1, x2 - x1, y2 - y1);
 }
@@ -244,8 +235,7 @@ void DrawSelectionRectangle(Uint32 color, int x1, int y1,
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionRectangleWithTrans(Uint32 color, int x1, int y1,
-	int x2, int y2)
+void DrawSelectionRectangleWithTrans(Uint32 color, int x1, int y1, int x2, int y2)
 {
 	Video.DrawRectangleClip(color, x1, y1, x2 - x1, y2 - y1);
 	Video.FillTransRectangleClip(color, x1 + 1, y1 + 1,
@@ -665,169 +655,6 @@ void DrawShadow(const CUnitType &type, int frame, int x, int y)
 	}
 }
 
-/**
-**  Get the location of a unit's order.
-**
-**  @param unit   Pointer to unit.
-**  @param order  Pointer to order.
-**  @param pos    Resulting screen cordinates.
-*/
-static void GetOrderPosition(const CUnit &unit, const COrder &order, PixelPos *screenPos)
-{
-	Assert(screenPos);
-
-	CUnit *goal;
-
-	// FIXME: n0body: Check for goal gone?
-	if ((goal = order.GetGoal()) && (!goal->Removed)) {
-		// Order has a goal, get it's location.
-		const PixelPos mapPos = goal->GetMapPixelPosCenter();
-		*screenPos = CurrentViewport->MapToScreenPixelPos(mapPos);
-	} else {
-		if (Map.Info.IsPointOnMap(order.goalPos)) {
-			// Order is for a location, show that.
-			*screenPos = CurrentViewport->TilePosToScreen_Center(order.goalPos);
-		} else {
-			// Some orders ignore x,y (like StandStill).
-			// Use the unit's position instead.
-			const PixelPos mapPos = unit.GetMapPixelPosCenter();
-			*screenPos = CurrentViewport->MapToScreenPixelPos(mapPos);
-		}
-		if (order.Action == UnitActionBuild) {
-			screenPos->x += (order.Arg1.Type->TileWidth - 1) * PixelTileSize.x / 2;
-			screenPos->y += (order.Arg1.Type->TileHeight - 1) * PixelTileSize.y / 2;
-		}
-	}
-}
-
-/**
-**  Show the order on map.
-**
-**  @param unit   Unit pointer.
-**  @param pos    screen pixel coordinate.
-**  @param order  Order to display.
-*/
-static void ShowSingleOrder(const CUnit &unit, const PixelPos &pos, const COrder &order)
-{
-	Uint32 color;
-	Uint32 e_color;
-
-	PixelPos pos1 = pos;
-	PixelPos pos2;
-	GetOrderPosition(unit, order, &pos2);
-
-	bool dest = false;
-	switch (order.Action) {
-		case UnitActionNone:
-			e_color = color = ColorGray;
-			break;
-
-		case UnitActionStill:
-			e_color = color = ColorGray;
-			break;
-
-		case UnitActionStandGround:
-			e_color = color = ColorGreen;
-			break;
-
-		case UnitActionFollow:
-		case UnitActionMove:
-			e_color = color = ColorGreen;
-			dest = true;
-			break;
-
-		case UnitActionPatrol:
-			Video.DrawLineClip(ColorGreen, pos1.x, pos1.y, pos2.x, pos2.y);
-			e_color = color = ColorBlue;
-			pos1 = CurrentViewport->TilePosToScreen_Center(order.Arg1.Patrol);
-			dest = true;
-			break;
-
-		case UnitActionRepair:
-			e_color = color = ColorGreen;
-			dest = true;
-			break;
-
-		case UnitActionAttackGround:
-			pos2 = CurrentViewport->TilePosToScreen_Center(order.goalPos);
-			// FALL THROUGH
-		case UnitActionAttack:
-			if (unit.SubAction & 2) { // Show weak targets.
-				e_color = ColorBlue;
-			} else {
-				e_color = ColorRed;
-			}
-			color = ColorRed;
-			dest = true;
-			break;
-
-		case UnitActionBoard:
-			e_color = color = ColorGreen;
-			dest = true;
-			break;
-
-		case UnitActionUnload:
-			e_color = color = ColorGreen;
-			dest = true;
-			break;
-
-		case UnitActionDie:
-			e_color = color = ColorGray;
-			break;
-
-		case UnitActionSpellCast:
-			e_color = color = ColorBlue;
-			dest = true;
-			break;
-
-		case UnitActionTrain:
-			e_color = color = ColorGray;
-			break;
-
-		case UnitActionUpgradeTo:
-			e_color = color = ColorGray;
-			break;
-
-		case UnitActionResearch:
-			e_color = color = ColorGray;
-			break;
-
-		case UnitActionBuild:
-		{
-			int w = order.Arg1.Type->BoxWidth;
-			int h = order.Arg1.Type->BoxHeight;
-			DrawSelection(ColorGray, pos2.x - w / 2, pos2.y - h / 2, pos2.x + w / 2, pos2.y + h / 2);
-			e_color = color = ColorGreen;
-			dest = true;
-		}
-			break;
-
-		case UnitActionBuilt:
-			e_color = color = ColorGray;
-			break;
-
-		case UnitActionResource:
-			e_color = color = ColorYellow;
-			dest = true;
-			break;
-
-		case UnitActionReturnGoods:
-			e_color = color = ColorYellow;
-			dest = true;
-			break;
-
-		default:
-			e_color = color = ColorGray;
-			DebugPrint("Unknown action %d\n" _C_ order.Action);
-			break;
-	}
-
-	Video.FillCircleClip(color, pos1.x, pos1.y, 2);
-	if (dest) {
-		Video.DrawLineClip(color, pos1.x, pos1.y, pos2.x, pos2.y);
-		Video.FillCircleClip(e_color, pos2.x, pos2.y, 3);
-	}
-}
 
 /**
 **  Show the current order of a unit.
@@ -846,25 +673,23 @@ void ShowOrder(const CUnit &unit)
 	const PixelPos mapPos = unit.GetMapPixelPosCenter();
 	PixelPos screenStartPos = CurrentViewport->MapToScreenPixelPos(mapPos);
 	COrderPtr order;
+	const bool flushed = unit.Orders[0]->Finished;
 
 	// If the current order is cancelled show the next one
-	if (unit.Orders.size() > 1 && unit.OrderFlush) {
+	if (unit.Orders.size() > 1 && flushed) {
 		order = unit.Orders[1];
 	} else {
 		order = unit.Orders[0];
 	}
-	ShowSingleOrder(unit, screenStartPos, *order);
-
+	PixelPos screenPos = order->Show(*CurrentViewport, screenStartPos);
 	// Show the rest of the orders
-	for (size_t i = 1 + (unit.OrderFlush ? 1 : 0); i < unit.Orders.size(); ++i) {
-		PixelPos screenPos;
-		GetOrderPosition(unit, *unit.Orders[i - 1], &screenPos);
-		ShowSingleOrder(unit, screenPos, *unit.Orders[i]);
+	for (size_t i = 1 + (flushed ? 1 : 0); i < unit.Orders.size(); ++i) {
+		screenPos =unit.Orders[i]->Show(*CurrentViewport, screenPos);
 	}
 
 	// Show order for new trained units
 	if (unit.NewOrder) {
-		ShowSingleOrder(unit, screenStartPos, *unit.NewOrder);
+		unit.NewOrder->Show(*CurrentViewport, screenStartPos);
 	}
 }
 
@@ -1111,8 +936,10 @@ void CUnit::Draw(const CViewport *vp) const
 		state = (action == UnitActionBuilt) | ((action == UnitActionUpgradeTo) << 1);
 		constructed = this->Constructed;
 		// Reset Type to the type being upgraded to
-		if (state == 2) {
-			type = this->CurrentOrder()->Arg1.Type;
+		if (action == UnitActionUpgradeTo) {
+			const COrder_UpgradeTo& order = *static_cast<COrder_UpgradeTo*>(this->CurrentOrder());
+
+			type = const_cast<CUnitType*>(&order.GetUnitType());
 		}
 
 		if (this->CurrentAction() == UnitActionBuilt) {
@@ -1123,8 +950,7 @@ void CUnit::Draw(const CViewport *vp) const
 			cframe = NULL;
 		}
 	} else {
-		const Vec2i seenTilePos = {this->Seen.X, this->Seen.Y};
-		const PixelPos &screenPos = vp->TilePosToScreen_TopLeft(seenTilePos);
+		const PixelPos &screenPos = vp->TilePosToScreen_TopLeft(this->Seen.tilePos);
 
 		x = screenPos.x + this->Seen.IX;
 		y = screenPos.y + this->Seen.IY;
@@ -1252,15 +1078,16 @@ void CUnitDrawProxy::operator=(const CUnit *unit)
 		frame = unit->Frame;
 		IY = unit->IY;
 		IX = unit->IX;
-		X = unit->tilePos.x;
-		Y = unit->tilePos.y;
+		tilePos = unit->tilePos;
 
 		state = (action == UnitActionBuilt) |
 				((action == UnitActionUpgradeTo) << 1);
 
 		// Reset Type to the type being upgraded to
-		if (state == 2) {
-			Type = unit->CurrentOrder()->Arg1.Type;
+		if (action == UnitActionUpgradeTo) {
+			const COrder_UpgradeTo& order = *static_cast<COrder_UpgradeTo*>(unit->CurrentOrder());
+
+			Type = const_cast<CUnitType*>(&order.GetUnitType());
 		}
 
 		if (unit->Constructed) {
@@ -1275,8 +1102,7 @@ void CUnitDrawProxy::operator=(const CUnit *unit)
 	} else {
 		IY = unit->Seen.IY;
 		IX = unit->Seen.IX;
-		X = unit->Seen.X;
-		Y = unit->Seen.Y;
+		tilePos = unit->Seen.tilePos;
 		frame = unit->Seen.Frame;
 		Type = unit->Seen.Type;
 		state = unit->Seen.State;
@@ -1396,8 +1222,7 @@ void CUnitDrawProxy::DrawSelectionAt(int x, int y) const
 
 void CUnitDrawProxy::Draw(const CViewport *vp) const
 {
-	const Vec2i tilePos = {this->X, this->Y};
-	const PixelPos screenPos = vp->TilePosToScreen_TopLeft(tilePos);
+	const PixelPos screenPos = vp->TilePosToScreen_TopLeft(this->tilePos);
 	const int x = screenPos.x + this->IX;
 	const int y = screenPos.y + this->IY;
 
@@ -1493,47 +1318,49 @@ static inline bool DrawLevelCompare(const CUnit*c1, const CUnit*c2)
 **  @param table  Table of units to return in sorted order
 **
 */
-int FindAndSortUnits(const CViewport *vp, CUnit*table[])
+int FindAndSortUnits(const CViewport *vp, std::vector<CUnit*>& table)
 {
-	//
 	//  Select all units touching the viewpoint.
-	//
-	int n = Map.Select(vp->MapX - 1, vp->MapY - 1, vp->MapX + vp->MapWidth + 1,
-		vp->MapY + vp->MapHeight + 1, table);
+	const Vec2i minPos = {vp->MapX - 1, vp->MapY - 1};
+	const Vec2i maxPos = {vp->MapX + vp->MapWidth + 1, vp->MapY + vp->MapHeight + 1};
 
-	for (int i = 0; i < n; ++i) {
+	Map.Select(minPos, maxPos, table);
+
+	int n = static_cast<int>(table.size());
+	for (size_t i = 0; i < table.size(); ++i) {
 		if (!table[i]->IsVisibleInViewport(vp)) {
 			table[i--] = table[--n];
+			table.pop_back();
 		}
 	}
-
+	Assert(n == static_cast<int>(table.size()));
 	if (n > 1) {
-		std::sort(table, table + n, DrawLevelCompare);
+		std::sort(table.begin(), table.begin() + n, DrawLevelCompare);
 	}
-
 	return n;
 }
 
 int FindAndSortUnits(const CViewport *vp, CUnitDrawProxy table[])
 {
-	CUnit* buffer[UnitMax];
-
-	//
 	//  Select all units touching the viewpoint.
-	//
-	int n = Map.Select(vp->MapX - 1, vp->MapY - 1, vp->MapX + vp->MapWidth + 1,
-		vp->MapY + vp->MapHeight + 1, buffer);
+	const Vec2i minPos = {vp->MapX - 1, vp->MapY - 1};
+	const Vec2i maxPos = {vp->MapX + vp->MapWidth + 1, vp->MapY + vp->MapHeight + 1};
+	std::vector<CUnit*> buffer;
+
+	Map.Select(minPos, maxPos, buffer);
+	int n = static_cast<int>(buffer.size());
 
 	for (int i = 0; i < n; ++i) {
-		if (!buffer[i]->IsVisibleInViewport(vp) ||
-			 buffer[i]->Destroyed || buffer[i]->Container ||
-			 buffer[i]->Type->Revealer) {
+		if (!buffer[i]->IsVisibleInViewport(vp)
+			|| buffer[i]->Destroyed || buffer[i]->Container
+			|| buffer[i]->Type->Revealer) {
 			buffer[i--] = buffer[--n];
+			buffer.pop_back();
 		}
 	}
 
 	if (n > 1) {
-		std::sort(buffer, buffer + n, DrawLevelCompare);
+		std::sort(buffer.begin(), buffer.begin() + n, DrawLevelCompare);
 		for (int i = 0; i < n; ++i) {
 			UpdateUnitVariables(*buffer[i]);
 			table[i] = buffer[i];

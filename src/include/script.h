@@ -280,14 +280,35 @@ extern bool LuaToBoolean(lua_State *l, int narg);
 extern void CclGarbageCollect(int fast);  /// Perform garbage collection
 extern void InitCcl();                /// Initialise ccl
 extern void LoadCcl(const std::string& filename);  /// Load ccl config file
-extern void SaveCcl(CFile *file);     /// Save CCL module
+extern void SaveCcl(CFile &file);     /// Save CCL module
 extern void SavePreferences();        /// Save user preferences
 extern int CclCommand(const std::string &command, bool exitOnError = true);
 
 
 CUnit *CclGetUnitFromRef(lua_State *l);
 
-
+/**
+**  Get a position from lua state
+**
+**  @param l  Lua state.
+**  param x  pointer to output x position.
+**  @param y  pointer to output y position.
+**
+**  @return   The unit pointer
+*/
+template <typename T>
+static void CclGetPos(lua_State *l, T *x , T *y, const int offset = -1)
+{
+	if (!lua_istable(l, offset) || lua_objlen(l, offset) != 2) {
+		LuaError(l, "incorrect argument");
+	}
+	lua_rawgeti(l, offset, 1);
+	*x = LuaToNumber(l, -1);
+	lua_pop(l, 1);
+	lua_rawgeti(l, offset, 2);
+	*y = LuaToNumber(l, -1);
+	lua_pop(l, 1);
+}
 
 extern NumberDesc *Damage;  /// Damage calculation for missile.
 
@@ -297,7 +318,6 @@ extern NumberDesc *CclParseNumberDesc(lua_State *l); /// Parse a number descript
 extern UnitDesc *CclParseUnitDesc(lua_State *l);     /// Parse a unit description.
 StringDesc *CclParseStringDesc(lua_State *l);        /// Parse a string description.
 
-StringDesc *NewStringDesc(const char *s);            /// Create a StringDesc with const string.
 extern int EvalNumber(const NumberDesc *numberdesc); /// Evaluate the number.
 extern CUnit *EvalUnit(const UnitDesc *unitdesc);    /// Evaluate the unit.
 std::string EvalString(const StringDesc *s);         /// Evaluate the string.

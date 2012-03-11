@@ -86,17 +86,17 @@ void InitGroups()
 **
 **  @param file  Output file.
 */
-void SaveGroups(CFile *file)
+void SaveGroups(CFile &file)
 {
-	file->printf("\n--- -----------------------------------------\n");
-	file->printf("--- MODULE: groups\n\n");
+	file.printf("\n--- -----------------------------------------\n");
+	file.printf("--- MODULE: groups\n\n");
 
 	for (int g = 0; g < NUM_GROUPS; ++g) {
-		file->printf("Group(%d, %d, {", g, Groups[g].NumUnits);
+		file.printf("Group(%d, %d, {", g, Groups[g].NumUnits);
 		for (int i = 0; i < Groups[g].NumUnits; ++i) {
-			file->printf("\"%s\", ", UnitReference(*Groups[g].Units[i]).c_str());
+			file.printf("\"%s\", ", UnitReference(*Groups[g].Units[i]).c_str());
 		}
-		file->printf("})\n");
+		file.printf("})\n");
 	}
 }
 
@@ -256,74 +256,6 @@ void RemoveUnitFromGroups(CUnit &unit)
 		}
 	}
 }
-
-/**
-**  Called if a member of Group is Attacked
-**
-**  @param attacker  Pointer to attacker unit.
-**  @param defender  Pointer to unit that is being attacked.
-*/
-void GroupHelpMe(CUnit *attacker, CUnit &defender)
-{
-	/* Freandly Fire - typical splash */
-	if (!attacker || attacker->Player->Index == defender.Player->Index) {
-		return;
-	}
-
-	DebugPrint("%d: GroupHelpMe %d(%s) attacked at %d,%d\n" _C_
-		defender.Player->Index _C_ UnitNumber(defender) _C_
-		defender.Type->Ident.c_str() _C_ defender.tilePos.x _C_ defender.tilePos.y);
-
-	//
-	//  Don't send help to scouts (zeppelin,eye of vision).
-	//
-	if (!defender.Type->CanAttack && defender.Type->UnitType == UnitTypeFly) {
-		return;
-	}
-
-	if (defender.GroupId) {
-		int mask = 0;
-		CUnitGroup *group;
-		for (int num = 0; num < NUM_GROUPS; ++num) {
-
-			//  Unit belongs to an group, check if brothers in arms can help
-			if (defender.GroupId & (1<<num)) {
-				mask |= (1<<num);
-				group = &Groups[num];
-
-				for (int i = 0; i < group->NumUnits; ++i) {
-					CUnit &gunit = *group->Units[i];
-
-					if (&defender == &gunit) {
-						continue;
-					}
-
-					// if brother is idle or attack no-agressive target and
-					// can attack our attacker then ask for help
-					if (gunit.IsAgressive() && (gunit.IsIdle() ||
-						!(gunit.CurrentAction() == UnitActionAttack &&
-						gunit.CurrentOrder()->HasGoal() &&
-						gunit.CurrentOrder()->GetGoal()->IsAgressive()))
-						&& CanTarget(gunit.Type, attacker->Type)) {
-						CommandAttack(gunit, attacker->tilePos, attacker, FlushCommands);
-						if (gunit.SavedOrder == NULL) {
-							COrder *savedOrder = COrder::NewActionAttack(gunit, gunit.tilePos);
-
-							if (gunit.StoreOrder(savedOrder) == false) {
-								delete savedOrder;
-								savedOrder = NULL;
-							}
-						}
-					}
-				}
-				if (!(defender.GroupId & ~mask)) {
-					return;
-				}
-			}
-		}
-	}
-}
-
 
 // ----------------------------------------------------------------------------
 

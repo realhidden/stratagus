@@ -59,7 +59,7 @@ struct lua_State;
 --  Player type
 ----------------------------------------------------------------------------*/
 
-	///  Player structure
+///  Player structure
 class CPlayer
 {
 public:
@@ -77,8 +77,9 @@ public:
 
 	inline void SetStartView(const Vec2i &pos) { StartPos = pos; }
 
-	int Resources[MaxCosts];      /// resources in store
+	int Resources[MaxCosts];      /// resources in overall store
 	int MaxResources[MaxCosts];   /// max resources can be stored
+	int StoredResources[MaxCosts];/// resources in store buildings (can't exceed MaxResources)
 	int LastResources[MaxCosts];  /// last values for revenue
 	int Incomes[MaxCosts];        /// income of the resources
 	int Revenue[MaxCosts];        /// income rate of the resources
@@ -89,8 +90,6 @@ public:
 	bool AiEnabled;        /// handle AI on local computer
 	PlayerAi *Ai;          /// Ai structure pointer
 
-	CUnit *Units[UnitMax]; /// units of this player
-	int    TotalNumUnits;  /// total # units for units' list
 	int    NumBuildings;   /// # buildings
 	int    Supply;         /// supply available/produced
 	int    Demand;         /// demand of player
@@ -120,8 +119,25 @@ public:
 	/// Clear turn related player data
 	void Clear();
 
+	std::vector<CUnit *>::const_iterator UnitBegin() const;
+	std::vector<CUnit *>::iterator UnitBegin();
+	std::vector<CUnit *>::const_iterator UnitEnd() const;
+	std::vector<CUnit *>::iterator UnitEnd();
+
+	CUnit &GetUnit(int index) const;
+	int GetUnitCount() const;
+
+	void AddUnit(CUnit &unit);
+	void RemoveUnit(CUnit &unit);
+
+	/// Get a resource of the player
+	int GetResource(int resource, int type);
+	/// Adds/subtracts some resources to/from the player store
+	void ChangeResource(int resource, int value, bool store = false);
 	/// Set a resource of the player
-	void SetResource(int resource, int value);
+	void SetResource(int resource, int value, bool store = false);
+	/// Check, if there enough resources for action.
+	bool CheckResource(int resource, int value);
 
 	/// Check if the unit-type didn't break any unit limits and supply/demand
 	int CheckLimits(const CUnitType &type) const;
@@ -158,8 +174,7 @@ public:
 	/**
 	**  Check if the player index is an enemy
 	*/
-	bool IsEnemy(const int index) const
-	{
+	bool IsEnemy(const int index) const {
 		return (Index != index && (Enemy & (1 << index)) != 0);
 	}
 
@@ -186,7 +201,9 @@ public:
 	void Init(/* PlayerTypes */ int type);
 	void Save(CFile &file) const;
 	void Load(lua_State *l);
+
 private:
+	std::vector<CUnit *> Units; /// units of this player
 	unsigned int Enemy;         /// enemy bit field for this player
 	unsigned int Allied;        /// allied bit field for this player
 	unsigned int SharedVision;  /// shared vision bit field
@@ -197,7 +214,8 @@ private:
 **  Mapped with #PlayerRaces to a symbolic name.
 */
 #define MAX_RACES 8
-class PlayerRace {
+class PlayerRace
+{
 public:
 	PlayerRace() : Count(0) {
 		memset(Visible, 0, sizeof(Visible));
@@ -297,40 +315,40 @@ extern int PlayerColorIndexCount;
 --  Functions
 ----------------------------------------------------------------------------*/
 
-	/// Init players
+/// Init players
 extern void InitPlayers();
-	/// Clean up players
+/// Clean up players
 extern void CleanPlayers();
-	/// Clean up races
+/// Clean up races
 extern void CleanRaces();
-	/// Save players
+/// Save players
 extern void SavePlayers(CFile &file);
 
-	/// Create a new player
+/// Create a new player
 extern void CreatePlayer(int type);
 
 
-	/// Initialize the computer opponent AI
+/// Initialize the computer opponent AI
 extern void PlayersInitAi();
-	/// Called each game cycle for player handlers (AI)
+/// Called each game cycle for player handlers (AI)
 extern void PlayersEachCycle();
-	/// Called each second for a given player handler (AI)
+/// Called each second for a given player handler (AI)
 extern void PlayersEachSecond(int player);
 
-	/// Change current color set to new player of the sprite
+/// Change current color set to new player of the sprite
 extern void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite);
 
-	/// Output debug informations for players
+/// Output debug informations for players
 extern void DebugPlayers();
 
 #ifdef DEBUG
 void FreePlayerColors();
 #endif
 
-	/// register ccl features
+/// register ccl features
 extern void PlayerCclRegister();
 
-	/// Allowed to select multiple units, maybe not mine
+/// Allowed to select multiple units, maybe not mine
 inline bool CanSelectMultipleUnits(const CPlayer &player) { return &player == ThisPlayer || ThisPlayer->IsTeamed(player); }
 
 //@}

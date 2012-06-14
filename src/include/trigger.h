@@ -44,7 +44,8 @@ class CFile;
 /**
 **  Timer structure
 */
-class CTimer {
+class CTimer
+{
 public:
 	CTimer() : Init(false), Running(false), Increasing(false), Cycles(0),
 		LastUpdate(0) {}
@@ -65,9 +66,8 @@ public:
 };
 
 #define ANY_UNIT ((const CUnitType *)0)
-#define ALL_UNITS ((const CUnitType *)-1)
-#define ALL_FOODUNITS ((const CUnitType *)-2)
-#define ALL_BUILDINGS ((const CUnitType *)-3)
+#define ALL_FOODUNITS ((const CUnitType *)-1)
+#define ALL_BUILDINGS ((const CUnitType *)-2)
 
 
 /**
@@ -77,6 +77,7 @@ typedef struct {
 	CUnit *Attacker;  /// Unit which send the missile.
 	CUnit *Defender;  /// Unit which is hit by missile.
 	CUnit *Active;    /// Unit which is selected or else under cursor unit.
+	CUnitType *Type;  /// Type used in trigger;
 } TriggerDataType;
 
 /*----------------------------------------------------------------------------

@@ -8,7 +8,7 @@
 //                        T H E   W A R   B E G I N S
 //         Stratagus - A free fantasy real time strategy game engine
 //
-/**@name actions.h - The actions headerfile. */
+/**@name action_follow.h - The actions headerfile. */
 //
 //      (c) Copyright 1998-2012 by Lutz Sammer and Jimmy Salmon
 //
@@ -36,22 +36,23 @@
 
 class COrder_Follow : public COrder
 {
-	friend COrder* COrder::NewActionFollow(CUnit &dest);
+	friend COrder *COrder::NewActionFollow(CUnit &dest);
 public:
-	COrder_Follow() : COrder(UnitActionFollow), State(0), Range(0)
-	{
+	COrder_Follow() : COrder(UnitActionFollow), State(0), Range(0) {
 		goalPos.x = -1;
 		goalPos.y = -1;
 	}
 
 	virtual COrder_Follow *Clone() const { return new COrder_Follow(*this); }
 
+	virtual bool IsValid() const;
+
 	virtual void Save(CFile &file, const CUnit &unit) const;
 	virtual bool ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit);
 
 	virtual void Execute(CUnit &unit);
-	virtual PixelPos Show(const CViewport& vp, const PixelPos& lastScreenPos) const;
-	virtual void UpdatePathFinderData(PathFinderInput& input);
+	virtual PixelPos Show(const CViewport &vp, const PixelPos &lastScreenPos) const;
+	virtual void UpdatePathFinderData(PathFinderInput &input);
 private:
 	unsigned int State;
 	int Range;

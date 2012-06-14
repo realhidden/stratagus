@@ -60,6 +60,31 @@ set(action_SRCS
 )
 source_group(action FILES ${action_SRCS})
 
+set(animation_SRCS
+	src/animation/animation.cpp
+	src/animation/animation_attack.cpp
+	src/animation/animation_die.cpp
+	src/animation/animation_exactframe.cpp
+	src/animation/animation_frame.cpp
+	src/animation/animation_goto.cpp
+	src/animation/animation_ifvar.cpp
+	src/animation/animation_label.cpp
+	src/animation/animation_move.cpp
+	src/animation/animation_randomgoto.cpp
+	src/animation/animation_randomrotate.cpp
+	src/animation/animation_randomsound.cpp
+	src/animation/animation_randomwait.cpp
+	src/animation/animation_rotate.cpp
+	src/animation/animation_setplayervar.cpp
+	src/animation/animation_setvar.cpp
+	src/animation/animation_sound.cpp
+	src/animation/animation_spawnmissile.cpp
+	src/animation/animation_spawnunit.cpp
+	src/animation/animation_unbreakable.cpp
+	src/animation/animation_wait.cpp
+)
+source_group(animation FILES ${animation_SRCS})
+
 set(ai_SRCS
 	src/ai/ai_building.cpp
 	src/ai/ai.cpp
@@ -152,6 +177,29 @@ set(map_SRCS
 )
 source_group(map FILES ${map_SRCS})
 
+set(missile_SRCS
+	src/missile/missile.cpp
+	src/missile/missile_cliptotarget.cpp
+	src/missile/missile_cycleonce.cpp
+	src/missile/missile_deathcoil.cpp
+	src/missile/missile_fire.cpp
+	src/missile/missile_flameshield.cpp
+	src/missile/missile_hit.cpp
+	src/missile/missile_landmine.cpp
+	src/missile/missile_none.cpp
+	src/missile/missile_parabolic.cpp
+	src/missile/missile_pointotpointwithhit.cpp
+	src/missile/missile_pointtopoint.cpp
+	src/missile/missile_pointtopointbounce.cpp
+	src/missile/missile_pointtopointcycleonce.cpp
+	src/missile/missile_stay.cpp
+	src/missile/missile_tracer.cpp
+	src/missile/missile_whirlwind.cpp
+	src/missile/missileconfig.cpp
+	src/missile/script_missile.cpp
+)
+source_group(missile FILES ${missile_SRCS})
+
 set(network_SRCS
 	src/network/commands.cpp
 	src/network/lowlevel.cpp
@@ -196,10 +244,8 @@ set(stratagusmain_SRCS
 	src/stratagus/iolib.cpp
 	src/stratagus/luacallback.cpp
 	src/stratagus/mainloop.cpp
-	src/stratagus/missile.cpp
 	src/stratagus/player.cpp
 	src/stratagus/script.cpp
-	src/stratagus/script_missile.cpp
 	src/stratagus/script_player.cpp
 	src/stratagus/script_spell.cpp
 	src/stratagus/selection.cpp
@@ -236,6 +282,7 @@ set(unit_SRCS
 	src/unit/unit_find.cpp
 	src/unit/unit_manager.cpp
 	src/unit/unit_save.cpp
+	src/unit/unitptr.cpp
 	src/unit/unittype.cpp
 	src/unit/upgrade.cpp
 )
@@ -286,11 +333,13 @@ source_group(tolua FILES ${tolua_FILES})
 
 set(stratagus_SRCS
 	${action_SRCS}
+	${animation_SRCS}
 	${ai_SRCS}
 	${editor_SRCS}
 	${game_SRCS}
 	${guichan_SRCS}
 	${map_SRCS}
+	${missile_SRCS}
 	${network_SRCS}
 	${particle_SRCS}
 	${pathfinder_SRCS}
@@ -368,6 +417,28 @@ set(stratagus_action_HDRS
 	src/include/action/action_upgradeto.h
 )
 
+set(stratagus_animation_HDRS
+	src/include/animation/animation_attack.h
+	src/include/animation/animation_die.h
+	src/include/animation/animation_exactframe.h
+	src/include/animation/animation_frame.h
+	src/include/animation/animation_goto.h
+	src/include/animation/animation_ifvar.h
+	src/include/animation/animation_label.h
+	src/include/animation/animation_move.h
+	src/include/animation/animation_randomgoto.h
+	src/include/animation/animation_randomrotate.h
+	src/include/animation/animation_randomsound.h
+	src/include/animation/animation_randomwait.h
+	src/include/animation/animation_rotate.h
+	src/include/animation/animation_setplayervar.h
+	src/include/animation/animation_setvar.h
+	src/include/animation/animation_sound.h
+	src/include/animation/animation_spawnmissile.h
+	src/include/animation/animation_spawnunit.h
+	src/include/animation/animation_unbreakable.h
+	src/include/animation/animation_wait.h
+)
 
 set(stratagus_generic_HDRS
 	src/ai/ai_local.h
@@ -393,6 +464,7 @@ set(stratagus_generic_HDRS
 	src/include/menus.h
 	src/include/minimap.h
 	src/include/missile.h
+	src/include/missileconfig.h
 	src/include/movie.h
 	src/include/myendian.h
 	src/include/netconnect.h
@@ -416,9 +488,10 @@ set(stratagus_generic_HDRS
 	src/include/translate.h
 	src/include/trigger.h
 	src/include/ui.h
-	src/include/unit_cache.h
 	src/include/unit.h
+	src/include/unit_cache.h
 	src/include/unit_manager.h
+	src/include/unitptr.h
 	src/include/unitsound.h
 	src/include/unittype.h
 	src/include/upgrade.h
@@ -427,6 +500,7 @@ set(stratagus_generic_HDRS
 	src/include/vec2i.h
 	src/include/version.h
 	src/include/video.h
+	src/include/viewport.h
 	src/include/wav.h
 	src/include/widgets.h
 )
@@ -434,9 +508,10 @@ set(stratagus_generic_HDRS
 
 source_group(include FILES ${stratagus_generic_HDRS})
 source_group(include\\action FILES ${stratagus_action_HDRS})
+source_group(include\\animation FILES ${stratagus_animation_HDRS})
 source_group(include\\guichan FILES ${stratagus_guichan_HDRS})
 
-set (stratagus_HDRS ${stratagus_generic_HDRS} ${stratagus_action_HDRS} ${stratagus_guichan_HDRS})
+set (stratagus_HDRS ${stratagus_generic_HDRS} ${stratagus_action_HDRS} ${stratagus_animation_HDRS} ${stratagus_guichan_HDRS})
 
 # Additional platform checks
 
@@ -538,6 +613,13 @@ if(NOT WITH_RENDERER)
 		set(WITH_RENDERER "NativeSDL")
 	endif()
 endif()
+
+# Install paths
+set(BINDIR "bin" CACHE PATH "Where to install binaries")
+set(SBINDIR "sbin" CACHE PATH "Where to install metaserver binary")
+set(DOCDIR "share/doc/stratagus" CACHE PATH "Sets the doc directory to a non-default location.")
+set(MANDIR "share/man/man6" CACHE PATH "Sets the man directory to a non-default location.")
+set(STRATAGUS_HEADERS "include" CACHE PATH "Where to install stratagus headers.")
 
 # Stratagus definitions
 
@@ -646,7 +728,7 @@ endif()
 # Stratagus needs to have char by default signed
 # No idea how to tell this to other compilers
 if(CMAKE_COMPILER_IS_GNUCXX)
-	set(CMAKE_CXX_FLAGS "-fsigned-char")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsigned-char")
 endif()
 
 check_function_exists("strcasestr" HAVE_STRCASESTR)
@@ -664,9 +746,7 @@ set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DDEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG")
 
 if(ENABLE_STRIP)
-	set(CMAKE_EXE_LINKER_FLAGS "-s")
-else()
-	set(CMAKE_EXE_LINKER_FLAGS "")
+	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
 endif()
 
 if(ENABLE_TOUCHSCREEN)
@@ -914,15 +994,15 @@ endif()
 
 ########### install files ###############
 
-install(TARGETS stratagus DESTINATION games)
-install(TARGETS png2stratagus DESTINATION bin)
+install(TARGETS stratagus DESTINATION ${BINDIR})
+install(TARGETS png2stratagus DESTINATION ${BINDIR})
 
 if(SQLITE_FOUND)
-	#install(TARGETS metaserver DESTINATION sbin)
+	#install(TARGETS metaserver DESTINATION ${SBINDIR})
 endif()
 
 if(ENABLE_DOC AND DOXYGEN_FOUND)
-	install(FILES doc/stratagus.6 DESTINATION share/man/man6)
+	install(FILES doc/stratagus.6 DESTINATION ${MANDIR})
 	install(FILES
 		doc/development.html
 		doc/faq.html
@@ -936,9 +1016,9 @@ if(ENABLE_DOC AND DOXYGEN_FOUND)
 		doc/README-SDL.txt
 		DESTINATION share/doc/stratagus
 	)
-	install(DIRECTORY doc/graphics doc/scripts ${CMAKE_CURRENT_BINARY_DIR}/doxygen DESTINATION share/doc/stratagus)
+	install(DIRECTORY doc/graphics doc/scripts ${CMAKE_CURRENT_BINARY_DIR}/doxygen DESTINATION ${DOCDIR})
 endif(ENABLE_DOC AND DOXYGEN_FOUND)
 
 if(ENABLE_DEV)
-	install(FILES ${gameheaders_HDRS} DESTINATION include)
+	install(FILES ${gameheaders_HDRS} DESTINATION ${STRATAGUS_HEADERS})
 endif()

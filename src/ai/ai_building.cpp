@@ -68,11 +68,12 @@
 **  @note            Can be faster written.
 */
 static int AiCheckSurrounding(const CUnit &worker,
-		 const CUnitType &type, int x, int y, bool &backupok)
+							  const CUnitType &type, int x, int y, bool &backupok)
 {
-	static int dirs[4][3] = {{1,0,0},{0,1,Map.Info.MapWidth},
-								{-1,0,0},{0,-1,-Map.Info.MapWidth}};
-	int surrounding[1024]; // Max criconference for building
+	static int dirs[4][3] = {{1, 0, 0}, {0, 1, Map.Info.MapWidth},
+		{ -1, 0, 0}, {0, -1, -Map.Info.MapWidth}
+	};
+	int surrounding[1024]; // Max circonference for building
 	int surroundingnb;
 	int lastval;
 	int dir;
@@ -94,16 +95,12 @@ static int AiCheckSurrounding(const CUnit &worker,
 			if (x == worker.tilePos.x && y == worker.tilePos.y) {
 				surrounding[surroundingnb++] = 1;
 			} else if (Map.CheckMask(x + y_offset,
-						(MapFieldUnpassable | MapFieldWall | MapFieldRocks |
-						MapFieldForest | MapFieldBuilding))
-						) {
+									 (MapFieldUnpassable | MapFieldWall | MapFieldRocks
+									  | MapFieldForest | MapFieldBuilding))) {
 				surrounding[surroundingnb++] = 0;
-			} else{
+			} else {
 				// Can pass there
-				surrounding[surroundingnb++] = Map.CheckMask(x + y_offset,
-						(MapFieldWaterAllowed +
-								MapFieldCoastAllowed + MapFieldLandAllowed));
-
+				surrounding[surroundingnb++] = Map.CheckMask(x + y_offset, (MapFieldWaterAllowed | MapFieldCoastAllowed | MapFieldLandAllowed));
 			}
 		} else {
 			surrounding[surroundingnb++] = 0;
@@ -140,131 +137,170 @@ static int AiCheckSurrounding(const CUnit &worker,
 	return obstacle == 0;
 }
 
+class BuildingPlaceFinder
+{
+public:
+	BuildingPlaceFinder(const CUnit &worker, const CUnitType &type, bool checkSurround, Vec2i* resultPos) :
+		worker(worker), type(type),
+		movemask(worker.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
+		checkSurround(checkSurround),
+		resultPos(resultPos)
+	{
+		resultPos->x = -1;
+		resultPos->y = -1;
+	}
+	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
+private:
+	const CUnit &worker;
+	const CUnitType &type;
+	unsigned int movemask;
+	bool checkSurround;
+	Vec2i* resultPos;
+};
+
+VisitResult BuildingPlaceFinder::Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from)
+{
+#if 0
+	if (!player.AiEnabled && !Map.IsFieldExplored(player, pos)) {
+		terrainTraversal.Get(pos) = -1;
+		return VisitResult_DeadEnd;
+	}
+#endif
+	if (CanBuildUnitType(&worker, type, pos, 1)
+		&& !AiEnemyUnitsInDistance(*worker.Player, NULL, pos, 8)) {
+		bool backupok;
+		if (AiCheckSurrounding(worker, type, pos.x, pos.y, backupok) && checkSurround) {
+			*resultPos = pos;
+			return VisitResult_Finished;
+		} else if (backupok && resultPos->x == -1) {
+			*resultPos = pos;
+		}
+	}
+	if (CanMoveToMask(pos, movemask)) { // reachable
+		terrainTraversal.Get(pos) = 1;
+		return VisitResult_Ok;
+	} else { // unreachable
+		terrainTraversal.Get(pos) = -1;
+		return VisitResult_DeadEnd;
+	}
+}
+
 /**
 **  Find free building place. (flood fill version)
 **
-**  @param worker  Worker to build building.
-**  @param type    Type of building.
-**  @param ox      Original X position to try building
-**  @param oy      Original Y position to try building
-**  @param dpos    Pointer for position returned.
+**  @param worker   Worker to build building.
+**  @param type     Type of building.
+**  @param startPos Original position to try building
+**  @param dpos     OUT: Pointer for position returned.
+**  @param checkSurround
 **
 **  @return        True if place found, false if no found.
 */
-static int AiFindBuildingPlace2(const CUnit &worker, const CUnitType &type, int ox, int oy, Vec2i *dpos, int surround)
+static int AiFindBuildingPlace2(const CUnit &worker, const CUnitType &type, const Vec2i &startPos, const CUnit *startUnit, Vec2i *dpos, bool checkSurround)
 {
-	const Vec2i offset[] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
-	Vec2i *points;
-	int size;
-	Vec2i pos = {ox, oy};
-	Vec2i rpos;
-	int mask;
-	int wp;
-	int rp;
-	int ep;
-	unsigned char *m;
-	Vec2i backupPos = {-1, -1};
-	bool backupok;
+	TerrainTraversal terrainTraversal;
 
-	//
-	// Look if we can build at current place.
-	//
-	if (CanBuildUnitType(&worker, type, pos, 1) &&
-		!AiEnemyUnitsInDistance(*worker.Player, NULL, pos, 8)) {
-		if (AiCheckSurrounding(worker, type, pos.x, pos.y, backupok) && surround) {
-			*dpos = pos;
-			return 1;
-		} else if (backupok) {
-			backupPos = pos;
+	terrainTraversal.SetSize(Map.Info.MapWidth, Map.Info.MapHeight);
+	terrainTraversal.Init(-1);
+
+	if (startUnit != NULL) {
+		const Vec2i offset = {1, 1};
+		const Vec2i extraTileSize = {startUnit->Type->TileWidth - 1, startUnit->Type->TileHeight - 1};
+		const Vec2i start = startUnit->tilePos - offset;
+		const Vec2i end = startUnit->tilePos + extraTileSize + offset;
+
+		for (Vec2i it = start; it.y != end.y; ++it.y) {
+			for (it.x = start.x; it.x != end.x; ++it.x) {
+				terrainTraversal.PushPos(it);
+			}
 		}
-	}
-
-	size = Map.Info.MapWidth * Map.Info.MapHeight / 4;
-	points = new Vec2i[size];
-
-	//
-	//  Make movement matrix.
-	//
-	unsigned char *matrix = CreateMatrix();
-	const int w = Map.Info.MapWidth + 2;
-
-	mask = worker.Type->MovementMask;
-	// Ignore all possible mobile units.
-	mask &= ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit);
-
-	points[0] = pos;
-	// also use the bottom right
-	if ((type.TileWidth > 1 || type.TileHeight > 1) &&
-			pos.x + type.TileWidth - 1 < Map.Info.MapWidth &&
-			pos.y + type.TileHeight - 1 < Map.Info.MapHeight) {
-		points[1].x = pos.x + type.TileWidth - 1;
-		points[1].y = pos.y + type.TileHeight - 1;
-		ep = wp = 2; // start with two points
 	} else {
-		ep = wp = 1; // start with one point
+		terrainTraversal.PushPos(startPos);
 	}
-	matrix += w + w + 2;
-	rp = 0;
-	matrix[pos.x + pos.y * w] = 1; // mark start point
 
-	//
-	// Pop a point from stack, push all neighbours which could be entered.
-	//
-	for (;;) {
-		while (rp != ep) {
-			rpos = points[rp];
-			for (int i = 0; i < 8; ++i) { // mark all neighbors
-				pos = rpos + offset[i];
-				m = matrix + pos.x + pos.y * w;
-				if (*m) { // already checked
-					continue;
-				}
+	BuildingPlaceFinder buildingPlaceFinder(worker, type, checkSurround, dpos);
 
-				//
-				// Look if we can build here and no enemies nearby.
-				//
-				if (CanBuildUnitType(&worker, type, pos, 1) &&
-						!AiEnemyUnitsInDistance(*worker.Player, NULL, pos, 8)) {
-					if (AiCheckSurrounding(worker, type, pos.x, pos.y, backupok) && surround) {
-						*dpos = pos;
-						delete[] points;
-						return 1;
-					} else if (backupok && backupPos.x == -1) {
-						backupPos = pos;
-					}
-				}
+	terrainTraversal.Run(buildingPlaceFinder);
+	return Map.Info.IsPointOnMap(*dpos);
+}
 
-				if (CanMoveToMask(pos, mask)) { // reachable
-					*m = 1;
-					points[wp] = pos; // push the point
-					if (++wp >= size) { // round about
-						wp = 0;
-					}
-				} else { // unreachable
-					*m = 99;
-				}
-			}
+class HallPlaceFinder
+{
+public:
+	HallPlaceFinder(const CUnit &worker, const CUnitType &type, int resource, Vec2i* resultPos) :
+		worker(worker), type(type),
+		movemask(worker.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
+		resource(resource),
+		resultPos(resultPos)
+	{}
+	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
+private:
+	bool IsAUsableMine(const CUnit &mine) const;
+private:
+	const CUnit &worker;
+	const CUnitType &type;
+	const unsigned int movemask;
+	const int resource;
+	Vec2i* resultPos;
+};
 
-			if (++rp >= size) { // round about
-				rp = 0;
+bool HallPlaceFinder::IsAUsableMine(const CUnit &mine) const
+{
+	// Check units around mine
+	const Vec2i offset = {5, 5};
+	const Vec2i minpos = mine.tilePos - offset;
+	const Vec2i typeSize = {mine.Type->TileWidth - 1, mine.Type->TileHeight - 1};
+	const Vec2i maxpos = mine.tilePos + typeSize + offset;
+	std::vector<CUnit *> units;
+
+	Map.Select(minpos, maxpos, units);
+
+	const size_t nunits = units.size();
+	int buildings = 0;
+
+	for (size_t j = 0; j < nunits; ++j) {
+		const CUnit &unit = *units[j];
+		// Enemy near mine
+		if (AiPlayer->Player->IsEnemy(*unit.Player)) {
+			return false;
+		}
+		// Town hall near mine
+		if (unit.Type->CanStore[resource]) {
+			return false;
+		}
+		// Town hall may not be near but we may be using it, check
+		// for 2 buildings near it and assume it's been used
+		if (unit.Type->Building && !unit.Type->GivesResource == resource) {
+			++buildings;
+			if (buildings == 2) {
+				return false;
 			}
 		}
+	}
+	return true;
+}
 
-		//
-		// Continue with next frame.
-		//
-		if (rp == wp) { // unreachable, no more points available
-			break;
+VisitResult HallPlaceFinder::Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from)
+{
+#if 0
+	if (!player.AiEnabled && !Map.IsFieldExplored(player, pos)) {
+		terrainTraversal.Get(pos) = -1;
+		return VisitResult_DeadEnd;
+	}
+#endif
+	CUnit *mine = ResourceOnMap(pos, resource);
+	if (mine && IsAUsableMine(*mine)) {
+		if (AiFindBuildingPlace2(worker, type, pos, mine, resultPos, true)) {
+			return VisitResult_Finished;
 		}
-		ep = wp;
 	}
-	delete[] points;
-
-	if (backupPos.x != -1) {
-		*dpos = backupPos;
-		return 1;
+	if (CanMoveToMask(pos, movemask)) { // reachable
+		terrainTraversal.Get(pos) = 1;
+		return VisitResult_Ok;
+	} else { // unreachable
+		terrainTraversal.Get(pos) = -1;
+		return VisitResult_DeadEnd;
 	}
-	return 0;
 }
 
 /**
@@ -278,11 +314,10 @@ static int AiFindBuildingPlace2(const CUnit &worker, const CUnitType &type, int 
 **  5) no hall already near
 **  !6) enough gold in mine
 **
-**  @param worker  Worker to build building.
-**  @param type    Type of building.
-**  @param nx      Start search X position (if == -1 then unit X pos used).
-**  @param ny      Start search Y position (if == -1 then unit Y pos used).
-**  @param dpos    Pointer for position returned.
+**  @param worker    Worker to build building.
+**  @param type      Type of building.
+**  @param startPos  Start search position (if == -1 then unit X pos used).
+**  @param resultPos OUT: Pointer for position returned.
 **
 **  @return        True if place found, false if not found.
 **
@@ -290,242 +325,102 @@ static int AiFindBuildingPlace2(const CUnit &worker, const CUnitType &type, int 
 **                 two flood fills, is not a perfect solution.
 */
 static int AiFindHallPlace(const CUnit &worker,
-						 const CUnitType &type,
-						 int nx, int ny,
-						 Vec2i *dpos,
-						 int resource = GoldCost)
+						   const CUnitType &type,
+						   const Vec2i &startPos,
+						   Vec2i *resultPos,
+						   int resource = GoldCost)
 {
-	const Vec2i offset[] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
-	Vec2i *points;
-	int size;
-	Vec2i pos;
-	Vec2i rpos;
-	int mask;
-	int wp;
-	int rp;
-	int ep;
-	int w;
-	unsigned char *m;
-	unsigned char *morg;
-	unsigned char *matrix;
-	CUnit *mine;
+	TerrainTraversal terrainTraversal;
 
-	pos.x = (nx != -1 ? nx : worker.tilePos.x);
-	pos.y = (ny != -1 ? ny : worker.tilePos.y);
-	size = Map.Info.MapWidth * Map.Info.MapHeight / 4;
-	points = new Vec2i[size];
+	terrainTraversal.SetSize(Map.Info.MapWidth, Map.Info.MapHeight);
+	terrainTraversal.Init(-1);
 
-	//
-	// Make movement matrix. FIXME: can create smaller matrix.
-	//
-	morg = MakeMatrix();
-	w = Map.Info.MapWidth + 2;
-	matrix = morg + w + w + 2;
-
-	points[0] = pos;
-	rp = 0;
-	matrix[pos.x + pos.y * w] = 1; // mark start point
-	ep = wp = 1; // start with one point
-
-	mask = worker.Type->MovementMask;
-
-	//
-	// Pop a point from stack, push all neighbors which could be entered.
-	//
-	for (;;) {
-		while (rp != ep) {
-			rpos = points[rp];
-			for (int i = 0; i < 8; ++i) { // mark all neighbors
-				pos = rpos + offset[i];
-				m = matrix + pos.x + pos.y * w;
-				if (*m) { // already checked
-					continue;
-				}
-				//
-				// Look if there is a mine
-				//
-				if ((mine = ResourceOnMap(pos, resource))) {
-					// Check units around mine
-					const Vec2i offset = {5, 5};
-					const Vec2i minpos = mine->tilePos - offset;
-					const Vec2i typeSize = {mine->Type->TileWidth - 1, mine->Type->TileHeight - 1};
-					const Vec2i maxpos = mine->tilePos + typeSize + offset;
-					std::vector<CUnit*> units;
-
-					Map.Select(minpos, maxpos, units);
-
-					const size_t nunits = units.size();
-					int buildings = 0;
-					size_t j;
-
-					for (j = 0; j < nunits; ++j) {
-						// Enemy near mine
-						if (AiPlayer->Player->IsEnemy(*units[j]->Player)) {
-							break;
-						}
-						// Town hall near mine
-						if (units[j]->Type->CanStore[resource]) {
-							break;
-						}
-						// Town hall may not be near but we may be using it, check
-						// for 2 buildings near it and assume it's been used
-						if (units[j]->Type->Building
-							&& !units[j]->Type->GivesResource == resource) {
-							++buildings;
-							if (buildings == 2) {
-								break;
-							}
-						}
-					}
-					if (j == nunits) {
-						if (AiFindBuildingPlace2(worker, type, pos.x, pos.y, dpos, 1)) {
-							delete[] morg;
-							delete[] points;
-							return 1;
-						}
-					}
-				}
-
-				if (CanMoveToMask(pos, mask)) { // reachable
-					*m = 1;
-					points[wp] = pos; // push the point
-					if (++wp >= size) { // round about
-						wp = 0;
-					}
-				} else { // unreachable
-					*m = 99;
-				}
-			}
-			if (++rp >= size) { // round about
-				rp = 0;
-			}
-		}
-
-		//
-		// Continue with next frame.
-		//
-		if (rp == wp) { // unreachable, no more points available
-			break;
-		}
-		ep = wp;
+	if (Map.Info.IsPointOnMap(startPos)) {
+		terrainTraversal.PushPos(startPos);
+	} else {
+		terrainTraversal.PushPos(worker.tilePos);
 	}
 
-	delete[] morg;
-	delete[] points;
-	return 0;
+	HallPlaceFinder hallPlaceFinder(worker, type, resource, resultPos);
+
+	return terrainTraversal.Run(hallPlaceFinder);
+}
+
+class LumberMillPlaceFinder
+{
+public:
+	LumberMillPlaceFinder(const CUnit &worker, const CUnitType &type, Vec2i* resultPos) :
+		worker(worker), type(type),
+		movemask(worker.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
+		resultPos(resultPos)
+	{}
+	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
+private:
+	const CUnit &worker;
+	const CUnitType &type;
+	unsigned int movemask;
+	Vec2i* resultPos;
+};
+
+VisitResult LumberMillPlaceFinder::Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from)
+{
+#if 0
+	if (!player.AiEnabled && !Map.IsFieldExplored(player, pos)) {
+		terrainTraversal.Get(pos) = -1;
+		return VisitResult_DeadEnd;
+	}
+#endif
+	if (Map.ForestOnMap(pos)) {
+		if (AiFindBuildingPlace2(worker, type, pos, NULL, resultPos, true)) {
+			return VisitResult_Finished;
+		}
+	}
+	if (CanMoveToMask(pos, movemask)) { // reachable
+		terrainTraversal.Get(pos) = 1;
+		return VisitResult_Ok;
+	} else { // unreachable
+		terrainTraversal.Get(pos) = -1;
+		return VisitResult_DeadEnd;
+	}
 }
 
 /**
 **  Find free building place for lumber mill. (flood fill version)
 **
-**  @param worker  Worker to build building.
-**  @param type    Type of building.
-**  @param nx      Start search X position (if == -1 then unit X pos used).
-**  @param ny      Start search X position (if == -1 then unit X pos used).
-**  @param dpos    Pointer for position returned.
+**  @param worker   Worker to build building.
+**  @param type     Type of building.
+**  @param startPos Start search X position (if == -1 then unit X pos used).
+**  @param dpos     OUT: Pointer for position returned.
 **
 **  @return        True if place found, false if not found.
 **
-**  @todo          FIXME: This is slow really slow, using two flood
-**                 fills, is not a perfect solution.
+**  @todo          FIXME: This is slow really slow, using two flood fills, is not a perfect solution.
 */
-static int AiFindLumberMillPlace(const CUnit &worker, const CUnitType &type,
-	int nx, int ny, Vec2i *dpos)
+static bool AiFindLumberMillPlace(const CUnit &worker, const CUnitType &type, const Vec2i &startPos, Vec2i *dpos)
 {
-	const Vec2i offset[] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
-	Vec2i *points;
-	int size;
-	Vec2i rpos;
-	int mask;
-	int wp;
-	int rp;
-	int ep;
-	int i;
-	int w;
-	unsigned char *m;
-	unsigned char *morg;
-	unsigned char *matrix;
-	Vec2i pos;
+	TerrainTraversal terrainTraversal;
 
-	pos.x = nx != -1 ? nx : worker.tilePos.x;
-	pos.y = ny != -1 ? ny : worker.tilePos.y;
-	size = Map.Info.MapWidth * Map.Info.MapHeight / 4;
-	points = new Vec2i[size];
+	terrainTraversal.SetSize(Map.Info.MapWidth, Map.Info.MapHeight);
+	terrainTraversal.Init(-1);
 
-	//
-	// Make movement matrix.
-	//
-	morg = MakeMatrix();
-	w = Map.Info.MapWidth + 2;
-	matrix = morg + w + w + 2;
-
-	points[0] = pos;
-	rp = 0;
-	matrix[pos.x + pos.y * w] = 1; // mark start point
-	ep = wp = 1; // start with one point
-
-	mask = worker.Type->MovementMask;
-
-	//
-	// Pop a point from stack, push all neightbors which could be entered.
-	//
-	for (;;) {
-		while (rp != ep) {
-			rpos = points[rp];
-			for (i = 0; i < 8; ++i) { // mark all neighbors
-				pos = rpos + offset[i];
-				m = matrix + pos.x + pos.y * w;
-				if (*m) { // already checked
-					continue;
-				}
-				//
-				// Look if there is wood
-				//
-				if (Map.ForestOnMap(pos)) {
-					if (AiFindBuildingPlace2(worker, type, pos.x, pos.y, dpos,1)) {
-						delete[] morg;
-						delete[] points;
-						return 1;
-					}
-				}
-
-				if (CanMoveToMask(pos, mask)) { // reachable
-					*m = 1;
-					points[wp] = pos; // push the point
-					if (++wp >= size) { // round about
-						wp = 0;
-					}
-				} else { // unreachable
-					*m = 99;
-				}
-			}
-
-			if (++rp >= size) { // round about
-				rp = 0;
-			}
-		}
-
-		//
-		// Continue with next frame.
-		//
-		if (rp == wp) { // unreachable, no more points available
-			break;
-		}
-		ep = wp;
+	if (Map.Info.IsPointOnMap(startPos)) {
+		terrainTraversal.PushPos(startPos);
+	} else {
+		terrainTraversal.PushPos(worker.tilePos);
 	}
 
-	delete[] morg;
-	delete[] points;
-	return 0;
+	LumberMillPlaceFinder lumberMillPlaceFinder(worker, type, dpos);
+
+	return terrainTraversal.Run(lumberMillPlaceFinder);
 }
 
 static int AiFindMiningPlace(const CUnit &worker,
-						 const CUnitType &type,
-						 int nx, int ny,
-						 Vec2i *dpos,
-						 int resource)
+							 const CUnitType &type,
+							 int nx, int ny,
+							 Vec2i *dpos,
+							 int resource)
 {
-	const Vec2i offset[] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+	const Vec2i offset[] = {{0, -1}, { -1, 0}, {1, 0}, {0, 1}, { -1, -1}, {1, -1}, { -1, 1}, {1, 1}};
 	Vec2i pos;
 	Vec2i rpos;
 	int wp;
@@ -543,12 +438,12 @@ static int AiFindMiningPlace(const CUnit &worker,
 	//
 	unsigned char *morg = MakeMatrix();
 	int w = Map.Info.MapWidth + 2;
-	unsigned char *matrix = morg + w + w + 2;
+	unsigned char *matrix = morg + w + w + 1;
 
 	points[0] = pos;
 	int rp = 0;
 	//if(worker->tilePos == pos)
-		matrix[pos.x + pos.y * w] = 1; // mark start point
+	matrix[pos.x + pos.y * w] = 1; // mark start point
 	ep = wp = 1; // start with one point
 
 	int mask = worker.Type->MovementMask;
@@ -569,10 +464,10 @@ static int AiFindMiningPlace(const CUnit &worker,
 				// Look if there is a mine area
 				//
 				if ((mine = ResourceOnMap(pos, resource, false)) &&
-						 AiFindBuildingPlace2(worker, type, mine->tilePos.x, mine->tilePos.y, dpos,0)) {
-							delete[] morg;
-							delete[] points;
-							return 1;
+					AiFindBuildingPlace2(worker, type, mine->tilePos, mine, dpos, false)) {
+					delete[] morg;
+					delete[] points;
+					return 1;
 				}
 
 				if (CanMoveToMask(pos, mask)) { // reachable
@@ -611,8 +506,7 @@ static int AiFindMiningPlace(const CUnit &worker,
 **
 **  @param worker  Worker to build building.
 **  @param type    Type of building.
-**  @param nx      Start search near X position (or worker->X if nx == -1).
-**  @param ny      Start search near Y position (or worker->Y if ny == -1).
+**  @param nearPos Start search near nearPos position (or worker->X if nearPos is invalid).
 **  @param dpos    Pointer for position returned.
 **
 **  @return        True if place found, false if no found.
@@ -620,41 +514,37 @@ static int AiFindMiningPlace(const CUnit &worker,
 **  @todo          Better and faster way to find building place of oil
 **                 platforms Special routines for special buildings.
 */
-int AiFindBuildingPlace(const CUnit &worker, const CUnitType &type, int nx, int ny, Vec2i *dpos)
+int AiFindBuildingPlace(const CUnit &worker, const CUnitType &type, const Vec2i &nearPos, Vec2i *dpos)
 {
-	//
 	// Find a good place for a new hall
-	//
 	DebugPrint("%d: Want to build a %s(%s)\n" _C_ AiPlayer->Player->Index
-		_C_ type.Ident.c_str() _C_ type.Name.c_str());
+			   _C_ type.Ident.c_str() _C_ type.Name.c_str());
 
 	//Mines and Depots
-	for (int i = 0; i < MaxCosts; ++i) {
-		ResourceInfo *resinfo= worker.Type->ResInfo[i];
+	for (int i = 1; i < MaxCosts; ++i) {
+		ResourceInfo *resinfo = worker.Type->ResInfo[i];
 		//Depots
 		if (type.CanStore[i]) {
 			if (resinfo && resinfo->TerrainHarvester) {
-				return AiFindLumberMillPlace(worker, type, nx, ny, dpos);
+				return AiFindLumberMillPlace(worker, type, nearPos, dpos);
 			} else {
-				return AiFindHallPlace(worker, type, nx, ny, dpos, i);
+				return AiFindHallPlace(worker, type, nearPos, dpos, i);
 			}
 		} else
 			//mines
 			if (type.GivesResource == i) {
 				if (resinfo && resinfo->RefineryHarvester) {
 					//Mine have to be build ONTOP resources
-					return AiFindMiningPlace(worker, type, nx, ny,  dpos, i);
+					return AiFindMiningPlace(worker, type, nearPos.x, nearPos.y,  dpos, i);
 				} else {
 					//Mine can be build without resource restrictions: solar panels, etc
-					return AiFindBuildingPlace2(worker, type,
-							(nx != -1 ? nx : worker.tilePos.x),
-							(ny != -1 ? ny : worker.tilePos.y), dpos,1);
+					const Vec2i &startPos = Map.Info.IsPointOnMap(nearPos) ? nearPos : worker.tilePos;
+					return AiFindBuildingPlace2(worker, type, startPos, NULL, dpos, true);
 				}
 			}
 	}
-
-	return AiFindBuildingPlace2(worker, type,
-			(nx != -1 ? nx : worker.tilePos.x), (ny != -1 ? ny : worker.tilePos.y), dpos,1);
+	const Vec2i &startPos = Map.Info.IsPointOnMap(nearPos) ? nearPos : worker.tilePos;
+	return AiFindBuildingPlace2(worker, type, startPos, NULL, dpos, true);
 }
 
 //@}

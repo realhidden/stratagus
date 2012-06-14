@@ -61,7 +61,7 @@ enum {
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* static */ COrder* COrder::NewActionFollow(CUnit &dest)
+/* static */ COrder *COrder::NewActionFollow(CUnit &dest)
 {
 	COrder_Follow *order = new COrder_Follow;
 
@@ -86,13 +86,7 @@ enum {
 	}
 	file.printf(" \"range\", %d,", this->Range);
 	if (this->HasGoal()) {
-		CUnit &goal = *this->GetGoal();
-		if (goal.Destroyed) {
-			/* this unit is destroyed so it's not in the global unit
-			 * array - this means it won't be saved!!! */
-			printf ("FIXME: storing destroyed Goal - loading will fail.\n");
-		}
-		file.printf(" \"goal\", \"%s\",", UnitReference(goal).c_str());
+		file.printf(" \"goal\", \"%s\",", UnitReference(this->GetGoal()).c_str());
 	}
 	file.printf(" \"tile\", {%d, %d},", this->goalPos.x, this->goalPos.y);
 
@@ -124,7 +118,12 @@ enum {
 	return true;
 }
 
-/* virtual */ PixelPos COrder_Follow::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+/* virtual */ bool COrder_Follow::IsValid() const
+{
+	return true;
+}
+
+/* virtual */ PixelPos COrder_Follow::Show(const CViewport &vp, const PixelPos &lastScreenPos) const
 {
 	PixelPos targetPos;
 
@@ -139,7 +138,7 @@ enum {
 	return targetPos;
 }
 
-/* virtual */ void COrder_Follow::UpdatePathFinderData(PathFinderInput& input)
+/* virtual */ void COrder_Follow::UpdatePathFinderData(PathFinderInput &input)
 {
 	input.SetMinRange(0);
 	input.SetMaxRange(this->Range);
@@ -203,8 +202,7 @@ enum {
 			// Some tries to reach the goal
 			this->Range++;
 			break;
-		case PF_REACHED:
-		{
+		case PF_REACHED: {
 			if (!goal) { // goal has died
 				this->Finished = true;
 				return ;
@@ -221,10 +219,8 @@ enum {
 				PlayGameSound(SoundForName("invisibility"), MaxSampleVolume);
 				// FIXME: MissileTypeByIdent() should be called once
 				MakeMissile(MissileTypeByIdent("missile-normal-spell"),
-					unit.tilePos.x * PixelTileSize.x + PixelTileSize.x / 2,
-					unit.tilePos.y * PixelTileSize.y + PixelTileSize.y / 2,
-					unit.tilePos.x * PixelTileSize.x + PixelTileSize.x / 2,
-					unit.tilePos.y * PixelTileSize.y + PixelTileSize.y / 2);
+							unit.GetMapPixelPosCenter(),
+							unit.GetMapPixelPosCenter());
 #endif
 				// FIXME: we must check if the units supports the new order.
 				CUnit &dest = *goal->Goal;
@@ -252,7 +248,7 @@ enum {
 			this->goalPos = goal->tilePos;
 			this->State = State_TargetReached;
 		}
-			// FALL THROUGH
+		// FALL THROUGH
 		default:
 			break;
 	}

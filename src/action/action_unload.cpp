@@ -53,7 +53,7 @@
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* static */ COrder* COrder::NewActionUnload(const Vec2i &pos, CUnit *what)
+/* static */ COrder *COrder::NewActionUnload(const Vec2i &pos, CUnit *what)
 {
 	COrder_Unload *order = new COrder_Unload;
 
@@ -71,13 +71,7 @@
 		file.printf(" \"finished\", ");
 	}
 	if (this->HasGoal()) {
-		CUnit &goal = *this->GetGoal();
-		if (goal.Destroyed) {
-			/* this unit is destroyed so it's not in the global unit
-			 * array - this means it won't be saved!!! */
-			printf ("FIXME: storing destroyed Goal - loading will fail.\n");
-		}
-		file.printf(" \"goal\", \"%s\",", UnitReference(goal).c_str());
+		file.printf(" \"goal\", \"%s\",", UnitReference(this->GetGoal()).c_str());
 	}
 	file.printf(" \"tile\", {%d, %d}, ", this->goalPos.x, this->goalPos.y);
 	file.printf("\"state\", %d", this->State);
@@ -102,7 +96,12 @@
 	return true;
 }
 
-/* virtual */ PixelPos COrder_Unload::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+/* virtual */ bool COrder_Unload::IsValid() const
+{
+	return true;
+}
+
+/* virtual */ PixelPos COrder_Unload::Show(const CViewport &vp, const PixelPos &lastScreenPos) const
 {
 	const PixelPos targetPos = vp.TilePosToScreen_Center(this->goalPos);
 
@@ -112,7 +111,7 @@
 	return targetPos;
 }
 
-/* virtual */ void COrder_Unload::UpdatePathFinderData(PathFinderInput& input)
+/* virtual */ void COrder_Unload::UpdatePathFinderData(PathFinderInput &input)
 {
 	input.SetMinRange(0);
 	input.SetMaxRange(0);
@@ -221,7 +220,7 @@ static bool IsDropZonePossible(const CUnit &transporter, const Vec2i &pos)
 		return false;
 	}
 	Vec2i dummyPos;
-	CUnit* unit = transporter.UnitInside;
+	CUnit *unit = transporter.UnitInside;
 	for (int i = 0; i < transporter.InsideCount; ++i, unit = unit->NextContained) {
 		if (FindUnloadPosition(transporter, *unit, pos, maxUnloadRange, &dummyPos)) {
 			return true;

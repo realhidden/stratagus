@@ -53,6 +53,7 @@
 #include "player.h"
 #include "script.h"
 #include "sound.h"
+#include "spells.h"
 #include "ui.h"
 #include "unit.h"
 #include "unittype.h"
@@ -76,7 +77,7 @@
 **
 **  @todo manage correctly unit with no animation attack.
 */
-void AnimateActionAttack(CUnit &unit, COrder& order)
+void AnimateActionAttack(CUnit &unit, COrder &order)
 {
 	//  No animation.
 	//  So direct fire missile.
@@ -88,7 +89,7 @@ void AnimateActionAttack(CUnit &unit, COrder& order)
 	UnitShowAnimation(unit, unit.Type->Animations->Attack);
 }
 
-/* static */ COrder* COrder::NewActionAttack(const CUnit &attacker, CUnit &target)
+/* static */ COrder *COrder::NewActionAttack(const CUnit &attacker, CUnit &target)
 {
 	COrder_Attack *order = new COrder_Attack(false);
 
@@ -103,7 +104,7 @@ void AnimateActionAttack(CUnit &unit, COrder& order)
 	return order;
 }
 
-/* static */ COrder* COrder::NewActionAttack(const CUnit &attacker, const Vec2i &dest)
+/* static */ COrder *COrder::NewActionAttack(const CUnit &attacker, const Vec2i &dest)
 {
 	Assert(Map.Info.IsPointOnMap(dest));
 
@@ -120,7 +121,7 @@ void AnimateActionAttack(CUnit &unit, COrder& order)
 	return order;
 }
 
-/* static */ COrder* COrder::NewActionAttackGround(const CUnit &attacker, const Vec2i &dest)
+/* static */ COrder *COrder::NewActionAttackGround(const CUnit &attacker, const Vec2i &dest)
 {
 	COrder_Attack *order = new COrder_Attack(true);
 
@@ -148,13 +149,7 @@ void AnimateActionAttack(CUnit &unit, COrder& order)
 		file.printf(" \"finished\", ");
 	}
 	if (this->HasGoal()) {
-		CUnit &goal = *this->GetGoal();
-		if (goal.Destroyed) {
-			/* this unit is destroyed so it's not in the global unit
-			 * array - this means it won't be saved!!! */
-			printf ("FIXME: storing destroyed Goal - loading will fail.\n");
-		}
-		file.printf(" \"goal\", \"%s\",", UnitReference(goal).c_str());
+		file.printf(" \"goal\", \"%s\",", UnitReference(this->GetGoal()).c_str());
 	}
 	file.printf(" \"tile\", {%d, %d},", this->goalPos.x, this->goalPos.y);
 
@@ -191,7 +186,21 @@ void AnimateActionAttack(CUnit &unit, COrder& order)
 	return true;
 }
 
-/* virtual */ PixelPos COrder_Attack::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+/* virtual */ bool COrder_Attack::IsValid() const
+{
+	if (Action == UnitActionAttack) {
+		if (this->HasGoal()) {
+			return this->GetGoal()->IsAliveOnMap();
+		} else {
+			return Map.Info.IsPointOnMap(this->goalPos);
+		}
+	} else {
+		Assert(Action == UnitActionAttackGround);
+		return Map.Info.IsPointOnMap(this->goalPos);
+	}
+}
+
+/* virtual */ PixelPos COrder_Attack::Show(const CViewport &vp, const PixelPos &lastScreenPos) const
 {
 	PixelPos targetPos;
 
@@ -206,7 +215,7 @@ void AnimateActionAttack(CUnit &unit, COrder& order)
 	return targetPos;
 }
 
-/* virtual */ void COrder_Attack::UpdatePathFinderData(PathFinderInput& input)
+/* virtual */ void COrder_Attack::UpdatePathFinderData(PathFinderInput &input)
 {
 	input.SetMinRange(this->MinRange);
 	input.SetMaxRange(this->Range);
@@ -237,11 +246,16 @@ void AnimateActionAttack(CUnit &unit, COrder& order)
 	CUnit *goal = this->GetGoal();
 
 	if (goal) {
+		if (goal->IsAlive() == false) {
+			this->ClearGoal();
+			this->goalPos = goal->tilePos;
+			return false;
+		}
 		if (goal == attacker) {
 			return true;
 		}
 		if (goal->CurrentAction() == UnitActionAttack) {
-			const COrder_Attack &order = *static_cast<COrder_Attack*>(goal->CurrentOrder());
+			const COrder_Attack &order = *static_cast<COrder_Attack *>(goal->CurrentOrder());
 			if (order.GetGoal() == &unit) {
 				//we already fight with one of attackers;
 				return true;
@@ -323,15 +337,16 @@ bool COrder_Attack::CheckForTargetInRange(CUnit &unit)
 			this->SetGoal(goal);
 			this->MinRange = unit.Type->MinAttackRange;
 			this->Range = unit.Stats->Variables[ATTACKRANGE_INDEX].Max;
-			this->goalPos.x = this->goalPos.y = -1;
+			this->goalPos = goal->tilePos;
 			this->State |= WEAK_TARGET; // weak target
 		}
-	// Have a weak target, try a better target.
-	} else if (this->HasGoal() && (this->State & WEAK_TARGET)) {
+		// Have a weak target, try a better target.
+	} else if (this->HasGoal() && (this->State & WEAK_TARGET || unit.Player->AiEnabled)) {
 		CUnit *goal = this->GetGoal();
 		CUnit *newTarget = AttackUnitsInReactRange(unit);
 
-		if (newTarget && newTarget->Type->Priority > goal->Type->Priority) {
+		if (newTarget && newTarget->IsAgressive()
+			&& ThreatCalculate(unit, *newTarget) < ThreatCalculate(unit, *goal)) {
 			COrder *savedOrder = this->Clone();
 
 			if (unit.StoreOrder(savedOrder) == false) {
@@ -339,7 +354,7 @@ bool COrder_Attack::CheckForTargetInRange(CUnit &unit)
 				savedOrder = NULL;
 			}
 			this->SetGoal(newTarget);
-			this->goalPos.x = this->goalPos.y = -1;
+			this->goalPos = newTarget->tilePos;
 		}
 	}
 
@@ -368,7 +383,7 @@ void COrder_Attack::MoveToTarget(CUnit &unit)
 	// Look if we have reached the target.
 	if (err == 0 && !this->HasGoal()) {
 		// Check if we're in range when attacking a location and we are waiting
-		if (unit.MapDistanceTo(this->goalPos.x, this->goalPos.y) <= unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
+		if (unit.MapDistanceTo(this->goalPos) <= unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
 			err = PF_REACHED;
 		}
 	}
@@ -382,7 +397,7 @@ void COrder_Attack::MoveToTarget(CUnit &unit)
 		CUnit *goal = this->GetGoal();
 		// Have reached target? FIXME: could use the new return code?
 		if (goal
-		&& unit.MapDistanceTo(*goal) <= unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
+			&& unit.MapDistanceTo(*goal) <= unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
 			// Reached another unit, now attacking it
 			unit.State = 0;
 			const Vec2i dir = goal->tilePos + goal->Type->GetHalfTileSize() - unit.tilePos;
@@ -391,8 +406,9 @@ void COrder_Attack::MoveToTarget(CUnit &unit)
 			return;
 		}
 		// Attacking wall or ground.
-		if (!goal && (Map.WallOnMap(this->goalPos) || this->Action == UnitActionAttackGround)
-			&& unit.MapDistanceTo(this->goalPos.x, this->goalPos.y) <= unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
+		if (((goal && goal->Type && goal->Type->Wall)
+			 || (!goal && (Map.WallOnMap(this->goalPos) || this->Action == UnitActionAttackGround)))
+			&& unit.MapDistanceTo(this->goalPos) <= unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
 			// Reached wall or ground, now attacking it
 			unit.State = 0;
 			UnitHeadingFromDeltaXY(unit, this->goalPos - unit.tilePos);
@@ -468,17 +484,18 @@ void COrder_Attack::AttackTarget(CUnit &unit)
 			savedOrder = NULL;
 		}
 		this->SetGoal(goal);
-		this->goalPos.x = this->goalPos.y = -1;
+		this->goalPos = goal->tilePos;
 		this->MinRange = unit.Type->MinAttackRange;
 		this->Range = unit.Stats->Variables[ATTACKRANGE_INDEX].Max;
 		this->State |= WEAK_TARGET;
 
-	// Have a weak target, try a better target.
-	// FIXME: if out of range also try another target quick
+		// Have a weak target, try a better target.
+		// FIXME: if out of range also try another target quick
 	} else {
 		if ((this->State & WEAK_TARGET)) {
 			CUnit *newTarget = AttackUnitsInReactRange(unit);
-			if (newTarget && newTarget->Type->Priority > goal->Type->Priority) {
+			if (newTarget && newTarget->IsAgressive()
+				&& ThreatCalculate(unit, *newTarget) < ThreatCalculate(unit, *goal)) {
 				COrder *savedOrder = this->Clone();
 
 				if (unit.StoreOrder(savedOrder) == false) {
@@ -487,7 +504,7 @@ void COrder_Attack::AttackTarget(CUnit &unit)
 				}
 				goal = newTarget;
 				this->SetGoal(newTarget);
-				this->goalPos.x = this->goalPos.y = -1;
+				this->goalPos = newTarget->tilePos;
 				this->MinRange = unit.Type->MinAttackRange;
 				this->State = MOVE_TO_TARGET;
 			}
@@ -498,7 +515,7 @@ void COrder_Attack::AttackTarget(CUnit &unit)
 	const int dist = unit.MapDistanceTo(*goal);
 	if (dist > unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
 		// towers don't chase after goal
-		if (!unit.Type->Building) {		
+		if (unit.CanMove()) {
 			COrder *savedOrder = this->Clone();
 			if (unit.StoreOrder(savedOrder) == false) {
 				delete savedOrder;
@@ -554,7 +571,7 @@ void COrder_Attack::AttackTarget(CUnit &unit)
 				const int dist = goal.MapDistanceTo(unit);
 
 				if (unit.Type->MinAttackRange < dist &&
-					 dist <= unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
+					dist <= unit.Stats->Variables[ATTACKRANGE_INDEX].Max) {
 					const Vec2i dir = goal.tilePos + goal.Type->GetHalfTileSize() - unit.tilePos;
 
 					UnitHeadingFromDeltaXY(unit, dir);
@@ -571,10 +588,8 @@ void COrder_Attack::AttackTarget(CUnit &unit)
 		case MOVE_TO_TARGET:
 		case MOVE_TO_TARGET + WEAK_TARGET:
 			if (!unit.CanMove()) {
-				if (!unit.RestoreOrder()) {
-					this->Finished = true;
-					unit.State = 0;
-				}
+				this->Finished = true;
+				unit.State = 0;
 				return;
 			}
 			MoveToTarget(unit);

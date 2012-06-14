@@ -61,7 +61,7 @@
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* static */ COrder* COrder::NewActionSpellCast(SpellType &spell, const Vec2i &pos, CUnit *target)
+/* static */ COrder *COrder::NewActionSpellCast(SpellType &spell, const Vec2i &pos, CUnit *target)
 {
 	COrder_SpellCast *order = new COrder_SpellCast;
 
@@ -96,13 +96,7 @@
 	}
 	file.printf(" \"range\", %d,", this->Range);
 	if (this->HasGoal()) {
-		CUnit &goal = *this->GetGoal();
-		if (goal.Destroyed) {
-			/* this unit is destroyed so it's not in the global unit
-			 * array - this means it won't be saved!!! */
-			printf ("FIXME: storing destroyed Goal - loading will fail.\n");
-		}
-		file.printf(" \"goal\", \"%s\",", UnitReference(goal).c_str());
+		file.printf(" \"goal\", \"%s\",", UnitReference(this->GetGoal()).c_str());
 	}
 	file.printf(" \"tile\", {%d, %d},", this->goalPos.x, this->goalPos.y);
 
@@ -140,7 +134,12 @@
 	return true;
 }
 
-/* virtual */ PixelPos COrder_SpellCast::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+/* virtual */ bool COrder_SpellCast::IsValid() const
+{
+	return true;
+}
+
+/* virtual */ PixelPos COrder_SpellCast::Show(const CViewport &vp, const PixelPos &lastScreenPos) const
 {
 	PixelPos targetPos;
 
@@ -155,7 +154,7 @@
 	return targetPos;
 }
 
-/* virtual */ void COrder_SpellCast::UpdatePathFinderData(PathFinderInput& input)
+/* virtual */ void COrder_SpellCast::UpdatePathFinderData(PathFinderInput &input)
 {
 	input.SetMinRange(0);
 	input.SetMaxRange(this->Range);
@@ -182,7 +181,7 @@
 	if (goal && !goal->IsVisibleAsGoal(*unit.Player)) {
 		unit.ReCast = 0;
 	} else {
-		unit.ReCast = SpellCast(unit, this->Spell, goal, goalPos.x, goalPos.y);
+		unit.ReCast = SpellCast(unit, this->Spell, goal, goalPos);
 	}
 	UnHideUnit(unit); // unit is invisible until attacks
 }
@@ -190,7 +189,7 @@
 
 
 /**
-**  Animate unit spell cast 
+**  Animate unit spell cast
 **
 **  @param unit  Unit, for that spell cast/attack animation is played.
 */
@@ -236,12 +235,12 @@ bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 		UnitHeadingFromDeltaXY(unit, goal->tilePos + goal->Type->GetHalfTileSize() - unit.tilePos);
 		this->State++; // cast the spell
 		return false;
-	} else if (!goal && unit.MapDistanceTo(this->goalPos.x, this->goalPos.y) <= this->Range) {
+	} else if (!goal && unit.MapDistanceTo(this->goalPos) <= this->Range) {
 		// there is no goal and target spot is in range
 		UnitHeadingFromDeltaXY(unit, this->goalPos - unit.tilePos);
 		this->State++; // cast the spell
 		return false;
-	} else if (err == PF_UNREACHABLE) {
+	} else if (err == PF_UNREACHABLE || !unit.CanMove()) {
 		// goal/spot unreachable and out of range -- give up
 		unit.State = 0;
 		return true;
@@ -262,16 +261,16 @@ bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 	switch (this->State) {
 		case 0:
 			// Check if we can cast the spell.
-			if (!CanCastSpell(unit, &spell, order.GetGoal(), order.goalPos.x, order.goalPos.y)) {
+			if (!CanCastSpell(unit, &spell, order.GetGoal(), order.goalPos)) {
 				// Notify player about this problem
 				if (unit.Variable[MANA_INDEX].Value < spell.ManaCost) {
 					unit.Player->Notify(NotifyYellow, unit.tilePos,
-						_("%s: not enough mana for spell: %s"),
-						unit.Type->Name.c_str(), spell.Name.c_str());
+										_("%s: not enough mana for spell: %s"),
+										unit.Type->Name.c_str(), spell.Name.c_str());
 				} else {
 					unit.Player->Notify(NotifyYellow, unit.tilePos,
-						_("%s: can't cast spell: %s"),
-						unit.Type->Name.c_str(), spell.Name.c_str());
+										_("%s: can't cast spell: %s"),
+										unit.Type->Name.c_str(), spell.Name.c_str());
 				}
 
 				if (unit.Player->AiEnabled) {
@@ -307,7 +306,7 @@ bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 				if (goal && goal != &unit && !goal->IsVisibleAsGoal(*unit.Player)) {
 					unit.ReCast = 0;
 				} else {
-					unit.ReCast = SpellCast(unit, &spell, goal, order.goalPos.x, order.goalPos.y);
+					unit.ReCast = SpellCast(unit, &spell, goal, order.goalPos);
 				}
 			}
 			// Check, if goal has moved (for ReCast)

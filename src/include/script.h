@@ -36,6 +36,7 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
+#include <string>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -51,6 +52,7 @@ extern "C" {
 ----------------------------------------------------------------------------*/
 
 class CUnit;
+class CUnitType;
 class CFile;
 class CFont;
 
@@ -90,6 +92,14 @@ extern int LuaCall(int narg, int clear, bool exitOnError = true);
 		} \
 	} while (0)
 
+#if LUA_VERSION_NUM <= 501
+
+inline size_t lua_rawlen(lua_State *l, int index)
+{
+	return luaL_getn(l, index);
+}
+
+#endif
 
 typedef enum {
 	ENumber_Lua,         /// a lua function.
@@ -112,15 +122,14 @@ typedef enum {
 	ENumber_VideoTextLength, /// VideoTextLength(font, string).
 	ENumber_StringFind,      /// strchr(string, char) - s.
 
-
-	ENumber_UnitStat     /// Property of Unit.
-// FIXME: add others.
+	ENumber_UnitStat,    /// Property of Unit.
+	ENumber_TypeStat     /// Property of UnitType.
 } ENumber; /// All possible value for a number.
 
 
 typedef enum {
 	EUnit_Ref           /// Unit direct reference.
-// FIXME: add others.
+	// FIXME: add others.
 } EUnit; /// All possible value for a unit.
 
 typedef enum {
@@ -133,7 +142,7 @@ typedef enum {
 	EString_UnitName,     /// UnitType Name.
 	EString_SubString,    /// SubString.
 	EString_Line          /// line n of the string.
-// FIXME: add others.
+	// FIXME: add others.
 } EString; /// All possible value for a string.
 
 typedef enum {
@@ -207,6 +216,11 @@ struct _NumberDesc_ {
 			int Loc;                   /// Location of Variables[].
 		} UnitStat;
 		struct {
+			CUnitType **Type;           /// Which unit type.
+			int Index;                 /// Which index variable.
+			EnumVariable Component;    /// Which component.
+		} TypeStat;
+		struct {
 			StringDesc *String; /// String.
 			CFont *Font;        /// Font.
 		} VideoTextLength;
@@ -279,7 +293,7 @@ extern bool LuaToBoolean(lua_State *l, int narg);
 
 extern void CclGarbageCollect(int fast);  /// Perform garbage collection
 extern void InitCcl();                /// Initialise ccl
-extern void LoadCcl(const std::string& filename);  /// Load ccl config file
+extern void LoadCcl(const std::string &filename);  /// Load ccl config file
 extern void SaveCcl(CFile &file);     /// Save CCL module
 extern void SavePreferences();        /// Save user preferences
 extern int CclCommand(const std::string &command, bool exitOnError = true);
@@ -299,7 +313,7 @@ CUnit *CclGetUnitFromRef(lua_State *l);
 template <typename T>
 static void CclGetPos(lua_State *l, T *x , T *y, const int offset = -1)
 {
-	if (!lua_istable(l, offset) || lua_objlen(l, offset) != 2) {
+	if (!lua_istable(l, offset) || lua_rawlen(l, offset) != 2) {
 		LuaError(l, "incorrect argument");
 	}
 	lua_rawgeti(l, offset, 1);
@@ -316,6 +330,7 @@ extern NumberDesc *Damage;  /// Damage calculation for missile.
 extern EnumVariable Str2EnumVariable(lua_State *l, const char *s);
 extern NumberDesc *CclParseNumberDesc(lua_State *l); /// Parse a number description.
 extern UnitDesc *CclParseUnitDesc(lua_State *l);     /// Parse a unit description.
+extern CUnitType **CclParseTypeDesc(lua_State *l);   /// Parse a unit type description.
 StringDesc *CclParseStringDesc(lua_State *l);        /// Parse a string description.
 
 extern int EvalNumber(const NumberDesc *numberdesc); /// Evaluate the number.
@@ -326,6 +341,8 @@ void FreeNumberDesc(NumberDesc *number);  /// Free number description content. (
 void FreeUnitDesc(UnitDesc *unitdesc);    /// Free unit description content. (no pointer itself).
 void FreeStringDesc(StringDesc *s);       /// Frre string description content. (no pointer itself).
 
+// call the lua function: CleanGame_Lua.
+void CleanGame_Lua();
 
 //@}
 

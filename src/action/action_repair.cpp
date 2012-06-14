@@ -56,7 +56,7 @@
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* static */ COrder* COrder::NewActionRepair(CUnit &unit, CUnit &target)
+/* static */ COrder *COrder::NewActionRepair(CUnit &unit, CUnit &target)
 {
 	COrder_Repair *order = new COrder_Repair();
 
@@ -69,7 +69,7 @@
 	return order;
 }
 
-/* static */ COrder* COrder::NewActionRepair(const Vec2i &pos)
+/* static */ COrder *COrder::NewActionRepair(const Vec2i &pos)
 {
 	Assert(Map.Info.IsPointOnMap(pos));
 
@@ -87,13 +87,7 @@
 		file.printf(" \"finished\", ");
 	}
 	if (this->HasGoal()) {
-		CUnit &goal = *this->GetGoal();
-		if (goal.Destroyed) {
-			/* this unit is destroyed so it's not in the global unit
-			 * array - this means it won't be saved!!! */
-			printf ("FIXME: storing destroyed Goal - loading will fail.\n");
-		}
-		file.printf(" \"goal\", \"%s\",", UnitReference(goal).c_str());
+		file.printf(" \"goal\", \"%s\",", UnitReference(this->GetGoal()).c_str());
 	}
 	file.printf(" \"tile\", {%d, %d},", this->goalPos.x, this->goalPos.y);
 
@@ -135,10 +129,12 @@
 	return true;
 }
 
+/* virtual */ bool COrder_Repair::IsValid() const
+{
+	return true;
+}
 
-
-
-/* virtual */ PixelPos COrder_Repair::Show(const CViewport& vp, const PixelPos& lastScreenPos) const
+/* virtual */ PixelPos COrder_Repair::Show(const CViewport &vp, const PixelPos &lastScreenPos) const
 {
 	PixelPos targetPos;
 
@@ -153,9 +149,9 @@
 	return targetPos;
 }
 
-/* virtual */ void COrder_Repair::UpdatePathFinderData(PathFinderInput& input)
+/* virtual */ void COrder_Repair::UpdatePathFinderData(PathFinderInput &input)
 {
-	const CUnit& unit = *input.GetUnit();
+	const CUnit &unit = *input.GetUnit();
 
 	input.SetMinRange(0);
 	input.SetMaxRange(ReparableTarget != NULL ? unit.Type->RepairRange : 0);
@@ -172,6 +168,27 @@
 	}
 }
 
+bool SubRepairCosts(const CUnit &unit, CPlayer &player, CUnit &goal)
+{
+	int RepairCosts[MaxCosts];
+
+	// Check if enough resources are available
+	for (int i = 1; i < MaxCosts; ++i) {
+		RepairCosts[i] = goal.Type->RepairCosts[i] *
+						 (goal.CurrentAction() == UnitActionBuilt ? ResourcesMultiBuildersMultiplier : 1);
+	}
+	for (int i = 1; i < MaxCosts; ++i) {
+		if (!player.CheckResource(i, RepairCosts[i])) {
+			player.Notify(NotifyYellow, unit.tilePos,
+						  _("We need more %s for repair!"), DefaultResourceNames[i].c_str());
+			return true;
+		}
+	}
+
+	// Subtract the resources
+	player.SubCosts(RepairCosts);
+	return false;
+}
 
 /**
 **  Repair a unit.
@@ -183,31 +200,27 @@
 */
 bool COrder_Repair::RepairUnit(const CUnit &unit, CUnit &goal)
 {
+	CPlayer &player = *unit.Player;
+
 	if (goal.CurrentAction() == UnitActionBuilt) {
 		COrder_Built &order = *static_cast<COrder_Built *>(goal.CurrentOrder());
 
 		order.ProgressHp(goal, 100 * this->RepairCycle);
 		this->RepairCycle = 0;
+		if (ResourcesMultiBuildersMultiplier && SubRepairCosts(unit, player, goal)) {
+			return true;
+		}
 		return false;
 	}
 	if (goal.Variable[HP_INDEX].Value >= goal.Variable[HP_INDEX].Max) {
 		return true;
 	}
-	CPlayer &player = *unit.Player;
 
-	// Calculate the repair costs.
 	Assert(goal.Stats->Variables[HP_INDEX].Max);
 
-	// Check if enough resources are available
-	for (int i = 1; i < MaxCosts; ++i) {
-		if (player.Resources[i] < goal.Type->RepairCosts[i]) {
-			player.Notify(NotifyYellow, unit.tilePos,
-				_("We need more %s for repair!"), DefaultResourceNames[i].c_str());
-			return true;
-		}
+	if (SubRepairCosts(unit, player, goal)) {
+		return true;
 	}
-	// Subtract the resources
-	player.SubCosts(goal.Type->RepairCosts);
 
 	goal.Variable[HP_INDEX].Value += goal.Type->RepairHP;
 	if (goal.Variable[HP_INDEX].Value >= goal.Variable[HP_INDEX].Max) {

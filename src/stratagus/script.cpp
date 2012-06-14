@@ -42,11 +42,14 @@
 
 #include "stratagus.h"
 
+#include "script.h"
+
+#include "actions.h"
+#include "animation.h"
 #include "iocompat.h"
 #include "unit.h"
 #include "unittype.h"
 #include "iolib.h"
-#include "script.h"
 #include "missile.h"
 #include "depend.h"
 #include "upgrade.h"
@@ -70,7 +73,6 @@
 #include "netconnect.h"
 #include "network.h"
 #include "spells.h"
-#include "actions.h"
 #include "replay.h"
 
 /*----------------------------------------------------------------------------
@@ -123,6 +125,8 @@ typedef struct {
 } UStrInt;
 /// Get component for unit variable.
 extern UStrInt GetComponent(const CUnit &unit, int index, EnumVariable e, int t);
+/// Get component for unit type variable.
+extern UStrInt GetComponent(const CUnitType &type, int index, EnumVariable e);
 
 /**
 **  FIXME: docu
@@ -189,8 +193,7 @@ static int report(int status, bool exitOnError)
 
 static int luatraceback(lua_State *L)
 {
-	lua_pushliteral(L, "debug");
-	lua_gettable(L, LUA_GLOBALSINDEX);
+	lua_getglobal(L, "debug");
 	if (!lua_istable(L, -1)) {
 		lua_pop(L, 1);
 		return 1;
@@ -248,7 +251,7 @@ static void LuaLoadBuffer(const std::string &file, std::string &buffer)
 
 	if (fp.open(file.c_str(), CL_OPEN_READ) == -1) {
 		fprintf(stderr, "Can't open file '%s': %s\n",
-			file.c_str(), strerror(errno));
+				file.c_str(), strerror(errno));
 		return;
 	}
 
@@ -510,20 +513,20 @@ void CclGarbageCollect(int)
 {
 #if LUA_VERSION_NUM >= 501
 	DebugPrint("Garbage collect (before): %d\n" _C_
-		lua_gc(Lua, LUA_GCCOUNT, 0));
+			   lua_gc(Lua, LUA_GCCOUNT, 0));
 
 	lua_gc(Lua, LUA_GCCOLLECT, 0);
 
 	DebugPrint("Garbage collect (after): %d\n" _C_
-		lua_gc(Lua, LUA_GCCOUNT, 0));
+			   lua_gc(Lua, LUA_GCCOUNT, 0));
 #else
 	DebugPrint("Garbage collect (before): %d/%d\n" _C_
-		lua_getgccount(Lua) _C_ lua_getgcthreshold(Lua));
+			   lua_getgccount(Lua) _C_ lua_getgcthreshold(Lua));
 
 	lua_setgcthreshold(Lua, 0);
 
 	DebugPrint("Garbage collect (after): %d/%d\n" _C_
-		lua_getgccount(Lua) _C_ lua_getgcthreshold(Lua));
+			   lua_getgccount(Lua) _C_ lua_getgcthreshold(Lua));
 #endif
 }
 
@@ -540,7 +543,7 @@ static void ParseBinOp(lua_State *l, BinOp *binop)
 	Assert(l);
 	Assert(binop);
 	Assert(lua_istable(l, -1));
-	Assert(lua_objlen(l, -1) == 2);
+	Assert(lua_rawlen(l, -1) == 2);
 
 	lua_rawgeti(l, -1, 1); // left
 	binop->Left = CclParseNumberDesc(l);
@@ -580,6 +583,30 @@ static CUnit **Str2UnitRef(lua_State *l, const char *s)
 }
 
 /**
+**  Convert the string to the corresponding data (which is a unit type).
+**
+**  @param l   lua state.
+**  @param s   Ident.
+**
+**  @return    The reference of the unit type.
+**
+**  @todo better check for error (restrict param).
+*/
+static CUnitType **Str2TypeRef(lua_State *l, const char *s)
+{
+	CUnitType **res = NULL; // Result.
+
+	Assert(l);
+	if (!strcmp(s, "Type")) {
+		res = &TriggerData.Type;
+	} else {
+		LuaError(l, "Invalid type reference '%s'\n" _C_ s);
+	}
+	Assert(res); // Must check for error.
+	return res;
+}
+
+/**
 **  Return unit referernce definition.
 **
 **  @param l  lua state.
@@ -601,6 +628,26 @@ UnitDesc *CclParseUnitDesc(lua_State *l)
 	return res;
 }
 
+/**
+**  Return unit type referernce definition.
+**
+**  @param l  lua state.
+**
+**  @return   unit type referernce definition.
+*/
+CUnitType **CclParseTypeDesc(lua_State *l)
+{
+	CUnitType **res = NULL;
+
+	if (lua_isstring(l, -1)) {
+		res = Str2TypeRef(l, LuaToString(l, -1));
+		lua_pop(l, 1);
+	} else {
+		LuaError(l, "Parse Error in ParseUnit\n");
+	}
+	return res;
+}
+
 
 /**
 **  Add a Lua handler
@@ -613,15 +660,12 @@ UnitDesc *CclParseUnitDesc(lua_State *l)
 */
 static int ParseLuaFunction(lua_State *l, const char *tablename, int *counter)
 {
-	lua_pushstring(l, tablename);
-	lua_gettable(l, LUA_GLOBALSINDEX);
+	lua_getglobal(l, tablename);
 	if (lua_isnil(l, -1)) {
 		lua_pop(l, 1);
-		lua_pushstring(l, tablename);
 		lua_newtable(l);
-		lua_settable(l, LUA_GLOBALSINDEX);
-		lua_pushstring(l, tablename);
-		lua_gettable(l, LUA_GLOBALSINDEX);
+		lua_setglobal(l, tablename);
+		lua_getglobal(l, tablename);
 	}
 	lua_pushvalue(l, -2);
 	lua_rawseti(l, -2, *counter);
@@ -638,18 +682,15 @@ static int ParseLuaFunction(lua_State *l, const char *tablename, int *counter)
 */
 static int CallLuaNumberFunction(unsigned int handler)
 {
-	int narg;
-	int res;
+	const int narg = lua_gettop(Lua);
 
-	narg = lua_gettop(Lua);
-	lua_pushstring(Lua, "_numberfunction_");
-	lua_gettable(Lua, LUA_GLOBALSINDEX);
+	lua_getglobal(Lua, "_numberfunction_");
 	lua_rawgeti(Lua, -1, handler);
 	LuaCall(0, 0);
 	if (lua_gettop(Lua) - narg != 2) {
 		LuaError(Lua, "Function must return one value.");
 	}
-	res = LuaToNumber(Lua, -1);
+	const int res = LuaToNumber(Lua, -1);
 	lua_pop(Lua, 2);
 	return res;
 }
@@ -663,18 +704,14 @@ static int CallLuaNumberFunction(unsigned int handler)
 */
 static char *CallLuaStringFunction(unsigned int handler)
 {
-	int narg;
-	char *res;
-
-	narg = lua_gettop(Lua);
-	lua_pushstring(Lua, "_stringfunction_");
-	lua_gettable(Lua, LUA_GLOBALSINDEX);
+	const int narg = lua_gettop(Lua);
+	lua_getglobal(Lua, "_stringfunction_");
 	lua_rawgeti(Lua, -1, handler);
 	LuaCall(0, 0);
 	if (lua_gettop(Lua) - narg != 2) {
 		LuaError(Lua, "Function must return one value.");
 	}
-	res = new_strdup(LuaToString(Lua, -1));
+	char *res = new_strdup(LuaToString(Lua, -1));
 	lua_pop(Lua, 2);
 	return res;
 }
@@ -688,11 +725,8 @@ static char *CallLuaStringFunction(unsigned int handler)
 */
 NumberDesc *CclParseNumberDesc(lua_State *l)
 {
-	NumberDesc *res;
-	int nargs;
-	const char *key;
+	NumberDesc *res = new NumberDesc;
 
-	res = new NumberDesc;
 	if (lua_isnumber(l, -1)) {
 		res->e = ENumber_Dir;
 		res->D.Val = LuaToNumber(l, -1);
@@ -700,12 +734,12 @@ NumberDesc *CclParseNumberDesc(lua_State *l)
 		res->e = ENumber_Lua;
 		res->D.Index = ParseLuaFunction(l, "_numberfunction_", &NumberCounter);
 	} else if (lua_istable(l, -1)) {
-		nargs = lua_objlen(l, -1);
+		const int nargs = lua_rawlen(l, -1);
 		if (nargs != 2) {
 			LuaError(l, "Bad number of args in parse Number table\n");
 		}
 		lua_rawgeti(l, -1, 1); // key
-		key = LuaToString(l, -1);
+		const char *key = LuaToString(l, -1);
 		lua_pop(l, 1);
 		lua_rawgeti(l, -1, 2); // table
 		if (!strcmp(key, "Add")) {
@@ -767,7 +801,29 @@ NumberDesc *CclParseNumberDesc(lua_State *l)
 				} else if (!strcmp(key, "Loc")) {
 					res->D.UnitStat.Loc = LuaToNumber(l, -1);
 					if (res->D.UnitStat.Loc < 0 || 2 < res->D.UnitStat.Loc) {
-						LuaError(l, "Bad Loc number :'%d'" _C_ (int) LuaToNumber(l, -1));
+						LuaError(l, "Bad Loc number :'%d'" _C_(int) LuaToNumber(l, -1));
+					}
+				} else {
+					LuaError(l, "Bad param %s for Unit" _C_ key);
+				}
+			}
+			lua_pop(l, 1); // pop the table.
+		} else if (!strcmp(key, "TypeVar")) {
+			Assert(lua_istable(l, -1));
+
+			res->e = ENumber_TypeStat;
+			for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+				key = LuaToString(l, -2);
+				if (!strcmp(key, "Type")) {
+					res->D.TypeStat.Type = CclParseTypeDesc(l);
+					lua_pushnil(l);
+				} else if (!strcmp(key, "Component")) {
+					res->D.TypeStat.Component = Str2EnumVariable(l, LuaToString(l, -1));
+				} else if (!strcmp(key, "Variable")) {
+					const char *const name = LuaToString(l, -1);
+					res->D.TypeStat.Index = UnitTypeVar.VariableNameLookup[name];
+					if (res->D.TypeStat.Index == -1) {
+						LuaError(l, "Bad variable name :'%s'" _C_ LuaToString(l, -1));
 					}
 				} else {
 					LuaError(l, "Bad param %s for Unit" _C_ key);
@@ -796,7 +852,7 @@ NumberDesc *CclParseNumberDesc(lua_State *l)
 		} else if (!strcmp(key, "StringFind")) {
 			Assert(lua_istable(l, -1));
 			res->e = ENumber_StringFind;
-			if (lua_objlen(l, -1) != 2) {
+			if (lua_rawlen(l, -1) != 2) {
 				LuaError(l, "Bad param for StringFind");
 			}
 			lua_rawgeti(l, -1, 1); // left
@@ -839,7 +895,7 @@ StringDesc *CclParseStringDesc(lua_State *l)
 		res->e = EString_Lua;
 		res->D.Index = ParseLuaFunction(l, "_stringfunction_", &StringCounter);
 	} else if (lua_istable(l, -1)) {
-		nargs = lua_objlen(l, -1);
+		nargs = lua_rawlen(l, -1);
 		if (nargs != 2) {
 			LuaError(l, "Bad number of args in parse String table\n");
 		}
@@ -847,11 +903,11 @@ StringDesc *CclParseStringDesc(lua_State *l)
 		key = LuaToString(l, -1);
 		lua_pop(l, 1);
 		lua_rawgeti(l, -1, 2); // table
-		if (!strcmp(key, "Concat")){
+		if (!strcmp(key, "Concat")) {
 			int i; // iterator.
 
 			res->e = EString_Concat;
-			res->D.Concat.n = lua_objlen(l, -1);
+			res->D.Concat.n = lua_rawlen(l, -1);
 			if (res->D.Concat.n < 1) {
 				LuaError(l, "Bad number of args in Concat\n");
 			}
@@ -872,47 +928,47 @@ StringDesc *CclParseStringDesc(lua_State *l)
 			res->D.Unit = CclParseUnitDesc(l);
 		} else if (!strcmp(key, "If")) {
 			res->e = EString_If;
-			if (lua_objlen(l, -1) != 2 && lua_objlen(l, -1) != 3) {
+			if (lua_rawlen(l, -1) != 2 && lua_rawlen(l, -1) != 3) {
 				LuaError(l, "Bad number of args in If\n");
 			}
 			lua_rawgeti(l, -1, 1); // Condition.
 			res->D.If.Cond = CclParseNumberDesc(l);
 			lua_rawgeti(l, -1, 2); // Then.
 			res->D.If.True = CclParseStringDesc(l);
-			if (lua_objlen(l, -1) == 3) {
+			if (lua_rawlen(l, -1) == 3) {
 				lua_rawgeti(l, -1, 3); // Else.
 				res->D.If.False = CclParseStringDesc(l);
 			}
 			lua_pop(l, 1); // table.
 		} else if (!strcmp(key, "SubString")) {
 			res->e = EString_SubString;
-			if (lua_objlen(l, -1) != 2 && lua_objlen(l, -1) != 3) {
+			if (lua_rawlen(l, -1) != 2 && lua_rawlen(l, -1) != 3) {
 				LuaError(l, "Bad number of args in SubString\n");
 			}
 			lua_rawgeti(l, -1, 1); // String.
 			res->D.SubString.String = CclParseStringDesc(l);
 			lua_rawgeti(l, -1, 2); // Begin.
 			res->D.SubString.Begin = CclParseNumberDesc(l);
-			if (lua_objlen(l, -1) == 3) {
+			if (lua_rawlen(l, -1) == 3) {
 				lua_rawgeti(l, -1, 3); // End.
 				res->D.SubString.End = CclParseNumberDesc(l);
 			}
 			lua_pop(l, 1); // table.
 		} else if (!strcmp(key, "Line")) {
 			res->e = EString_Line;
-			if (lua_objlen(l, -1) < 2 || lua_objlen(l, -1) > 4) {
+			if (lua_rawlen(l, -1) < 2 || lua_rawlen(l, -1) > 4) {
 				LuaError(l, "Bad number of args in Line\n");
 			}
 			lua_rawgeti(l, -1, 1); // Line.
 			res->D.Line.Line = CclParseNumberDesc(l);
 			lua_rawgeti(l, -1, 2); // String.
 			res->D.Line.String = CclParseStringDesc(l);
-			if (lua_objlen(l, -1) >= 3) {
+			if (lua_rawlen(l, -1) >= 3) {
 				lua_rawgeti(l, -1, 3); // Lenght.
 				res->D.Line.MaxLen = CclParseNumberDesc(l);
 			}
 			res->D.Line.Font = NULL;
-			if (lua_objlen(l, -1) >= 4) {
+			if (lua_rawlen(l, -1) >= 4) {
 				lua_rawgeti(l, -1, 4); // Font.
 				res->D.Line.Font = CFont::Get(LuaToString(l, -1));
 				if (!res->D.Line.Font) {
@@ -967,6 +1023,7 @@ CUnit *EvalUnit(const UnitDesc *unitdesc)
 int EvalNumber(const NumberDesc *number)
 {
 	CUnit *unit;
+	CUnitType **type;
 	std::string s;
 	int a;
 	int b;
@@ -1030,20 +1087,28 @@ int EvalNumber(const NumberDesc *number)
 			unit = EvalUnit(number->D.UnitStat.Unit);
 			if (unit != NULL) {
 				return GetComponent(*unit, number->D.UnitStat.Index,
-					number->D.UnitStat.Component, number->D.UnitStat.Loc).i;
+									number->D.UnitStat.Component, number->D.UnitStat.Loc).i;
+			} else { // ERROR.
+				return 0;
+			}
+		case ENumber_TypeStat : // property of unit type.
+			type = number->D.TypeStat.Type;
+			if (type != NULL) {
+				return GetComponent(**type, number->D.TypeStat.Index,
+									number->D.TypeStat.Component).i;
 			} else { // ERROR.
 				return 0;
 			}
 		case ENumber_VideoTextLength : // VideoTextLength(font, s)
-			if (number->D.VideoTextLength.String != NULL &&
-					!(s = EvalString(number->D.VideoTextLength.String)).empty()) {
+			if (number->D.VideoTextLength.String != NULL
+				&& !(s = EvalString(number->D.VideoTextLength.String)).empty()) {
 				return number->D.VideoTextLength.Font->Width(s);
 			} else { // ERROR.
 				return 0;
 			}
 		case ENumber_StringFind : // s.find(c)
-			if (number->D.StringFind.String != NULL &&
-					!(s = EvalString(number->D.StringFind.String)).empty()) {
+			if (number->D.StringFind.String != NULL
+				&& !(s = EvalString(number->D.StringFind.String)).empty()) {
 				size_t pos = s.find(number->D.StringFind.C);
 				return pos != std::string::npos ? (int)pos : -1;
 			} else { // ERROR.
@@ -1080,8 +1145,7 @@ std::string EvalString(const StringDesc *s)
 				res += EvalString(s->D.Concat.Strings[i]);
 			}
 			return res;
-		case EString_String :     // 42 -> "42".
-		{
+		case EString_String : {   // 42 -> "42".
 			char buffer[16]; // Should be enough ?
 			sprintf(buffer, "%d", EvalNumber(s->D.Number));
 			return std::string(buffer);
@@ -1107,8 +1171,8 @@ std::string EvalString(const StringDesc *s)
 				return std::string("");
 			}
 		case EString_SubString : // substring(s, begin, end)
-			if (s->D.SubString.String != NULL &&
-					!(tmp1 = EvalString(s->D.SubString.String)).empty()) {
+			if (s->D.SubString.String != NULL
+				&& !(tmp1 = EvalString(s->D.SubString.String)).empty()) {
 				int begin;
 				int end;
 
@@ -1130,8 +1194,7 @@ std::string EvalString(const StringDesc *s)
 				return std::string("");
 			}
 		case EString_Line : // line n of the string
-			if (s->D.Line.String == NULL ||
-					(tmp1 = EvalString(s->D.Line.String)).empty()) {
+			if (s->D.Line.String == NULL || (tmp1 = EvalString(s->D.Line.String)).empty()) {
 				return std::string(""); // ERROR.
 			} else {
 				int line;
@@ -1212,6 +1275,9 @@ void FreeNumberDesc(NumberDesc *number)
 		case ENumber_UnitStat : // property of unit.
 			FreeUnitDesc(number->D.UnitStat.Unit);
 			delete number->D.UnitStat.Unit;
+			break;
+		case ENumber_TypeStat : // property of unit type.
+			delete *number->D.TypeStat.Type;
 			break;
 		case ENumber_VideoTextLength : // VideoTextLength(font, s)
 			FreeStringDesc(number->D.VideoTextLength.String);
@@ -1295,6 +1361,40 @@ void FreeStringDesc(StringDesc *s)
 ............................................................................*/
 
 /**
+**  Make alias for some unit type Variable function.
+**
+**  @param l  lua State.
+**  @param s  FIXME: docu
+**
+**  @return   the lua table {"TypeVar", {Variable = arg1,
+**                           Component = "Value" or arg2}
+*/
+static int AliasTypeVar(lua_State *l, const char *s)
+{
+	Assert(0 < lua_gettop(l) && lua_gettop(l) <= 2);
+
+	lua_newtable(l);
+	lua_pushnumber(l, 1);
+	lua_pushstring(l, "TypeVar");
+	lua_rawset(l, -3);
+	lua_pushnumber(l, 2);
+	lua_newtable(l);
+
+	lua_pushstring(l, "Type");
+	lua_pushstring(l, s);
+	lua_rawset(l, -3);
+	lua_pushstring(l, "Variable");
+	lua_pushvalue(l, 1);
+	lua_rawset(l, -3);
+	lua_pushstring(l, "Component");
+	lua_pushvalue(l, 2);
+	lua_rawset(l, -3);
+
+	lua_rawset(l, -3);
+	return 1;
+}
+
+/**
 **  Make alias for some unit Variable function.
 **
 **  @param l  lua State.
@@ -1309,12 +1409,12 @@ static int AliasUnitVar(lua_State *l, const char *s)
 
 	Assert(0 < lua_gettop(l) && lua_gettop(l) <= 3);
 	nargs = lua_gettop(l);
-	lua_newtable (l);
+	lua_newtable(l);
 	lua_pushnumber(l, 1);
 	lua_pushstring(l, "UnitVar");
 	lua_rawset(l, -3);
 	lua_pushnumber(l, 2);
-	lua_newtable (l);
+	lua_newtable(l);
 
 	lua_pushstring(l, "Unit");
 	lua_pushstring(l, s);
@@ -1404,6 +1504,22 @@ static int CclActiveUnitVar(lua_State *l)
 	return AliasUnitVar(l, "Active");
 }
 
+/**
+**  Return equivalent lua table for .
+**  {"Type", {Type = "Active", Variable = arg1, Component = "Value" or arg2}}
+**
+**  @param l  Lua state.
+**
+**  @return   equivalent lua table.
+*/
+static int CclActiveTypeVar(lua_State *l)
+{
+	if (lua_gettop(l) == 0 || lua_gettop(l) > 3) {
+		LuaError(l, "Bad number of arg for ActiveTypeVar()\n");
+	}
+	return AliasTypeVar(l, "Type");
+}
+
 
 /**
 **  Make alias for some function.
@@ -1420,13 +1536,13 @@ static int Alias(lua_State *l, const char *s)
 
 	narg = lua_gettop(l);
 	Assert(narg);
-	lua_newtable (l);
+	lua_newtable(l);
 	lua_pushnumber(l, 1);
 	lua_pushstring(l, s);
 	lua_rawset(l, -3);
 	lua_pushnumber(l, 2);
 	if (narg > 1) {
-		lua_newtable (l);
+		lua_newtable(l);
 		for (i = 1; i <= narg; i++) {
 			lua_pushnumber(l, i);
 			lua_pushvalue(l, i);
@@ -1740,13 +1856,13 @@ static int CclGameInfo(lua_State *l)
 static int CclVideoTextLength(lua_State *l)
 {
 	LuaCheckArgs(l, 2);
-	lua_newtable (l);
+	lua_newtable(l);
 	lua_pushnumber(l, 1);
 	lua_pushstring(l, "VideoTextLength");
 	lua_rawset(l, -3);
 	lua_pushnumber(l, 2);
 
-	lua_newtable (l);
+	lua_newtable(l);
 	lua_pushstring(l, "Font");
 	lua_pushvalue(l, 1);
 	lua_rawset(l, -3);
@@ -1799,6 +1915,8 @@ static void AliasRegister()
 	lua_register(Lua, "DefenderVar", CclUnitDefenderVar);
 	lua_register(Lua, "ActiveUnitVar", CclActiveUnitVar);
 
+	// Type
+	lua_register(Lua, "TypeVar", CclActiveTypeVar);
 
 	// String.
 	lua_register(Lua, "Concat", CclConcat);
@@ -1860,7 +1978,7 @@ static int CclFilteredListDirectory(lua_State *l, int type, int mask)
 	if (pathtype == 1) {
 		++userdir;
 		std::string dir(Parameters::Instance.GetUserDirectory());
-		if(!GameName.empty()) {
+		if (!GameName.empty()) {
 			dir += "/";
 			dir += GameName;
 		}
@@ -1925,7 +2043,7 @@ static int CclSetGameName(lua_State *l)
 		GameName = lua_tostring(l, 1);
 	}
 
-	if(!GameName.empty()) {
+	if (!GameName.empty()) {
 		std::string path = Parameters::Instance.GetUserDirectory() + "/" + GameName;
 		makedir(path.c_str(), 0777);
 	}
@@ -2065,14 +2183,9 @@ static int CclSetSpeedResourcesHarvest(lua_State *l)
 	LuaCheckArgs(l, 2);
 
 	const std::string resource = LuaToString(l, 1);
+	const int resId = GetResourceIdByName(l, resource.c_str());
 
-	for (unsigned int i = 0; i < MaxCosts; ++i) {
-		if (resource == DefaultResourceNames[i]) {
-			SpeedResourcesHarvest[i] = LuaToNumber(l, 2);
-			return 0;
-		}
-	}
-	LuaError(l, "Resource not found: %s" _C_ resource.c_str());
+	SpeedResourcesHarvest[resId] = LuaToNumber(l, 2);
 	return 0;
 }
 
@@ -2085,13 +2198,9 @@ static int CclSetSpeedResourcesReturn(lua_State *l)
 {
 	LuaCheckArgs(l, 2);
 	const std::string resource = LuaToString(l, 1);
-	for (unsigned int i = 0; i < MaxCosts; ++i) {
-		if (resource == DefaultResourceNames[i]) {
-			SpeedResourcesReturn[i] = LuaToNumber(l, 2);
-			return 0;
-		}
-	}
-	LuaError(l, "Resource not found: %s" _C_ resource.c_str());
+	const int resId = GetResourceIdByName(l, resource.c_str());
+
+	SpeedResourcesReturn[resId] = LuaToNumber(l, 2);
 	return 0;
 }
 
@@ -2265,19 +2374,11 @@ static int CclDefineDefaultResourceAmounts(lua_State *l)
 		LuaError(l, "incorrect argument");
 	}
 	for (unsigned int j = 0; j < args; ++j) {
-		const std::string value = LuaToString(l, j + 1);
-		unsigned int i;
+		const std::string resource = LuaToString(l, j + 1);
+		const int resId = GetResourceIdByName(l, resource.c_str());
 
-		for (i = 0; i < MaxCosts; ++i) {
-			if (value == DefaultResourceNames[i]) {
-				++j;
-				DefaultResourceAmounts[i] = LuaToNumber(l, j + 1);
-				break;
-			}
-		}
-		if (i == MaxCosts) {
-			LuaError(l, "Resource not found: %s" _C_ value.c_str());
-		}
+		++j;
+		DefaultResourceAmounts[resId] = LuaToNumber(l, j + 1);
 	}
 	return 0;
 }
@@ -2294,8 +2395,9 @@ static int CclDefineDefaultResourceMaxAmounts(lua_State *l)
 	for (int i = 0; i < args; ++i) {
 		DefaultResourceMaxAmounts[i] = LuaToNumber(l, i + 1);
 	}
-	for (int i = args; i < MaxCosts; ++i)
+	for (int i = args; i < MaxCosts; ++i) {
 		DefaultResourceMaxAmounts[i] = -1;
+	}
 	return 0;
 }
 
@@ -2374,10 +2476,10 @@ static void InitLua()
 	// For security we don't load all libs
 	static const luaL_Reg lualibs[] = {
 		{"", luaopen_base},
-//		{LUA_LOADLIBNAME, luaopen_package},
+		//		{LUA_LOADLIBNAME, luaopen_package},
 		{LUA_TABLIBNAME, luaopen_table},
-//		{LUA_IOLIBNAME, luaopen_io},
-//		{LUA_OSLIBNAME, luaopen_os},
+		//		{LUA_IOLIBNAME, luaopen_io},
+		//		{LUA_OSLIBNAME, luaopen_os},
 		{LUA_STRLIBNAME, luaopen_string},
 		{LUA_MATHLIBNAME, luaopen_math},
 		{LUA_DBLIBNAME, luaopen_debug},
@@ -2460,6 +2562,7 @@ void InitCcl()
 	ConstructionCclRegister();
 	DecorationCclRegister();
 	UnitTypeCclRegister();
+	AnimationCclRegister();
 	UpgradesCclRegister();
 	DependenciesCclRegister();
 	SelectionCclRegister();
@@ -2523,44 +2626,39 @@ static char *LuaEscape(const char *str)
 */
 std::string SaveGlobal(lua_State *l, bool is_root)
 {
-	int type_key;
-	int type_value;
 	std::string value;
-	int first;
 	std::string res;
 	std::string tmp;
-	int b;
 
-//	Assert(!is_root || !lua_gettop(l));
-	first = 1;
+	//Assert(!is_root || !lua_gettop(l));
+	int first = 1;
 	if (is_root) {
-		lua_pushstring(l, "_G");// global table in lua.
-		lua_gettable(l, LUA_GLOBALSINDEX);
+		lua_getglobal(l, "_G");// global table in lua.
 	}
 	const std::string sep = is_root ? "" : ", ";
 	Assert(lua_istable(l, -1));
 	lua_pushnil(l);
 	while (lua_next(l, -2)) {
-		type_key = lua_type(l, -2);
-		type_value = lua_type(l, -1);
+		int type_key = lua_type(l, -2);
+		int type_value = lua_type(l, -1);
 		const std::string key = (type_key == LUA_TSTRING) ? lua_tostring(l, -2) : "";
 		if ((key == "_G") || (is_root && (
-				(key == "assert") || (key == "gcinfo") || (key == "getfenv") ||
-				(key == "unpack") || (key == "tostring") || (key == "tonumber") ||
-				(key == "setmetatable") || (key == "require") || (key == "pcall") ||
-				(key == "rawequal") || (key == "collectgarbage") || (key == "type") ||
-				(key == "getmetatable") || (key == "next") || (key == "print") ||
-				(key == "xpcall") || (key == "rawset") || (key == "setfenv") ||
-				(key == "rawget") || (key == "newproxy") || (key == "ipairs") ||
-				(key == "loadstring") || (key == "dofile") || (key == "_TRACEBACK") ||
-				(key == "_VERSION") || (key == "pairs") || (key == "__pow") ||
-				(key == "error") || (key == "loadfile") || (key == "arg") ||
-				(key == "_LOADED") || (key == "loadlib") || (key == "string") ||
-				(key == "os") || (key == "io") || (key == "debug") ||
-				(key == "coroutine") || (key == "Icons") || (key == "Upgrades") ||
-				(key == "Fonts") || (key == "FontColors") || (key == "expansion")
-				// other string to protected ?
-				))) {
+								  (key == "assert") || (key == "gcinfo") || (key == "getfenv") ||
+								  (key == "unpack") || (key == "tostring") || (key == "tonumber") ||
+								  (key == "setmetatable") || (key == "require") || (key == "pcall") ||
+								  (key == "rawequal") || (key == "collectgarbage") || (key == "type") ||
+								  (key == "getmetatable") || (key == "next") || (key == "print") ||
+								  (key == "xpcall") || (key == "rawset") || (key == "setfenv") ||
+								  (key == "rawget") || (key == "newproxy") || (key == "ipairs") ||
+								  (key == "loadstring") || (key == "dofile") || (key == "_TRACEBACK") ||
+								  (key == "_VERSION") || (key == "pairs") || (key == "__pow") ||
+								  (key == "error") || (key == "loadfile") || (key == "arg") ||
+								  (key == "_LOADED") || (key == "loadlib") || (key == "string") ||
+								  (key == "os") || (key == "io") || (key == "debug") ||
+								  (key == "coroutine") || (key == "Icons") || (key == "Upgrades") ||
+								  (key == "Fonts") || (key == "FontColors") || (key == "expansion")
+								  // other string to protected ?
+							  ))) {
 			lua_pop(l, 1); // pop the value
 			continue;
 		}
@@ -2571,12 +2669,13 @@ std::string SaveGlobal(lua_State *l, bool is_root)
 			case LUA_TNUMBER:
 				value = lua_tostring(l, -1); // let lua do the conversion
 				break;
-			case LUA_TBOOLEAN:
-				b = lua_toboolean(l, -1);
+			case LUA_TBOOLEAN: {
+				int b = lua_toboolean(l, -1);
 				value = b ? "true" : "false";
 				break;
+			}
 			case LUA_TSTRING:
-				value = ( ( std::string(lua_tostring(l, -1)).find('\n') != std::string::npos ) ? ( std::string("[[") + lua_tostring(l, -1) + "]]" ) : ( std::string("\"") + lua_tostring(l, -1) + "\"" ) );
+				value = ((std::string(lua_tostring(l, -1)).find('\n') != std::string::npos) ? (std::string("[[") + lua_tostring(l, -1) + "]]") : (std::string("\"") + lua_tostring(l, -1) + "\""));
 				break;
 			case LUA_TTABLE:
 				lua_pushvalue(l, -1);
@@ -2587,9 +2686,9 @@ std::string SaveGlobal(lua_State *l, bool is_root)
 				}
 				break;
 			case LUA_TFUNCTION:
-			// Could be done with string.dump(function)
-			// and debug.getinfo(function).name (could be nil for anonymous function)
-			// But not usefull yet.
+				// Could be done with string.dump(function)
+				// and debug.getinfo(function).name (could be nil for anonymous function)
+				// But not usefull yet.
 				value = "";
 				break;
 			case LUA_TUSERDATA:
@@ -2642,7 +2741,7 @@ std::string SaveGlobal(lua_State *l, bool is_root)
 		res += "\n";
 	}
 	lua_pop(l, 1); // pop the table
-//	Assert(!is_root || !lua_gettop(l));
+	//Assert(!is_root || !lua_gettop(l));
 	return res;
 }
 
@@ -2651,42 +2750,34 @@ std::string SaveGlobal(lua_State *l, bool is_root)
 */
 void SavePreferences()
 {
-	FILE *fd;
-	std::string path;
 	std::string tableName;
 
 	if (!GameName.empty()) {
-		lua_pushstring(Lua, GameName.c_str());
-		lua_gettable(Lua, LUA_GLOBALSINDEX);
+		lua_getglobal(Lua, GameName.c_str());
 		if (lua_type(Lua, -1) == LUA_TTABLE) {
 			tableName = GameName;
 			tableName += ".";
 			tableName += "preferences";
 			lua_pushstring(Lua, "preferences");
 			lua_gettable(Lua, -2);
-		}
-		else
-		{
-			lua_pushstring(Lua, "preferences");
-			lua_gettable(Lua, LUA_GLOBALSINDEX);
+		} else {
+			lua_getglobal(Lua, "preferences");
 			tableName = "preferences";
 		}
-	}
-	else
-	{
+	} else {
 		tableName = "preferences";
-		lua_pushstring(Lua, "preferences");
-		lua_gettable(Lua, LUA_GLOBALSINDEX);
+		lua_getglobal(Lua, "preferences");
 	}
 	if (lua_type(Lua, -1) == LUA_TTABLE) {
-		path = Parameters::Instance.GetUserDirectory();
+		std::string path = Parameters::Instance.GetUserDirectory();
+
 		if (!GameName.empty()) {
 			path += "/";
 			path += GameName;
 		}
 		path += "/preferences.lua";
 
-		fd = fopen(path.c_str(), "w");
+		FILE *fd = fopen(path.c_str(), "w");
 		if (!fd) {
 			DebugPrint("Cannot open file %s for writing\n" _C_ path.c_str());
 			return;
@@ -2704,7 +2795,7 @@ void SavePreferences()
 /**
 **  Load stratagus config file.
 */
-void LoadCcl(const std::string& filename)
+void LoadCcl(const std::string &filename)
 {
 	char buf[PATH_MAX];
 
@@ -2733,14 +2824,28 @@ void SaveCcl(CFile &file)
 
 	for (unsigned int i = 0; i < MaxCosts; ++i) {
 		file.printf("SetSpeedResourcesHarvest(\"%s\", %d)\n",
-			DefaultResourceNames[i].c_str(), SpeedResourcesHarvest[i]);
+					DefaultResourceNames[i].c_str(), SpeedResourcesHarvest[i]);
 		file.printf("SetSpeedResourcesReturn(\"%s\", %d)\n",
-			DefaultResourceNames[i].c_str(), SpeedResourcesReturn[i]);
+					DefaultResourceNames[i].c_str(), SpeedResourcesReturn[i]);
 	}
 	file.printf("SetSpeedBuild(%d)\n", SpeedBuild);
 	file.printf("SetSpeedTrain(%d)\n", SpeedTrain);
 	file.printf("SetSpeedUpgrade(%d)\n", SpeedUpgrade);
 	file.printf("SetSpeedResearch(%d)\n", SpeedResearch);
 }
+
+
+
+void CleanGame_Lua()
+{
+	lua_getglobal(Lua, "CleanGame_Lua");
+	if (lua_isfunction(Lua, -1)) {
+		LuaCall(0, 1);
+	} else {
+		lua_pop(Lua, 1);
+	}
+}
+
+
 
 //@}

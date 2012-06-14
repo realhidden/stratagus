@@ -69,7 +69,7 @@
 /**
 ** Define the names and effects of all im play available spells.
 */
-std::vector<SpellType*> SpellTypeTable;
+std::vector<SpellType *> SpellTypeTable;
 
 
 /*----------------------------------------------------------------------------
@@ -85,17 +85,16 @@ std::vector<SpellType*> SpellTypeTable;
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      tilePos of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 */
-int Demolish::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int y)
+int Demolish::Cast(CUnit &caster, const SpellType *, CUnit *, const Vec2i &goalPos)
 {
-	const Vec2i pos = {x, y};
 	// Allow error margins. (Lame, I know)
-	Vec2i minpos = {pos.x - this->Range - 2, pos.y - this->Range - 2};
-	Vec2i maxpos = {pos.x + this->Range + 2, pos.y + this->Range + 2};
+	const Vec2i offset = {this->Range + 2, this->Range + 2};
+	Vec2i minpos = goalPos - offset;
+	Vec2i maxpos = goalPos + offset;
 
 	Map.FixSelectionArea(minpos, maxpos);
 
@@ -106,7 +105,7 @@ int Demolish::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int y)
 	for (ipos.x = minpos.x; ipos.x <= maxpos.x; ++ipos.x) {
 		for (ipos.y = minpos.y; ipos.y <= maxpos.y; ++ipos.y) {
 			const int flag = Map.Field(ipos)->Flags;
-			if (MapDistance(ipos, pos) > this->Range) {
+			if (MapDistance(ipos, goalPos) > this->Range) {
 				// Not in circle range
 				continue;
 			} else if (flag & MapFieldWall) {
@@ -123,12 +122,12 @@ int Demolish::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int y)
 	//  Effect of the explosion on units. Don't bother if damage is 0
 	//
 	if (this->Damage) {
-		std::vector<CUnit*> table;
+		std::vector<CUnit *> table;
 		Map.SelectFixed(minpos, maxpos, table);
 		for (size_t i = 0; i != table.size(); ++i) {
 			CUnit &unit = *table[i];
-			if (unit.Type->UnitType != UnitTypeFly && unit.IsAlive() &&
-					unit.MapDistanceTo(x, y) <= this->Range) {
+			if (unit.Type->UnitType != UnitTypeFly && unit.IsAlive()
+				&& unit.MapDistanceTo(goalPos) <= this->Range) {
 				// Don't hit flying units!
 				HitUnit(&caster, unit, this->Damage);
 			}
@@ -144,26 +143,23 @@ int Demolish::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int y)
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      tilePos of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 */
-int SpawnPortal::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int y)
+int SpawnPortal::Cast(CUnit &caster, const SpellType *, CUnit *, const Vec2i &goalPos)
 {
-	const Vec2i pos = {x, y};
 	// FIXME: vladi: cop should be placed only on explored land
 	CUnit *portal = caster.Goal;
 
 	DebugPrint("Spawning a portal exit.\n");
 	if (portal) {
-		portal->MoveToXY(pos);
+		portal->MoveToXY(goalPos);
 	} else {
-		portal = MakeUnitAndPlace(pos, *this->PortalType, &Players[PlayerNumNeutral]);
+		portal = MakeUnitAndPlace(goalPos, *this->PortalType, &Players[PlayerNumNeutral]);
 	}
 	//  Goal is used to link to destination circle of power
 	caster.Goal = portal;
-	portal->RefsIncrease();
 	//FIXME: setting destination circle of power should use mana
 	return 0;
 }
@@ -174,27 +170,25 @@ int SpawnPortal::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int y)
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      TilePos of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 */
-int AreaAdjustVitals::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int x, int y)
+int AreaAdjustVitals::Cast(CUnit &caster, const SpellType *spell, CUnit *target, const Vec2i &goalPos)
 {
-	const Vec2i tilePos = {x, y};
 	const Vec2i range = {spell->Range, spell->Range};
 	const Vec2i typeSize = {caster.Type->Width, caster.Type->Height};
 	std::vector<CUnit *> units;
 
 	// Get all the units around the unit
-	Map.Select(tilePos - range, tilePos + typeSize + range, units);
+	Map.Select(goalPos - range, goalPos + typeSize + range, units);
 	int hp = this->HP;
 	int mana = this->Mana;
 	caster.Variable[MANA_INDEX].Value -= spell->ManaCost;
 	for (size_t j = 0; j != units.size(); ++j) {
 		target = units[j];
-// if (!PassCondition(caster, spell, target, x, y) {
-		if (!CanCastSpell(caster, spell, target, x, y)) {
+		// if (!PassCondition(caster, spell, target, goalPos) {
+		if (!CanCastSpell(caster, spell, target, goalPos)) {
 			continue;
 		}
 		if (hp < 0) {
@@ -222,14 +216,13 @@ int AreaAdjustVitals::Cast(CUnit &caster, const SpellType *spell, CUnit *target,
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      TilePos of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 **  @internal: vladi: blizzard differs than original in this way:
 **   original: launches 50 shards at 5 random spots x 10 for 25 mana.
 */
-int AreaBombardment::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int y)
+int AreaBombardment::Cast(CUnit &caster, const SpellType *, CUnit *, const Vec2i &goalPos)
 {
 	int fields = this->Fields;
 	const int shards = this->Shards;
@@ -238,18 +231,16 @@ int AreaBombardment::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int 
 	const MissileType *missile = this->Missile;
 
 	while (fields--) {
-		int dx;
-		int dy;
+		Vec2i dpos;
 
 		// FIXME: radius configurable...
 		do {
 			// find new destination in the map
-			dx = x + SyncRand() % 5 - 2;
-			dy = y + SyncRand() % 5 - 2;
-		} while (!Map.Info.IsPointOnMap(dx, dy));
+			dpos.x = goalPos.x + SyncRand() % 5 - 2;
+			dpos.y = goalPos.y + SyncRand() % 5 - 2;
+		} while (!Map.Info.IsPointOnMap(dpos));
 
-		const PixelPos dest = { dx * PixelTileSize.x + PixelTileSize.x / 2,
-								dy * PixelTileSize.y + PixelTileSize.y / 2};
+		const PixelPos dest = Map.TilePosToMapPixelPos_Center(dpos);
 		const PixelPos start = dest + offset;
 		for (int i = 0; i < shards; ++i) {
 			::Missile *mis = MakeMissile(*missile, start, dest);
@@ -264,7 +255,6 @@ int AreaBombardment::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int 
 			// FIXME: not correct -- blizzard should continue even if mage is
 			//    destroyed (though it will be quite short time...)
 			mis->SourceUnit = &caster;
-			caster.RefsIncrease();
 		}
 	}
 	return 1;
@@ -276,33 +266,28 @@ int AreaBombardment::Cast(CUnit &caster, const SpellType *, CUnit *, int x, int 
 ** @param location     Parameters for location.
 ** @param caster       Unit that casts the spell
 ** @param target       Target unit that spell is addressed to
-** @param x            X coord of target spot when/if target does not exist
-** @param y            Y coord of target spot when/if target does not exist
-** @param resx         pointer to X coord of the result
-** @param resy         pointer to Y coord of the result
+** @param goalPos      TilePos of target spot when/if target does not exist
+** @param res          pointer to PixelPos of the result
 */
-static void EvaluateMissileLocation(const SpellActionMissileLocation *location,
-	CUnit &caster, CUnit *target, int x, int y, int *resx, int *resy)
+static void EvaluateMissileLocation(const SpellActionMissileLocation &location,
+									CUnit &caster, CUnit *target, const Vec2i &goalPos, PixelPos *res)
 {
-	if (location->Base == LocBaseCaster) {
-		*resx = caster.tilePos.x * PixelTileSize.x + PixelTileSize.x / 2;
-		*resy = caster.tilePos.y * PixelTileSize.y + PixelTileSize.y / 2;
+	if (location.Base == LocBaseCaster) {
+		*res = caster.GetMapPixelPosCenter();
 	} else {
 		if (target) {
-			*resx = target->tilePos.x * PixelTileSize.x + PixelTileSize.x / 2;
-			*resy = target->tilePos.y * PixelTileSize.y + PixelTileSize.y / 2;
+			*res = target->GetMapPixelPosCenter();
 		} else {
-			*resx = x * PixelTileSize.x + PixelTileSize.x / 2;
-			*resy = y * PixelTileSize.y + PixelTileSize.y / 2;
+			*res = Map.TilePosToMapPixelPos_Center(goalPos);
 		}
 	}
-	*resx += location->AddX;
-	if (location->AddRandX) {
-		*resx += SyncRand() % location->AddRandX;
+	res->x += location.AddX;
+	if (location.AddRandX) {
+		res->x += SyncRand() % location.AddRandX;
 	}
-	*resy += location->AddY;
-	if (location->AddRandY) {
-		*resy += SyncRand() % location->AddRandY;
+	res->y += location.AddY;
+	if (location.AddRandY) {
+		res->y += SyncRand() % location.AddRandY;
 	}
 }
 
@@ -312,20 +297,17 @@ static void EvaluateMissileLocation(const SpellActionMissileLocation *location,
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      TilePos of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 */
-int SpawnMissile::Cast(CUnit &caster, const SpellType *, CUnit *target, int x, int y)
+int SpawnMissile::Cast(CUnit &caster, const SpellType *, CUnit *target, const Vec2i &goalPos)
 {
 	PixelPos startPos;
 	PixelPos endPos;
 
-	EvaluateMissileLocation(&this->StartPoint,
-		caster, target, x, y, &startPos.x, &startPos.y);
-	EvaluateMissileLocation(&this->EndPoint,
-		caster, target, x, y, &endPos.x, &endPos.y);
+	EvaluateMissileLocation(this->StartPoint, caster, target, goalPos, &startPos);
+	EvaluateMissileLocation(this->EndPoint, caster, target, goalPos, &endPos);
 
 	::Missile *missile = MakeMissile(*this->Missile, startPos, endPos);
 	missile->TTL = this->TTL;
@@ -334,29 +316,24 @@ int SpawnMissile::Cast(CUnit &caster, const SpellType *, CUnit *target, int x, i
 	if (this->UseUnitVar) {
 		missile->Damage = 0;
 		missile->SourceUnit = &caster;
-		caster.RefsIncrease();
 	} else if (missile->Damage != 0) {
 		missile->SourceUnit = &caster;
-		caster.RefsIncrease();
 	}
-	if ((missile->TargetUnit = target)) {
-		target->RefsIncrease();
-	}
+	missile->TargetUnit = target;
 	return 1;
 }
 
 /**
 **  Adjust User Variables.
 **
-**  @param caster  Unit that casts the spell
-**  @param spell   Spell-type pointer
-**  @param target  Target
-**  @param x       X coord of target spot when/if target does not exist
-**  @param y       Y coord of target spot when/if target does not exist
+**  @param caster   Unit that casts the spell
+**  @param spell    Spell-type pointer
+**  @param target   Target
+**  @param goalPos  coord of target spot when/if target does not exist
 **
 **  @return        =!0 if spell should be repeated, 0 if not
 */
-int AdjustVariable::Cast(CUnit &caster, const SpellType *, CUnit *target, int, int)
+int AdjustVariable::Cast(CUnit &caster, const SpellType *, CUnit *target, const Vec2i &/*goalPos*/)
 {
 	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); ++i) {
 		CUnit *unit = (this->Var[i].TargetIsCaster) ? &caster : target;
@@ -387,16 +364,11 @@ int AdjustVariable::Cast(CUnit &caster, const SpellType *, CUnit *target, int, i
 			unit->Variable[i].Value = this->Var[i].Value;
 		}
 		unit->Variable[i].Value += this->Var[i].AddValue;
-		unit->Variable[i].Value += this->Var[i].IncreaseTime
-			* unit->Variable[i].Increase;
+		unit->Variable[i].Value += this->Var[i].IncreaseTime * unit->Variable[i].Increase;
 
-		if (unit->Variable[i].Value <= 0) {
-			unit->Variable[i].Value = 0;
-		} else if (unit->Variable[i].Value > unit->Variable[i].Max) {
-			unit->Variable[i].Value = unit->Variable[i].Max;
-		}
+		clamp(&unit->Variable[i].Value, 0, unit->Variable[i].Max);
 	}
-	return 0;
+	return 1;
 }
 
 
@@ -406,28 +378,22 @@ int AdjustVariable::Cast(CUnit &caster, const SpellType *, CUnit *target, int, i
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      coord of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 */
-int AdjustVitals::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int, int)
+int AdjustVitals::Cast(CUnit &caster, const SpellType *spell, CUnit *target, const Vec2i &/*goalPos*/)
 {
-	int castcount;
-	int diffHP;
-	int diffMana;
-	int hp;
-	int mana;
-	int manacost;
-
 	Assert(spell);
 	if (!target) {
 		return 0;
 	}
 
-	hp = this->HP;
-	mana = this->Mana;
-	manacost = spell->ManaCost;
+	const int hp = this->HP;
+	const int mana = this->Mana;
+	const int manacost = spell->ManaCost;
+	int diffHP;
+	int diffMana;
 
 	//  Healing and harming
 	if (hp > 0) {
@@ -444,14 +410,14 @@ int AdjustVitals::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int
 	//  When harming cast again to send the hp to negative values.
 	//  Carefull, a perfect 0 target hp kills too.
 	//  Avoid div by 0 errors too!
-	castcount = 1;
+	int castcount = 1;
 	if (hp) {
-		castcount = std::max<int>(castcount, diffHP / abs(hp) + (((hp < 0) &&
-			(diffHP % (-hp) > 0)) ? 1 : 0));
+		castcount = std::max<int>(castcount,
+								  diffHP / abs(hp) + (((hp < 0) && (diffHP % (-hp) > 0)) ? 1 : 0));
 	}
 	if (mana) {
-		castcount = std::max<int>(castcount, diffMana / abs(mana) + (((mana < 0) &&
-			(diffMana % (-mana) > 0)) ? 1 : 0));
+		castcount = std::max<int>(castcount,
+								  diffMana / abs(mana) + (((mana < 0) && (diffMana % (-mana) > 0)) ? 1 : 0));
 	}
 	if (manacost) {
 		castcount = std::min<int>(castcount, caster.Variable[MANA_INDEX].Value / manacost);
@@ -483,8 +449,9 @@ int AdjustVitals::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int
 	if (target->Variable[MANA_INDEX].Value > target->Variable[MANA_INDEX].Max) {
 		target->Variable[MANA_INDEX].Value = target->Variable[MANA_INDEX].Max;
 	}
-	if (spell->RepeatCast)
+	if (spell->RepeatCast) {
 		return 1;
+	}
 	return 0;
 }
 
@@ -494,22 +461,18 @@ int AdjustVitals::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      coord of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 */
-int Polymorph::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int x, int y)
+int Polymorph::Cast(CUnit &caster, const SpellType *spell, CUnit *target, const Vec2i &goalPos)
 {
 	if (!target) {
 		return 0;
 	}
-
 	CUnitType &type = *this->NewForm;
+	const Vec2i pos = {goalPos.x - type.TileWidth / 2, goalPos.y - type.TileHeight / 2};
 
-	x = x - type.TileWidth / 2;
-	y = y - type.TileHeight / 2;
-	const Vec2i pos = {x, y};
 	caster.Player->Score += target->Variable[POINTS_INDEX].Value;
 	if (caster.IsEnemy(*target)) {
 		if (target->Type->Building) {
@@ -559,12 +522,11 @@ int Polymorph::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int x,
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      coord of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 */
-int Capture::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int, int)
+int Capture::Cast(CUnit &caster, const SpellType *spell, CUnit *target, const Vec2i &/*goalPos*/)
 {
 	if (!target || caster.Player == target->Player) {
 		return 0;
@@ -574,16 +536,16 @@ int Capture::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int, int
 		if ((100 * target->Variable[HP_INDEX].Value) /
 			target->Variable[HP_INDEX].Max > this->DamagePercent &&
 			target->Variable[HP_INDEX].Value > this->Damage) {
-				HitUnit(&caster, *target, this->Damage);
-				if (this->SacrificeEnable) {
-					// No corpse.
-					caster.Remove(NULL);
-					UnitLost(caster);
-					UnitClearOrders(caster);
-				}
-				return 1;
+			HitUnit(&caster, *target, this->Damage);
+			if (this->SacrificeEnable) {
+				// No corpse.
+				caster.Remove(NULL);
+				UnitLost(caster);
+				UnitClearOrders(caster);
 			}
+			return 1;
 		}
+	}
 	caster.Player->Score += target->Variable[POINTS_INDEX].Value;
 	if (caster.IsEnemy(*target)) {
 		if (target->Type->Building) {
@@ -617,8 +579,7 @@ int Capture::Cast(CUnit &caster, const SpellType *spell, CUnit *target, int, int
 class IsDyingAndNotABuilding
 {
 public:
-	bool operator () (const CUnit* unit) const
-	{
+	bool operator()(const CUnit *unit) const {
 		return unit->CurrentAction() == UnitActionDie && !unit->Type->Building;
 	}
 };
@@ -630,28 +591,27 @@ public:
 **  @param caster       Unit that casts the spell
 **  @param spell        Spell-type pointer
 **  @param target       Target unit that spell is addressed to
-**  @param x            X coord of target spot when/if target does not exist
-**  @param y            Y coord of target spot when/if target does not exist
+**  @param goalPos      coord of target spot when/if target does not exist
 **
 **  @return             =!0 if spell should be repeated, 0 if not
 */
-int Summon::Cast(CUnit &caster, const SpellType *spell,
-	CUnit *target, int x, int y)
+int Summon::Cast(CUnit &caster, const SpellType *spell, CUnit *target, const Vec2i &goalPos)
 {
+	Vec2i pos = goalPos;
 	int cansummon;
 	CUnitType &unittype = *this->UnitType;
 	int ttl = this->TTL;
 
 	if (this->RequireCorpse) {
-		const Vec2i minPos = {x - 1, y - 1};
-		const Vec2i maxPos = {x + 2, y + 2};
+		const Vec2i offset = {1, 1};
+		const Vec2i minPos = pos - offset;
+		const Vec2i maxPos = pos + offset;
 
 		CUnit *unit = Map.Find_If(minPos, maxPos, IsDyingAndNotABuilding());
 		cansummon = 0;
 
 		if (unit != NULL) { //  Found a corpse. eliminate it and proceed to summoning.
-			x = unit->tilePos.x;
-			y = unit->tilePos.y;
+			pos = unit->tilePos;
 			unit->Remove(NULL);
 			unit->Release();
 			cansummon = 1;
@@ -669,8 +629,7 @@ int Summon::Cast(CUnit &caster, const SpellType *spell,
 		//
 		target = MakeUnit(unittype, caster.Player);
 		if (target != NoUnitP) {
-			target->tilePos.x = x;
-			target->tilePos.y = y;
+			target->tilePos = pos;
 			DropOutOnSide(*target, LookingW, NULL);
 			//
 			//  set life span. ttl=0 results in a permanent unit.
@@ -714,14 +673,13 @@ static Target *NewTargetUnit(CUnit &unit)
 **  @param caster      Pointer to caster unit.
 **  @param spell       Pointer to the spell to cast.
 **  @param target      Pointer to target unit, or 0 if it is a position spell.
-**  @param x           X position, or -1 if it is a unit spell.
-**  @param y           Y position, or -1 if it is a unit spell.
+**  @param goalPos     position, or {-1, -1} if it is a unit spell.
 **  @param condition   Pointer to condition info.
 **
 **  @return            true if passed, false otherwise.
 */
 static bool PassCondition(const CUnit &caster, const SpellType *spell, const CUnit *target,
-	int, int, const ConditionInfo *condition)
+						  const Vec2i &/*goalPos*/, const ConditionInfo *condition)
 {
 	if (caster.Variable[MANA_INDEX].Value < spell->ManaCost) { // Check caster mana.
 		return false;
@@ -737,6 +695,10 @@ static bool PassCondition(const CUnit &caster, const SpellType *spell, const CUn
 	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); i++) { // for custom variables
 		const CUnit *unit;
 
+		if (!condition->Variable[i].Check) {
+			continue;
+		}
+
 		unit = (condition->Variable[i].ConditionApplyOnCaster) ? &caster : target;
 		//  Spell should target location and have unit condition.
 		if (unit == NULL) {
@@ -747,7 +709,7 @@ static bool PassCondition(const CUnit &caster, const SpellType *spell, const CUn
 				return false;
 			}
 		}
-	// Value and Max
+		// Value and Max
 		if (condition->Variable[i].MinValue >= unit->Variable[i].Value) {
 			return false;
 		}
@@ -763,7 +725,7 @@ static bool PassCondition(const CUnit &caster, const SpellType *spell, const CUn
 		if (!unit->Variable[i].Max) {
 			continue;
 		}
-	// Percent
+		// Percent
 		if (condition->Variable[i].MinValuePercent * unit->Variable[i].Max
 			>= 100 * unit->Variable[i].Value) {
 			return false;
@@ -782,14 +744,14 @@ static bool PassCondition(const CUnit &caster, const SpellType *spell, const CUn
 	}
 	if (condition->Alliance != CONDITION_TRUE) {
 		if ((condition->Alliance == CONDITION_ONLY) ^
-				// own units could be not allied ?
-				(caster.IsAllied(*target) || target->Player == caster.Player)) {
+			// own units could be not allied ?
+			(caster.IsAllied(*target) || target->Player == caster.Player)) {
 			return false;
 		}
 	}
 	if (condition->Opponent != CONDITION_TRUE) {
 		if ((condition->Opponent == CONDITION_ONLY) ^
-				(caster.IsEnemy(*target) && 1)) {
+			(caster.IsEnemy(*target) && 1)) {
 			return false;
 		}
 	}
@@ -822,9 +784,8 @@ static Target *SelectTargetUnitsOfAutoCast(CUnit &caster, const SpellType *spell
 		autocast = spell->AutoCast;
 	}
 	Assert(autocast);
-	int x = caster.tilePos.x;
-	int y = caster.tilePos.y;
-	int range = spell->AutoCast->Range;
+	const Vec2i &pos = caster.tilePos;
+	int range = autocast->Range;
 
 
 	// Select all units aroung the caster
@@ -850,8 +811,8 @@ static Target *SelectTargetUnitsOfAutoCast(CUnit &caster, const SpellType *spell
 
 	switch (spell->Target) {
 		case TargetSelf :
-			if (PassCondition(caster, spell, &caster, x, y, spell->Condition) &&
-					PassCondition(caster, spell, &caster, x, y, autocast->Condition)) {
+			if (PassCondition(caster, spell, &caster, pos, spell->Condition)
+				&& PassCondition(caster, spell, &caster, pos, autocast->Condition)) {
 				return NewTargetUnit(caster);
 			}
 			return NULL;
@@ -871,8 +832,8 @@ static Target *SelectTargetUnitsOfAutoCast(CUnit &caster, const SpellType *spell
 			for (size_t i = 0; i != table.size(); ++i) {
 				//  FIXME: autocast conditions should include normal conditions.
 				//  FIXME: no, really, they should.
-				if (PassCondition(caster, spell, table[i], x, y, spell->Condition) &&
-						PassCondition(caster, spell, table[i], x, y, autocast->Condition)) {
+				if (PassCondition(caster, spell, table[i], pos, spell->Condition)
+					&& PassCondition(caster, spell, table[i], pos, autocast->Condition)) {
 					table[n++] = table[i];
 				}
 			}
@@ -961,19 +922,18 @@ bool SpellIsAvailable(const CPlayer &player, int spellid)
 **  @param caster    Unit that casts the spell
 **  @param spell     Spell-type pointer
 **  @param target    Target unit that spell is addressed to
-**  @param x         X coord of target spot when/if target does not exist
-**  @param y         Y coord of target spot when/if target does not exist
+**  @param goalPos   coord of target spot when/if target does not exist
 **
 **  @return          =!0 if spell should/can casted, 0 if not
 **  @note caster must know the spell, and spell must be researched.
 */
 bool CanCastSpell(const CUnit &caster, const SpellType *spell,
-	const CUnit *target, int x, int y)
+				  const CUnit *target, const Vec2i &goalPos)
 {
 	if (spell->Target == TargetUnit && target == NULL) {
 		return false;
 	}
-	return PassCondition(caster, spell, target, x, y, spell->Condition);
+	return PassCondition(caster, spell, target, goalPos, spell->Condition);
 }
 
 /**
@@ -1000,7 +960,7 @@ int AutoCastSpell(CUnit &caster, const SpellType *spell)
 		// Must move before ?
 		// FIXME: SpellType* of CommandSpellCast must be const.
 		CommandSpellCast(caster, target->targetPos, target->Unit,
-			const_cast<SpellType *>(spell), FlushCommands);
+						 const_cast<SpellType *>(spell), FlushCommands);
 		delete target;
 	}
 	return 1;
@@ -1017,39 +977,38 @@ int AutoCastSpell(CUnit &caster, const SpellType *spell)
 **
 ** @return          !=0 if spell should/can continue or 0 to stop
 */
-int SpellCast(CUnit &caster, const SpellType *spell, CUnit *target, int x, int y)
+int SpellCast(CUnit &caster, const SpellType *spell, CUnit *target, const Vec2i &goalPos)
 {
+	Vec2i pos = goalPos;
 	int cont;             // Should we recast the spell.
 	int mustSubtractMana; // false if action which have their own calculation is present.
 
 	caster.Variable[INVISIBLE_INDEX].Value = 0;// unit is invisible until attacks // FIXME: Must be configurable
 	if (target) {
-		x = target->tilePos.x;
-		y = target->tilePos.y;
+		pos = target->tilePos;
 	}
 	//
 	// For TargetSelf, you target.... YOURSELF
 	//
 	if (spell->Target == TargetSelf) {
-		x = caster.tilePos.x;
-		y = caster.tilePos.y;
+		pos = caster.tilePos;
 		target = &caster;
 	}
 	DebugPrint("Spell cast: (%s), %s -> %s (%d,%d)\n" _C_ spell->Ident.c_str() _C_
-		caster.Type->Name.c_str() _C_ target ? target->Type->Name.c_str() : "none" _C_ x _C_ y);
-	if (CanCastSpell(caster, spell, target, x, y)) {
+			   caster.Type->Name.c_str() _C_ target ? target->Type->Name.c_str() : "none" _C_ pos.x _C_ pos.y);
+	if (CanCastSpell(caster, spell, target, pos)) {
 		cont = 1;
 		mustSubtractMana = 1;
 		//
 		//  Ugly hack, CastAdjustVitals makes it's own mana calculation.
 		//
 		PlayGameSound(spell->SoundWhenCast.Sound, MaxSampleVolume);
-		for (std::vector<SpellActionType*>::const_iterator act = spell->Action.begin();
-			act != spell->Action.end();	++act) {
+		for (std::vector<SpellActionType *>::const_iterator act = spell->Action.begin();
+			 act != spell->Action.end(); ++act) {
 			if ((*act)->ModifyManaCaster) {
 				mustSubtractMana = 0;
 			}
-			cont = cont & (*act)->Cast(caster, spell, target, x, y);
+			cont = cont & (*act)->Cast(caster, spell, target, pos);
 		}
 		if (mustSubtractMana) {
 			caster.Variable[MANA_INDEX].Value -= spell->ManaCost;
@@ -1062,7 +1021,7 @@ int SpellCast(CUnit &caster, const SpellType *spell, CUnit *target, int x, int y
 		// anim but fail in this proc.
 		//
 		if (spell->RepeatCast && cont) {
-			return CanCastSpell(caster, spell, target, x, y);
+			return CanCastSpell(caster, spell, target, pos);
 		}
 	}
 	//

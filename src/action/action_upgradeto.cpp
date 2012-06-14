@@ -58,7 +58,7 @@
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* static */ COrder* COrder::NewActionTransformInto(CUnitType &type)
+/* static */ COrder *COrder::NewActionTransformInto(CUnitType &type)
 {
 	COrder_TransformInto *order = new COrder_TransformInto;
 
@@ -66,7 +66,7 @@
 	return order;
 }
 
-/* static */ COrder* COrder::NewActionUpgradeTo(CUnit &unit, CUnitType &type)
+/* static */ COrder *COrder::NewActionUpgradeTo(CUnit &unit, CUnitType &type)
 {
 	COrder_UpgradeTo *order = new COrder_UpgradeTo;
 
@@ -115,8 +115,8 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	// Change resource limit
 	for (int i = 0; i < MaxCosts; ++i) {
 		if (player.MaxResources[i] != -1) {
-			player.MaxResources[i] += newtype._Storing[i] - oldtype._Storing[i];
-			player.SetResource(i, player.Resources[i]);
+			player.MaxResources[i] += newtype.Stats[player.Index].Storing[i] - oldtype.Stats[player.Index].Storing[i];
+			player.SetResource(i, player.StoredResources[i], true);
 		}
 	}
 
@@ -126,7 +126,7 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); ++i) {
 		if (unit.Variable[i].Max) {
 			unit.Variable[i].Value = newstats.Variables[i].Max *
-				unit.Variable[i].Value / unit.Variable[i].Max;
+									 unit.Variable[i].Value / unit.Variable[i].Max;
 		} else {
 			unit.Variable[i].Value = newstats.Variables[i].Value;
 		}
@@ -135,7 +135,7 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 		unit.Variable[i].Enable = newstats.Variables[i].Enable;
 	}
 
-	unit.Type = const_cast<CUnitType*>(&newtype);
+	unit.Type = const_cast<CUnitType *>(&newtype);
 	unit.Stats = &unit.Type->Stats[player.Index];
 
 	if (newtype.CanCastSpell && !unit.AutoCastSpell) {
@@ -188,7 +188,13 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	return true;
 }
 
-/* virtual */ PixelPos COrder_TransformInto::Show(const CViewport& , const PixelPos& lastScreenPos) const
+/* virtual */ bool COrder_TransformInto::IsValid() const
+{
+	return true;
+}
+
+
+/* virtual */ PixelPos COrder_TransformInto::Show(const CViewport & , const PixelPos &lastScreenPos) const
 {
 	return lastScreenPos;
 }
@@ -233,7 +239,12 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	return true;
 }
 
-/* virtual */ PixelPos COrder_UpgradeTo::Show(const CViewport& , const PixelPos& lastScreenPos) const
+/* virtual */ bool COrder_UpgradeTo::IsValid() const
+{
+	return true;
+}
+
+/* virtual */ PixelPos COrder_UpgradeTo::Show(const CViewport & , const PixelPos &lastScreenPos) const
 {
 	return lastScreenPos;
 }
@@ -241,9 +252,9 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 
 static void AnimateActionUpgradeTo(CUnit &unit)
 {
-	unit.Type->Animations->Upgrade ?
-		UnitShowAnimation(unit, unit.Type->Animations->Upgrade) :
-		UnitShowAnimation(unit, unit.Type->Animations->Still);
+	CAnimations &animations = *unit.Type->Animations;
+
+	UnitShowAnimation(unit, animations.Upgrade ? animations.Upgrade : animations.Still);
 }
 
 /* virtual */ void COrder_UpgradeTo::Execute(CUnit &unit)

@@ -50,7 +50,11 @@
 --  Declarations
 ----------------------------------------------------------------------------*/
 
+#include <queue>
+#include "Vec2i.h"
+
 class CUnit;
+class CFile;
 
 /**
 **  Result codes of the pathfinder.
@@ -71,27 +75,27 @@ class PathFinderInput
 {
 public:
 	PathFinderInput();
-	CUnit* GetUnit() const { return unit; }
-	const Vec2i& GetUnitPos() const;
+	CUnit *GetUnit() const { return unit; }
+	const Vec2i &GetUnitPos() const;
 	Vec2i GetUnitSize() const;
-	const Vec2i& GetGoalPos() const { return goalPos; }
-	const Vec2i& GetGoalSize() const { return goalSize; }
+	const Vec2i &GetGoalPos() const { return goalPos; }
+	const Vec2i &GetGoalSize() const { return goalSize; }
 	int GetMinRange() const { return minRange; }
 	int GetMaxRange() const { return maxRange; }
 	bool IsRecalculateNeeded() const { return isRecalculatePathNeeded; }
 
 	void SetUnit(CUnit &_unit);
-	void SetGoal(const Vec2i& pos, const Vec2i& size);
+	void SetGoal(const Vec2i &pos, const Vec2i &size);
 	void SetMinRange(int range);
 	void SetMaxRange(int range);
 
 	void PathRacalculated();
 
-	void Save(CFile& file) const;
-	void Load(lua_State* l);
+	void Save(CFile &file) const;
+	void Load(lua_State *l);
 
 private:
-	CUnit* unit;
+	CUnit *unit;
 	Vec2i unitSize;
 	Vec2i goalPos;
 	Vec2i goalSize;
@@ -106,8 +110,8 @@ public:
 	enum {MAX_PATH_LENGTH = 28}; /// max length of precalculated path
 public:
 	PathFinderOutput();
-	void Save(CFile& file) const;
-	void Load(lua_State* l);
+	void Save(CFile &file) const;
+	void Load(lua_State *l);
 public:
 	unsigned short int Cycles;  /// how much Cycles we move.
 	char Fast;                  /// Flag fast move (one step)
@@ -123,18 +127,81 @@ public:
 };
 
 
+//
+//  Terrain traversal stuff.
+//
+
+enum VisitResult
+{
+	VisitResult_Finished,
+	VisitResult_DeadEnd,
+	VisitResult_Ok,
+	VisitResult_Cancel
+};
+
+class TerrainTraversal
+{
+public:
+	void SetSize(unsigned int width, unsigned int height);
+	void Init(unsigned char borderValue);
+
+	void PushPos(const Vec2i &pos);
+	void PushNeighboor(const Vec2i &pos);
+
+	template <typename T>
+	bool Run(T &context);
+
+	bool IsVisited(const Vec2i &pos) const;
+
+	// Accept pos to be at one inside the real map
+	unsigned char Get(const Vec2i &pos) const;
+	unsigned char& Get(const Vec2i &pos);
+
+private:
+	struct PosNode
+	{
+		PosNode(const Vec2i &pos, const Vec2i &from) : pos(pos), from(from) {}
+		Vec2i pos;
+		Vec2i from;
+	};
+
+private:
+	std::vector<unsigned char> m_values;
+	std::queue<PosNode> m_queue;
+	unsigned int m_extented_width;
+	unsigned int m_height;
+};
+
+template <typename T>
+bool TerrainTraversal::Run(T &context)
+{
+	for (; m_queue.empty() == false; m_queue.pop())
+	{
+		const PosNode& posNode = m_queue.front();
+
+		switch (context.Visit(*this, posNode.pos, posNode.from)) {
+			case VisitResult_Finished: return true;
+			case VisitResult_DeadEnd: break;
+			case VisitResult_Ok: PushNeighboor(posNode.pos); break;
+			case VisitResult_Cancel: return false;
+		}
+		Assert(IsVisited(posNode.pos));
+	}
+	return false;
+}
+
 
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
 
-	/// cost associated to move on a tile occupied by a fixed unit
+/// cost associated to move on a tile occupied by a fixed unit
 extern int AStarFixedUnitCrossingCost;
-	/// cost associated to move on a tile occupied by a moving unit
+/// cost associated to move on a tile occupied by a moving unit
 extern int AStarMovingUnitCrossingCost;
-	/// Whether to have knowledge of terrain that we haven't visited yet
+/// Whether to have knowledge of terrain that we haven't visited yet
 extern bool AStarKnowUnseenTerrain;
-	/// Cost of using a square we haven't seen before.
+/// Cost of using a square we haven't seen before.
 extern int AStarUnknownTerrainCost;
 
 //
@@ -148,23 +215,23 @@ extern const int XY2Heading[3][3];
 --  Functions
 ----------------------------------------------------------------------------*/
 
-	/// Init the pathfinder
+/// Init the pathfinder
 extern void InitPathfinder();
-	/// Free the pathfinder
+/// Free the pathfinder
 extern void FreePathfinder();
 
-	/// Create a matrix for the old pathfinder
+/// Create a matrix for the old pathfinder
 extern unsigned char *CreateMatrix();
-	/// Allocate a new matrix and initialize
+/// Allocate a new matrix and initialize
 extern unsigned char *MakeMatrix();
 
-	/// Returns the next element of the path
+/// Returns the next element of the path
 extern int NextPathElement(CUnit &unit, short int *xdp, short int *ydp);
-	/// Return distance to unit.
+/// Return distance to unit.
 extern int UnitReachable(const CUnit &unit, const CUnit &dst, int range);
-	/// Can the unit 'src' reach the place x,y
-extern int PlaceReachable(const CUnit &src, int x, int y, int w, int h,
-	int minrange, int maxrange);
+/// Can the unit 'src' reach the place x,y
+extern int PlaceReachable(const CUnit &src, const Vec2i &pos, int w, int h,
+						  int minrange, int maxrange);
 
 //
 // in astar.cpp

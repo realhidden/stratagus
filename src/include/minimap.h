@@ -40,7 +40,7 @@ class CMinimap
 {
 	template <const int BPP>
 	void UpdateMapTerrain(void *const mpixels, const int mpitch,
-		 const void *const tpixels, const int tpitch);
+						  const void *const tpixels, const int tpitch);
 
 	void UpdateTerrain();
 
@@ -59,14 +59,16 @@ public:
 	void FreeOpenGL();
 	void Reload();
 	void Destroy();
-	void Draw(int vx, int vy);
-	void DrawCursor(int vx, int vy);
-	void AddEvent(int x, int y, Uint32 color);
+	void Draw() const;
+	void DrawViewportArea(const CViewport &viewport) const;
+	void AddEvent(const Vec2i &pos, Uint32 color);
 
-	Vec2i ScreenToTilePos(const PixelPos& screenPos) const;
+	Vec2i ScreenToTilePos(const PixelPos &screenPos) const;
 	int Screen2MapX(int x) const;
 	int Screen2MapY(int y) const;
 
+	bool Contains(const PixelPos &screenPos) const;
+public:
 	int X;
 	int Y;
 	int W;

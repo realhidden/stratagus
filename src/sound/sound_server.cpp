@@ -61,9 +61,10 @@ static int MusicVolume = 128;    /// music volume
 static bool MusicEnabled = true;
 static bool EffectsEnabled = true;
 
-	/// Channels for sound effects and unit speach
+/// Channels for sound effects and unit speach
 struct SoundChannel {
 	CSample *Sample;       /// sample to play
+	Origin *Unit;          /// pointer to unit, who plays the sound, if any
 	unsigned char Volume;  /// Volume of this channel
 	signed char Stereo;    /// stereo location of sound (-128 left, 0 center, 127 right)
 
@@ -105,7 +106,7 @@ static int MixerBufferSize;
 **  @return           Number of bytes written in 'dest'
 */
 static int ConvertToStereo32(const char *src, char *dest, int frequency,
-	int chansize, int channels, int bytes)
+							 int chansize, int channels, int bytes)
 {
 	SDL_AudioCVT acvt;
 	Uint16 format;
@@ -137,29 +138,21 @@ static int ConvertToStereo32(const char *src, char *dest, int frequency,
 */
 static void MixMusicToStereo32(int *buffer, int size)
 {
-	int i;
-	int n;
-	int len;
-	short *buf;
-	char *tmp;
-	int div;
-
 	if (MusicPlaying) {
 		Assert(MusicChannel.Sample);
 
-		len = size * sizeof(*buf);
-		tmp = new char[len];
-		buf = new short[len];
+		short *buf = new short[size];
+		int len = size * sizeof(short);
+		char *tmp = new char[len];
 
-		div = 176400 / (MusicChannel.Sample->Frequency * (MusicChannel.Sample->SampleSize / 8)
-				* MusicChannel.Sample->Channels);
+		int div = 176400 / (MusicChannel.Sample->Frequency * (MusicChannel.Sample->SampleSize / 8) * MusicChannel.Sample->Channels);
 
 		size = MusicChannel.Sample->Read(tmp, len / div);
 
-		n = ConvertToStereo32((char *)(tmp), (char *)buf, MusicChannel.Sample->Frequency,
-			MusicChannel.Sample->SampleSize / 8, MusicChannel.Sample->Channels, size);
+		int n = ConvertToStereo32(tmp, (char *)buf, MusicChannel.Sample->Frequency,
+								  MusicChannel.Sample->SampleSize / 8, MusicChannel.Sample->Channels, size);
 
-		for (i = 0; i < n / (int)sizeof(*buf); ++i) {
+		for (int i = 0; i < n / (int)sizeof(*buf); ++i) {
 			// Add to our samples
 			// FIXME: why taking out '/ 2' leads to distortion
 			buffer[i] += buf[i] * MusicVolume / MaxVolume / 2;
@@ -198,19 +191,14 @@ static void MixMusicToStereo32(int *buffer, int size)
 **  @todo          Can mix faster if signed 8 bit buffers are used.
 */
 static int MixSampleToStereo32(CSample *sample, int index, unsigned char volume,
-	char stereo, int *buffer, int size)
+							   char stereo, int *buffer, int size)
 {
-	int local_volume;
+	static int buf[SOUND_BUFFER_SIZE / 2];
 	unsigned char left;
 	unsigned char right;
-	int i;
-	static int buf[SOUND_BUFFER_SIZE / 2];
-	int div;
 
-	div = 176400 / (sample->Frequency * (sample->SampleSize / 8)
-			* sample->Channels);
-
-	local_volume = (int)volume * EffectsVolume / MaxVolume;
+	int div = 176400 / (sample->Frequency * (sample->SampleSize / 8) * sample->Channels);
+	int local_volume = (int)volume * EffectsVolume / MaxVolume;
 
 	if (stereo < 0) {
 		left = 128;
@@ -227,11 +215,11 @@ static int MixSampleToStereo32(CSample *sample, int index, unsigned char volume,
 	}
 
 	size = ConvertToStereo32((char *)(sample->Buffer + index), (char *)buf, sample->Frequency,
-			sample->SampleSize / 8, sample->Channels,
-			size * 2 / div);
+							 sample->SampleSize / 8, sample->Channels,
+							 size * 2 / div);
 
 	size /= 2;
-	for (i = 0; i < size; i += 2) {
+	for (int i = 0; i < size; i += 2) {
 		// FIXME: why taking out '/ 2' leads to distortion
 		buffer[i] += ((short *)buf)[i] * local_volume * left / 128 / MaxVolume / 2;
 		buffer[i + 1] += ((short *)buf)[i + 1] * local_volume * right / 128 / MaxVolume / 2;
@@ -250,16 +238,13 @@ static int MixSampleToStereo32(CSample *sample, int index, unsigned char volume,
 */
 static int MixChannelsToStereo32(int *buffer, int size)
 {
-	int channel;
-	int i;
-	int new_free_channels;
+	int new_free_channels = 0;
 
-	new_free_channels = 0;
-	for (channel = 0; channel < MaxChannels; ++channel) {
+	for (int channel = 0; channel < MaxChannels; ++channel) {
 		if (Channels[channel].Playing && Channels[channel].Sample) {
-			i = MixSampleToStereo32(Channels[channel].Sample,
-				Channels[channel].Point, Channels[channel].Volume,
-				Channels[channel].Stereo, buffer, size);
+			int i = MixSampleToStereo32(Channels[channel].Sample,
+										Channels[channel].Point, Channels[channel].Volume,
+										Channels[channel].Stereo, buffer, size);
 			Channels[channel].Point += i;
 			Assert(Channels[channel].Point <= Channels[channel].Sample->Len);
 
@@ -269,7 +254,6 @@ static int MixChannelsToStereo32(int *buffer, int size)
 			}
 		}
 	}
-
 	return new_free_channels;
 }
 
@@ -282,12 +266,10 @@ static int MixChannelsToStereo32(int *buffer, int size)
 */
 static void ClipMixToStereo16(const int *mix, int size, short *output)
 {
-	int s;
-	const int *end;
+	const int *end = mix + size;
 
-	end = mix + size;
 	while (mix < end) {
-		s = (*mix++);
+		int s = (*mix++);
 		if (s > SHRT_MAX) {
 			*output++ = SHRT_MAX;
 		} else if (s < SHRT_MIN) {
@@ -323,7 +305,6 @@ static void MixIntoBuffer(void *buffer, int samples)
 		// Add music to mixer buffer
 		MixMusicToStereo32(MixerBuffer, samples);
 	}
-
 	ClipMixToStereo16(MixerBuffer, samples, (short *)buffer);
 }
 
@@ -347,6 +328,30 @@ static void FillAudio(void *, Uint8 *stream, int len)
 ----------------------------------------------------------------------------*/
 
 /**
+**  Check if this sound is already playing
+*/
+bool SampleIsPlaying(CSample *sample)
+{
+	for (int i = 0; i < MaxChannels; ++i) {
+		if (Channels[i].Sample == sample && Channels[i].Playing) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool UnitSoundIsPlaying(Origin *origin)
+{
+	for (int i = 0; i < MaxChannels; ++i) {
+		if (origin && Channels[i].Unit && origin->Id && Channels[i].Unit->Id
+			&& origin->Id == Channels[i].Unit->Id && Channels[i].Playing) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
 **  A channel is finished playing
 */
 static void ChannelFinished(int channel)
@@ -354,6 +359,9 @@ static void ChannelFinished(int channel)
 	if (Channels[channel].FinishedCallback) {
 		Channels[channel].FinishedCallback(channel);
 	}
+
+	delete Channels[channel].Unit;
+	Channels[channel].Unit = NULL;
 
 	Channels[channel].Playing = false;
 	Channels[channel].Point = NextFreeChannel;
@@ -363,7 +371,7 @@ static void ChannelFinished(int channel)
 /**
 **  Put a sound request in the next free channel.
 */
-static int FillChannel(CSample *sample, unsigned char volume, char stereo)
+static int FillChannel(CSample *sample, unsigned char volume, char stereo, Origin *origin)
 {
 	Assert(NextFreeChannel < MaxChannels);
 
@@ -376,7 +384,12 @@ static int FillChannel(CSample *sample, unsigned char volume, char stereo)
 	Channels[NextFreeChannel].Sample = sample;
 	Channels[NextFreeChannel].Stereo = stereo;
 	Channels[NextFreeChannel].FinishedCallback = NULL;
-
+	if (origin && origin->Base) {
+		Origin *source = new Origin;
+		source->Base = origin->Base;
+		source->Id = origin->Id;
+		Channels[NextFreeChannel].Unit = source;
+	}
 	NextFreeChannel = next_free;
 
 	return old_free;
@@ -408,7 +421,6 @@ int SetChannelVolume(int channel, int volume)
 
 		SDL_UnlockAudio();
 	}
-
 	return volume;
 }
 
@@ -440,7 +452,6 @@ int SetChannelStereo(int channel, int stereo)
 
 		SDL_UnlockAudio();
 	}
-
 	return stereo;
 }
 
@@ -455,7 +466,6 @@ void SetChannelFinishedCallback(int channel, void (*callback)(int channel))
 	if (channel < 0 || channel >= MaxChannels) {
 		return;
 	}
-
 	Channels[channel].FinishedCallback = callback;
 }
 
@@ -467,7 +477,6 @@ CSample *GetChannelSample(int channel)
 	if (channel < 0 || channel >= MaxChannels) {
 		return NULL;
 	}
-
 	return Channels[channel].Sample;
 }
 
@@ -479,13 +488,11 @@ CSample *GetChannelSample(int channel)
 void StopChannel(int channel)
 {
 	SDL_LockAudio();
-
 	if (channel >= 0 && channel < MaxChannels) {
 		if (Channels[channel].Playing) {
 			ChannelFinished(channel);
 		}
 	}
-
 	SDL_UnlockAudio();
 }
 
@@ -495,13 +502,11 @@ void StopChannel(int channel)
 void StopAllChannels()
 {
 	SDL_LockAudio();
-
 	for (int i = 0; i < MaxChannels; ++i) {
 		if (Channels[i].Playing) {
 			ChannelFinished(i);
 		}
 	}
-
 	SDL_UnlockAudio();
 }
 
@@ -516,27 +521,27 @@ void StopAllChannels()
 */
 CSample *LoadSample(const std::string &name)
 {
-	CSample *sample;
 	char buf[PATH_MAX];
 
 	LibraryFileName(name.c_str(), buf, sizeof(buf));
+	CSample *sample = LoadWav(buf, PlayAudioLoadInMemory);
 
-	if ((sample = LoadWav(buf, PlayAudioLoadInMemory))) {
+	if (sample) {
 		return sample;
 	}
 #ifdef USE_VORBIS
-	if ((sample = LoadVorbis(buf, PlayAudioLoadInMemory))) {
+	sample = LoadVorbis(buf, PlayAudioLoadInMemory);
+	if (sample) {
 		return sample;
 	}
 #endif
 #ifdef USE_MIKMOD
-	if ((sample = LoadMikMod(buf, PlayAudioLoadInMemory))) {
+	sample = LoadMikMod(buf, PlayAudioLoadInMemory);
+	if (sample) {
 		return sample;
 	}
 #endif
-
 	fprintf(stderr, "Can't load the sound `%s'\n", name.c_str());
-
 	return sample;
 }
 
@@ -547,19 +552,15 @@ CSample *LoadSample(const std::string &name)
 **
 **  @return        Channel number, -1 for error
 */
-int PlaySample(CSample *sample)
+int PlaySample(CSample *sample, Origin *origin)
 {
 	int channel = -1;
 
 	SDL_LockAudio();
-
-	if (SoundEnabled() && EffectsEnabled && sample &&
-			NextFreeChannel != MaxChannels) {
-		channel = FillChannel(sample, EffectsVolume, 0);
+	if (SoundEnabled() && EffectsEnabled && sample && NextFreeChannel != MaxChannels) {
+		channel = FillChannel(sample, EffectsVolume, 0, origin);
 	}
-
 	SDL_UnlockAudio();
-
 	return channel;
 }
 
@@ -586,13 +587,8 @@ int PlaySoundFile(const std::string &name)
 */
 void SetEffectsVolume(int volume)
 {
-	if (volume < 0) {
-		EffectsVolume = 0;
-	} else if (volume > MaxVolume) {
-		EffectsVolume = MaxVolume;
-	} else {
-		EffectsVolume = volume;
-	}
+	clamp(&volume, 0, MaxVolume);
+	EffectsVolume = volume;
 }
 
 /**
@@ -660,18 +656,16 @@ int PlayMusic(CSample *sample)
 */
 int PlayMusic(const std::string &file)
 {
-	char name[PATH_MAX];
-	CSample *sample;
-
 	if (!SoundEnabled() || !IsMusicEnabled()) {
 		return -1;
 	}
+	char name[PATH_MAX];
 
 	LibraryFileName(file.c_str(), name, sizeof(name));
 
 	DebugPrint("play music %s\n" _C_ name);
 
-	sample = LoadWav(name, PlayAudioStream);
+	CSample *sample = LoadWav(name, PlayAudioStream);
 
 #ifdef USE_VORBIS
 	if (!sample) {
@@ -718,13 +712,8 @@ void StopMusic()
 */
 void SetMusicVolume(int volume)
 {
-	if (volume < 0) {
-		MusicVolume = 0;
-	} else if (volume > MaxVolume) {
-		MusicVolume = MaxVolume;
-	} else {
-		MusicVolume = volume;
-	}
+	clamp(&volume, 0, MaxVolume);
+	MusicVolume = volume;
 }
 
 /**
@@ -808,7 +797,6 @@ static int InitSdlSound(int freq, int size)
 		return -1;
 	}
 	SDL_PauseAudio(0);
-
 	return 0;
 }
 
@@ -834,7 +822,6 @@ int InitSound()
 	for (int i = 0; i < MaxChannels; ++i) {
 		Channels[i].Point = i + 1;
 	}
-
 	return 0;
 }
 

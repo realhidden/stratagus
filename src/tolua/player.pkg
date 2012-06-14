@@ -21,14 +21,13 @@ class CPlayer
 	void SetStartView(const Vec2i &pos);
 
 	int Resources[MaxCosts];
+	int StoredResources[MaxCosts];
 	int Incomes[MaxCosts];
 	const int Revenue[MaxCosts];
 
 	const int UnitTypesCount[UnitTypeMax];
 	bool AiEnabled;
 
-	CUnit *Units[UnitMax];
-	int TotalNumUnits;
 	int NumBuildings;
 	int Supply;
 	int Demand;
@@ -43,6 +42,9 @@ class CPlayer
 	int TotalResources[MaxCosts];
 	int TotalRazings;
 	int TotalKills;
+
+	CUnit& GetUnit(int index) const;
+	int GetUnitCount() const;
 
 	bool IsEnemy(const CPlayer &player) const;
 	bool IsEnemy(const CUnit &unit) const;

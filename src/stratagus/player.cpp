@@ -344,8 +344,8 @@ void InitPlayers()
 		}
 		for (int x = 0; x < PlayerColorIndexCount; ++x) {
 			PlayerColors[p][x] = Video.MapRGB(TheScreen->format,
-				PlayerColorsRGB[p][x].r,
-				PlayerColorsRGB[p][x].g, PlayerColorsRGB[p][x].b);
+											  PlayerColorsRGB[p][x].r,
+											  PlayerColorsRGB[p][x].g, PlayerColorsRGB[p][x].b);
 		}
 	}
 }
@@ -420,9 +420,9 @@ void CPlayer::Save(CFile &file) const
 		case PlayerNobody:        file.printf("\"nobody\",");          break;
 		case PlayerComputer:      file.printf("\"computer\",");        break;
 		case PlayerPerson:        file.printf("\"person\",");          break;
-		case PlayerRescuePassive: file.printf("\"rescue-passive\",");break;
+		case PlayerRescuePassive: file.printf("\"rescue-passive\","); break;
 		case PlayerRescueActive:  file.printf("\"rescue-active\","); break;
-		default:                  file.printf("%d,", p.Type);break;
+		default:                  file.printf("%d,", p.Type); break;
 	}
 	file.printf(" \"race\", \"%s\",", PlayerRaces.Name[p.Race].c_str());
 	file.printf(" \"ai-name\", \"%s\",\n", p.AiName.c_str());
@@ -430,7 +430,7 @@ void CPlayer::Save(CFile &file) const
 
 	file.printf(" \"enemy\", \"");
 	for (int j = 0; j < PlayerMax; ++j) {
-		file.printf("%c",(p.Enemy & (1 << j)) ? 'X' : '_');
+		file.printf("%c", (p.Enemy & (1 << j)) ? 'X' : '_');
 	}
 	file.printf("\", \"allied\", \"");
 	for (int j = 0; j < PlayerMax; ++j) {
@@ -446,6 +446,11 @@ void CPlayer::Save(CFile &file) const
 	file.printf("  \"resources\", {");
 	for (int j = 0; j < MaxCosts; ++j) {
 		file.printf("\"%s\", %d, ", DefaultResourceNames[j].c_str(), p.Resources[j]);
+	}
+	// Stored Resources
+	file.printf("},\n  \"stored-resources\", {");
+	for (int j = 0; j < MaxCosts; ++j) {
+		file.printf("\"%s\", %d, ", DefaultResourceNames[j].c_str(), p.StoredResources[j]);
 	}
 	// Max Resources
 	file.printf("},\n  \"max-resources\", {");
@@ -550,11 +555,7 @@ void CreatePlayer(int type)
 
 void CPlayer::Init(/* PlayerTypes */ int type)
 {
-	//  Allocate memory for the "list" of this player's units.
-	//  FIXME: brutal way, as we won't need UnitMax for this player...
-	//  FIXME: ARI: is this needed for 'PlayerNobody' ??
-	//  FIXME: A: Johns: currently we need no init for the nobody player.
-	memset(this->Units, 0, sizeof (this->Units));
+	this->Units.resize(0);
 
 	//  Take first slot for person on this computer,
 	//  fill other with computer players.
@@ -625,20 +626,17 @@ void CPlayer::Init(/* PlayerTypes */ int type)
 				if (Players[i].Type == PlayerComputer) {
 					this->Allied |= (1 << i);
 					Players[i].Allied |= (1 << NumPlayers);
-				} else if (Players[i].Type == PlayerPerson ||
-						Players[i].Type == PlayerRescueActive) {
+				} else if (Players[i].Type == PlayerPerson || Players[i].Type == PlayerRescueActive) {
 					this->Enemy |= (1 << i);
 					Players[i].Enemy |= (1 << NumPlayers);
 				}
 				break;
 			case PlayerPerson:
 				// Humans are enemy of all?
-				if (Players[i].Type == PlayerComputer ||
-						Players[i].Type == PlayerPerson) {
+				if (Players[i].Type == PlayerComputer || Players[i].Type == PlayerPerson) {
 					this->Enemy |= (1 << i);
 					Players[i].Enemy |= (1 << NumPlayers);
-				} else if (Players[i].Type == PlayerRescueActive ||
-						Players[i].Type == PlayerRescuePassive) {
+				} else if (Players[i].Type == PlayerRescueActive || Players[i].Type == PlayerRescuePassive) {
 					this->Allied |= (1 << i);
 					Players[i].Allied |= (1 << NumPlayers);
 				}
@@ -673,18 +671,16 @@ void CPlayer::Init(/* PlayerTypes */ int type)
 		this->MaxResources[i] = DefaultResourceMaxAmounts[i];
 	}
 
-	memset(this->UnitTypesCount, 0, sizeof (this->UnitTypesCount));
+	memset(this->UnitTypesCount, 0, sizeof(this->UnitTypesCount));
 
 	this->Supply = 0;
 	this->Demand = 0;
 	this->NumBuildings = 0;
-	this->TotalNumUnits = 0;
 	this->Score = 0;
 
 	this->Color = PlayerColors[NumPlayers][0];
 
-	if (Players[NumPlayers].Type == PlayerComputer ||
-			Players[NumPlayers].Type == PlayerRescueActive) {
+	if (Players[NumPlayers].Type == PlayerComputer || Players[NumPlayers].Type == PlayerRescueActive) {
 		this->AiEnabled = true;
 	} else {
 		this->AiEnabled = false;
@@ -722,6 +718,7 @@ void CPlayer::Clear()
 	StartPos.x = 0;
 	StartPos.y = 0;
 	memset(Resources, 0, sizeof(Resources));
+	memset(StoredResources, 0, sizeof(StoredResources));
 	memset(MaxResources, 0, sizeof(MaxResources));
 	memset(LastResources, 0, sizeof(LastResources));
 	memset(Incomes, 0, sizeof(Incomes));
@@ -729,15 +726,14 @@ void CPlayer::Clear()
 	memset(UnitTypesCount, 0, sizeof(UnitTypesCount));
 	AiEnabled = false;
 	Ai = 0;
-	memset(Units, 0, sizeof(Units));
-	TotalNumUnits = 0;
+	this->Units.resize(0);
 	NumBuildings = 0;
 	Supply = 0;
 	Demand = 0;
 	// FIXME: can't clear limits since it's initialized already
-//	UnitLimit = 0;
-//	BuildingLimit = 0;
-//	TotalUnitLimit = 0;
+	//	UnitLimit = 0;
+	//	BuildingLimit = 0;
+	//	TotalUnitLimit = 0;
 	Score = 0;
 	TotalUnits = 0;
 	TotalBuildings = 0;
@@ -748,23 +744,144 @@ void CPlayer::Clear()
 	UpgradeTimers.Clear();
 }
 
+
+void CPlayer::AddUnit(CUnit &unit)
+{
+	Assert(unit.Player != this);
+	Assert(unit.PlayerSlot == static_cast<size_t>(-1));
+	unit.PlayerSlot = this->Units.size();
+	this->Units.push_back(&unit);
+	unit.Player = this;
+	Assert(this->Units[unit.PlayerSlot] == &unit);
+}
+
+void CPlayer::RemoveUnit(CUnit &unit)
+{
+	Assert(unit.Player == this);
+	Assert(this->Units[unit.PlayerSlot] == &unit);
+
+	//	unit.Player = NULL; // we can remove dying unit...
+	CUnit *last = this->Units.back();
+
+	this->Units[unit.PlayerSlot] = last;
+	last->PlayerSlot = unit.PlayerSlot;
+	this->Units.pop_back();
+	unit.PlayerSlot = static_cast<size_t>(-1);
+	Assert(last == &unit || this->Units[last->PlayerSlot] == last);
+}
+
+
+
+std::vector<CUnit *>::const_iterator CPlayer::UnitBegin() const
+{
+	return Units.begin();
+}
+
+std::vector<CUnit *>::iterator CPlayer::UnitBegin()
+{
+	return Units.begin();
+}
+
+std::vector<CUnit *>::const_iterator CPlayer::UnitEnd() const
+{
+	return Units.end();
+}
+
+std::vector<CUnit *>::iterator CPlayer::UnitEnd()
+{
+	return Units.end();
+}
+
+CUnit &CPlayer::GetUnit(int index) const
+{
+	return *Units[index];
+}
+
+int CPlayer::GetUnitCount() const
+{
+	return static_cast<int>(Units.size());
+}
+
+
+
 /*----------------------------------------------------------------------------
 --  Resource management
 ----------------------------------------------------------------------------*/
+
+/**
+**  Gets the player resource.
+**
+**  @param resource  Resource to get.
+**  @param store     Resource type to get
+**
+**  @note Resource types: 0 - overall store, 1 - store buildings, 2 - both
+*/
+int CPlayer::GetResource(int resource, int type)
+{
+	switch (type) {
+		case 0:
+			return this->Resources[resource];
+		case 1:
+			return this->StoredResources[resource];
+		case 2:
+			return this->Resources[resource] + this->StoredResources[resource];
+		default:
+			DebugPrint("Wrong resource type\n");
+			return -1;
+	}
+}
+
+/**
+**  Adds/subtracts some resources to/from the player store
+**
+**  @param resource  Resource to add/subtract.
+**  @param value     How many of this resource (can be negative).
+**  @param store     If true, sets the building store resources, else the overall resources.
+*/
+void CPlayer::ChangeResource(int resource, int value, bool store)
+{
+	if (value < 0) {
+		int fromStore = std::min(this->StoredResources[resource], abs(value));
+		this->StoredResources[resource] -= fromStore;
+		this->Resources[resource] -= abs(value) - fromStore;
+	} else {
+		if (store && this->MaxResources[resource] != -1) {
+			this->StoredResources[resource] += std::min(value, this->MaxResources[resource] - this->StoredResources[resource]);
+		} else {
+			this->Resources[resource] += value;
+		}
+	}
+}
 
 /**
 **  Change the player resource.
 **
 **  @param resource  Resource to change.
 **  @param value     How many of this resource.
+**  @param store     If true, sets the building store resources, else the overall resources.
 */
-void CPlayer::SetResource(int resource, int value)
+void CPlayer::SetResource(int resource, int value, bool store)
 {
-	if (this->MaxResources[resource] != -1) {
-		this->Resources[resource] = std::min(value, this->MaxResources[resource]);
+	if (store && this->MaxResources[resource] != -1) {
+		this->StoredResources[resource] = std::min(value, this->MaxResources[resource]);
 	} else {
 		this->Resources[resource] = value;
 	}
+}
+
+/**
+**  Check, if there enough resources for action.
+**
+**  @param resource  Resource to change.
+**  @param value     How many of this resource.
+*/
+bool CPlayer::CheckResource(int resource, int value)
+{
+	int result = this->Resources[resource];
+	if (this->MaxResources[resource] != -1) {
+		result += this->StoredResources[resource];
+	}
+	return result < value ? false : true;
 }
 
 /**
@@ -784,7 +901,7 @@ int CPlayer::CheckLimits(const CUnitType &type) const
 			Notify("%s", _("Building Limit Reached"));
 			return -1;
 		}
-		if (!type.Building && (TotalNumUnits - NumBuildings) >= UnitLimit) {
+		if (!type.Building && (this->GetUnitCount() - NumBuildings) >= UnitLimit) {
 			Notify("%s", _("Unit Limit Reached"));
 			return -2;
 		}
@@ -792,7 +909,7 @@ int CPlayer::CheckLimits(const CUnitType &type) const
 			Notify("%s", _("Insufficient Supply, increase Supply."));
 			return -3;
 		}
-		if (TotalNumUnits >= TotalUnitLimit) {
+		if (this->GetUnitCount() >= TotalUnitLimit) {
 			Notify("%s", _("Total Unit Limit Reached"));
 			return -4;
 		}
@@ -823,7 +940,7 @@ int CPlayer::CheckCosts(const int *costs) const
 {
 	int err = 0;
 	for (int i = 1; i < MaxCosts; ++i) {
-		if (this->Resources[i] >= costs[i]) {
+		if (this->Resources[i] + this->StoredResources[i] >= costs[i]) {
 			continue;
 		}
 		const char *name = DefaultResourceNames[i].c_str();
@@ -859,7 +976,7 @@ int CPlayer::CheckUnitType(const CUnitType &type) const
 void CPlayer::AddCosts(const int *costs)
 {
 	for (int i = 1; i < MaxCosts; ++i) {
-		SetResource(i, Resources[i] + costs[i]);
+		ChangeResource(i, costs[i], false);
 	}
 }
 
@@ -882,7 +999,7 @@ void CPlayer::AddUnitType(const CUnitType &type)
 void CPlayer::AddCostsFactor(const int *costs, int factor)
 {
 	for (int i = 1; i < MaxCosts; ++i) {
-		SetResource(i, this->Resources[i] + costs[i] * factor / 100);
+		ChangeResource(i, costs[i] * factor / 100, true);
 	}
 }
 
@@ -894,7 +1011,7 @@ void CPlayer::AddCostsFactor(const int *costs, int factor)
 void CPlayer::SubCosts(const int *costs)
 {
 	for (int i = 1; i < MaxCosts; ++i) {
-		SetResource(i, this->Resources[i] - costs[i]);
+		ChangeResource(i, -costs[i], true);
 	}
 }
 
@@ -917,7 +1034,7 @@ void CPlayer::SubUnitType(const CUnitType &type)
 void CPlayer::SubCostsFactor(const int *costs, int factor)
 {
 	for (int i = 1; i < MaxCosts; ++i) {
-		SetResource(i, this->Resources[i] - costs[i] * 100 / factor);
+		ChangeResource(i, -costs[i] * 100 / factor);
 	}
 }
 
@@ -984,9 +1101,9 @@ void PlayersEachSecond(int playerIdx)
 
 	if ((GameCycle / CYCLES_PER_SECOND) % 10 == 0) {
 		for (int res = 0; res < MaxCosts; ++res) {
-			player.Revenue[res] = player.Resources[res] - player.LastResources[res];
+			player.Revenue[res] = player.Resources[res] + player.StoredResources[res] - player.LastResources[res];
 			player.Revenue[res] *= 6;  // estimate per minute
-			player.LastResources[res] = player.Resources[res];
+			player.LastResources[res] = player.Resources[res] + player.StoredResources[res];
 		}
 	}
 	if (player.AiEnabled) {
@@ -1024,8 +1141,7 @@ void SetPlayersPalette()
 	for (int i = 0; i < PlayerMax; ++i) {
 		delete[] Players[i].UnitColors.Colors;
 		Players[i].UnitColors.Colors = new SDL_Color[PlayerColorIndexCount];
-		memcpy(Players[i].UnitColors.Colors, PlayerColorsRGB[i],
-			sizeof(SDL_Color) * PlayerColorIndexCount);
+		memcpy(Players[i].UnitColors.Colors, PlayerColorsRGB[i], sizeof(SDL_Color) * PlayerColorIndexCount);
 	}
 }
 
@@ -1055,11 +1171,11 @@ void DebugPlayers()
 			default : playertype = "?unknown?   "; break;
 		}
 		DebugPrint("%2d: %8.8s %c %-8.8s %s %7s %s\n" _C_ i _C_ PlayerColorNames[i].c_str() _C_
-			ThisPlayer == &Players[i] ? '*' :
-				Players[i].AiEnabled ? '+' : ' ' _C_
-			Players[i].Name.c_str() _C_ playertype _C_
-			PlayerRaces.Name[Players[i].Race].c_str() _C_
-			Players[i].AiName.c_str());
+				   ThisPlayer == &Players[i] ? '*' :
+				   Players[i].AiEnabled ? '+' : ' ' _C_
+				   Players[i].Name.c_str() _C_ playertype _C_
+				   PlayerRaces.Name[Players[i].Race].c_str() _C_
+				   Players[i].AiName.c_str());
 	}
 #endif
 }
@@ -1090,8 +1206,7 @@ void CPlayer::Notify(int type, const Vec2i &pos, const char *fmt, ...) const
 	temp[sizeof(temp) - 1] = '\0';
 	vsnprintf(temp, sizeof(temp) - 1, fmt, va);
 	va_end(va);
-	switch (type)
-	{
+	switch (type) {
 		case NotifyRed:
 			color = ColorRed;
 			break;
@@ -1103,7 +1218,7 @@ void CPlayer::Notify(int type, const Vec2i &pos, const char *fmt, ...) const
 			break;
 		default: color = ColorWhite;
 	}
-	UI.Minimap.AddEvent(pos.x, pos.y, color);
+	UI.Minimap.AddEvent(pos, color);
 	if (this == ThisPlayer) {
 		SetMessageEvent(pos, "%s", temp);
 	} else {
@@ -1235,8 +1350,8 @@ bool CPlayer::IsSharedVision(const CUnit &unit) const
 */
 bool CPlayer::IsBothSharedVision(const CPlayer &player) const
 {
-	return (SharedVision & (1 << player.Index)) != 0 &&
-		(player.SharedVision & (1 << Index)) != 0;
+	return (SharedVision & (1 << player.Index)) != 0
+		   && (player.SharedVision & (1 << Index)) != 0;
 }
 
 /**

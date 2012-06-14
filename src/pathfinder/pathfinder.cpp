@@ -36,29 +36,88 @@
 ----------------------------------------------------------------------------*/
 
 #include "stratagus.h"
+
+#include "pathfinder.h"
+
+#include "actions.h"
 #include "map.h"
 #include "unittype.h"
 #include "unit.h"
-#include "pathfinder.h"
-#include "actions.h"
 
 //astar.cpp
 
 /// Init the a* data structures
-extern void InitAStar(int mapWidth, int mapHeight,
-	 int (STDCALL *costMoveTo)(unsigned int index, void *data));
+extern void InitAStar(int mapWidth, int mapHeight);
 
 /// free the a* data structures
 extern void FreeAStar();
 
 /// Find and a* path for a unit
-extern int AStarFindPath(int sx, int sy, int gx, int gy, int gw, int gh,
-	int tilesizex, int tilesizey, int minrange,
-	 int maxrange, char *path, int pathlen, void *data);
+extern int AStarFindPath(const Vec2i &startPos, const Vec2i &goalPos, int gw, int gh,
+						 int tilesizex, int tilesizey, int minrange,
+						 int maxrange, char *path, int pathlen, const CUnit &unit);
 
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
+
+void TerrainTraversal::SetSize(unsigned int width, unsigned int height)
+{
+	m_values.resize((width + 2) * (height + 2));
+	m_extented_width = width + 2;
+	m_height = height;
+}
+
+void TerrainTraversal::Init(unsigned char borderValue)
+{
+	const unsigned int insideValue = 0;
+	const unsigned int height = m_height;
+	const unsigned int width = m_extented_width - 2;
+	const unsigned int width_ext = m_extented_width;
+
+	memset(&m_values[0], borderValue, width_ext);
+	for (unsigned i = 1; i < 1 + height; ++i) {
+		m_values[i * width_ext] = borderValue;
+		memset(&m_values[i * width_ext + 1], insideValue, width);
+		m_values[i * width_ext + width + 1] = borderValue;
+	}
+	memset(&m_values[(height + 1) * width_ext], borderValue, width_ext);
+}
+
+void TerrainTraversal::PushPos(const Vec2i &pos)
+{
+	if (IsVisited(pos) == false) {
+		m_queue.push(PosNode(pos, pos));
+	}
+}
+
+void TerrainTraversal::PushNeighboor(const Vec2i &pos)
+{
+	const Vec2i offsets[] = {{0, -1}, { -1, 0}, {1, 0}, {0, 1}, { -1, -1}, {1, -1}, { -1, 1}, {1, 1}};
+
+	for (int i = 0; i != 8; ++i) {
+		const Vec2i newPos = pos + offsets[i];
+
+		if (IsVisited(newPos) == false) {
+			m_queue.push(PosNode(newPos, pos));
+		}
+	}
+}
+
+bool TerrainTraversal::IsVisited(const Vec2i &pos) const
+{
+	return Get(pos) != 0;
+}
+
+unsigned char TerrainTraversal::Get(const Vec2i& pos) const
+{
+	return m_values[m_extented_width + 1 + pos.y * m_extented_width + pos.x];
+}
+
+unsigned char& TerrainTraversal::Get(const Vec2i& pos)
+{
+	return m_values[m_extented_width + 1 + pos.y * m_extented_width + pos.x];
+}
 
 /**
 **  The matrix is used to generated the paths.
@@ -80,7 +139,7 @@ static unsigned char Matrix[(MaxMapWidth + 2) * (MaxMapHeight + 3) + 2];  /// Pa
 */
 void InitPathfinder()
 {
-	InitAStar(Map.Info.MapWidth, Map.Info.MapHeight, NULL);
+	InitAStar(Map.Info.MapWidth, Map.Info.MapHeight);
 }
 
 /**
@@ -104,24 +163,19 @@ void FreePathfinder()
 */
 static void InitMatrix(unsigned char *matrix)
 {
-	unsigned i;
-	unsigned w;
-	unsigned h;
-	unsigned e;
+	const char border = 98;
+	const char valid = 0;
+	const unsigned int w = Map.Info.MapWidth;
+	const unsigned int h = Map.Info.MapHeight;
+	const unsigned int offset = 2 * (w + 2);
+	memset(matrix, border, offset);
 
-	w = Map.Info.MapWidth + 2;
-	h = Map.Info.MapHeight;
-
-	i = w + w + 1;
-	memset(matrix, 98, i);          // +1 for ships!
-	memset(matrix + i, 0, w * h);   // initialize matrix
-
-	for (e = i + w * h; i < e;) {   // mark left and right border
-		matrix[i] = 98;
-		i += w;
-		matrix[i - 1] = 98;
+	for (unsigned i = 0; i < h; ++i) {   // mark left and right border
+		matrix[offset + i * (w + 2)] = border;
+		memset(matrix + offset + i * (w + 2) + 1, valid, w);
+		matrix[offset + i * (w + 2) + w + 1] = border;
 	}
-	memset(matrix + i, 98, w + 1);  // +1 for ships!
+	memset(matrix + offset + h * (w + 2), border, w + 2);
 }
 
 /**
@@ -138,9 +192,7 @@ unsigned char *CreateMatrix()
 */
 unsigned char *MakeMatrix()
 {
-	unsigned char *matrix;
-
-	matrix = new unsigned char[(Map.Info.MapWidth + 2) * (Map.Info.MapHeight + 3) + 2];
+	unsigned char *matrix = new unsigned char[(Map.Info.MapWidth + 2) * (Map.Info.MapHeight + 3) + 2];
 	InitMatrix(matrix);
 
 	return matrix;
@@ -151,11 +203,10 @@ unsigned char *MakeMatrix()
 ----------------------------------------------------------------------------*/
 
 /**
-**  Can the unit 'src' reach the place x,y.
+**  Can the unit 'src' reach the place goalPos.
 **
 **  @param src       Unit for the path.
-**  @param x         Map X tile position.
-**  @param y         Map Y tile position.
+**  @param goalPos   Map tile position.
 **  @param w         Width of Goal
 **  @param h         Height of Goal
 **  @param minrange  min range to the tile
@@ -163,12 +214,11 @@ unsigned char *MakeMatrix()
 **
 **  @return          Distance to place.
 */
-int PlaceReachable(const CUnit &src, int x, int y, int w, int h,
-	 int minrange, int range)
+int PlaceReachable(const CUnit &src, const Vec2i &goalPos, int w, int h, int minrange, int range)
 {
-	int i = AStarFindPath(src.tilePos.x, src.tilePos.y, x, y, w, h,
-		src.Type->TileWidth, src.Type->TileHeight,
-		 minrange, range, NULL, 0, const_cast<CUnit*>(&src));
+	int i = AStarFindPath(src.tilePos, goalPos, w, h,
+						  src.Type->TileWidth, src.Type->TileHeight,
+						  minrange, range, NULL, 0, src);
 
 	switch (i) {
 		case PF_FAILED:
@@ -189,7 +239,6 @@ int PlaceReachable(const CUnit &src, int x, int y, int w, int h,
 		default:
 			break;
 	}
-
 	return i;
 }
 
@@ -205,10 +254,11 @@ int PlaceReachable(const CUnit &src, int x, int y, int w, int h,
 int UnitReachable(const CUnit &src, const CUnit &dst, int range)
 {
 	//  Find a path to the goal.
-	if (src.Type->Building)
+	if (src.Type->Building) {
 		return 0;
-	const int depth = PlaceReachable(src, dst.tilePos.x, dst.tilePos.y,
-		dst.Type->TileWidth, dst.Type->TileHeight, 0, range);
+	}
+	const int depth = PlaceReachable(src, dst.tilePos,
+									 dst.Type->TileWidth, dst.Type->TileHeight, 0, range);
 	if (depth <= 0) {
 		return 0;
 	}
@@ -230,20 +280,23 @@ PathFinderInput::PathFinderInput() : unit(NULL), minRange(0), maxRange(0),
 	goalSize.y = 0;
 }
 
-const Vec2i& PathFinderInput::GetUnitPos() const { return unit->tilePos; }
-Vec2i PathFinderInput::GetUnitSize() const {
+const Vec2i &PathFinderInput::GetUnitPos() const { return unit->tilePos; }
+Vec2i PathFinderInput::GetUnitSize() const
+{
 	const Vec2i tileSize = {unit->Type->TileWidth, unit->Type->TileHeight};
 	return tileSize;
 }
 
-void PathFinderInput::SetUnit(CUnit &_unit) {
+void PathFinderInput::SetUnit(CUnit &_unit)
+{
 	unit = &_unit;
 
 	isRecalculatePathNeeded = true;
 }
 
 
-void PathFinderInput::SetGoal(const Vec2i& pos, const Vec2i& size) {
+void PathFinderInput::SetGoal(const Vec2i &pos, const Vec2i &size)
+{
 	Vec2i newPos = pos;
 	// Large units may have a goal that goes outside the map, fix it here
 	if (newPos.x + unit->Type->TileWidth - 1 >= Map.Info.MapWidth) {
@@ -259,21 +312,24 @@ void PathFinderInput::SetGoal(const Vec2i& pos, const Vec2i& size) {
 	goalSize = size;
 }
 
-void PathFinderInput::SetMinRange(int range) {
+void PathFinderInput::SetMinRange(int range)
+{
 	if (minRange != range) {
 		minRange = range;
 		isRecalculatePathNeeded = true;
 	}
 }
 
-void PathFinderInput::SetMaxRange(int range) {
+void PathFinderInput::SetMaxRange(int range)
+{
 	if (maxRange != range) {
 		maxRange = range;
 		isRecalculatePathNeeded = true;
 	}
 }
 
-void PathFinderInput::PathRacalculated() {
+void PathFinderInput::PathRacalculated()
+{
 	unitSize.x = unit->Type->TileWidth;
 	unitSize.y = unit->Type->TileHeight;
 
@@ -283,7 +339,7 @@ void PathFinderInput::PathRacalculated() {
 
 PathFinderOutput::PathFinderOutput()
 {
-	memset(this, 0, sizeof (*this));
+	memset(this, 0, sizeof(*this));
 }
 
 /**
@@ -299,16 +355,16 @@ PathFinderOutput::PathFinderOutput()
 **  @return      >0 remaining path length, 0 wait for path, -1
 **               reached goal, -2 can't reach the goal.
 */
-static int NewPath(PathFinderInput& input, PathFinderOutput& output)
+static int NewPath(PathFinderInput &input, PathFinderOutput &output)
 {
 	char *path = output.Path;
-	int i = AStarFindPath(input.GetUnitPos().x, input.GetUnitPos().y,
-						input.GetGoalPos().x, input.GetGoalPos().y,
-						input.GetGoalSize().x, input.GetGoalSize().y,
-						input.GetUnitSize().x, input.GetUnitSize().y,
-						input.GetMinRange(), input.GetMaxRange(),
-						path, PathFinderOutput::MAX_PATH_LENGTH,
-						input.GetUnit());
+	int i = AStarFindPath(input.GetUnitPos(),
+						  input.GetGoalPos(),
+						  input.GetGoalSize().x, input.GetGoalSize().y,
+						  input.GetUnitSize().x, input.GetUnitSize().y,
+						  input.GetMinRange(), input.GetMaxRange(),
+						  path, PathFinderOutput::MAX_PATH_LENGTH,
+						  *input.GetUnit());
 	input.PathRacalculated();
 	if (i == PF_FAILED) {
 		i = PF_UNREACHABLE;
@@ -337,9 +393,8 @@ static int NewPath(PathFinderInput& input, PathFinderOutput& output)
 */
 int NextPathElement(CUnit &unit, short int *pxd, short int *pyd)
 {
-	int result;
-	PathFinderInput& input = unit.pathFinderData->input;
-	PathFinderOutput& output = unit.pathFinderData->output;
+	PathFinderInput &input = unit.pathFinderData->input;
+	PathFinderOutput &output = unit.pathFinderData->output;
 
 	unit.CurrentOrder()->UpdatePathFinderData(input);
 	// Attempt to use path cache
@@ -349,7 +404,7 @@ int NextPathElement(CUnit &unit, short int *pxd, short int *pyd)
 
 	// Goal has moved, need to recalculate path or no cached path
 	if (output.Length <= 0 || input.IsRecalculateNeeded()) {
-		result = NewPath(input, output);
+		const int result = NewPath(input, output);
 
 		if (result == PF_UNREACHABLE) {
 			output.Length = 0;
@@ -363,7 +418,7 @@ int NextPathElement(CUnit &unit, short int *pxd, short int *pyd)
 	*pxd = Heading2X[(int)output.Path[(int)output.Length - 1]];
 	*pyd = Heading2Y[(int)output.Path[(int)output.Length - 1]];
 	const Vec2i dir = {*pxd, *pyd};
-	result = output.Length;
+	int result = output.Length;
 	output.Length--;
 	if (!UnitCanBeAt(unit, unit.tilePos + dir)) {
 		// If obstructing unit is moving, wait for a bit.

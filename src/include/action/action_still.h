@@ -8,7 +8,7 @@
 //                        T H E   W A R   B E G I N S
 //         Stratagus - A free fantasy real time strategy game engine
 //
-/**@name actions.h - The actions headerfile. */
+/**@name action_still.h - The actions headerfile. */
 //
 //      (c) Copyright 1998-2012 by Lutz Sammer and Jimmy Salmon
 //
@@ -41,15 +41,18 @@ public:
 
 	virtual COrder_Still *Clone() const { return new COrder_Still(*this); }
 
+	virtual bool IsValid() const;
+
 	virtual void Save(CFile &file, const CUnit &unit) const;
 	virtual bool ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit);
 
 	virtual void Execute(CUnit &unit);
 	virtual void OnAnimationAttack(CUnit &unit);
-	virtual PixelPos Show(const CViewport& vp, const PixelPos& lastScreenPos) const;
-	virtual void UpdatePathFinderData(PathFinderInput& input) { UpdatePathFinderData_NotCalled(input); }
+	virtual PixelPos Show(const CViewport &vp, const PixelPos &lastScreenPos) const;
+	virtual void UpdatePathFinderData(PathFinderInput &input) { UpdatePathFinderData_NotCalled(input); }
 private:
 	bool AutoAttackStand(CUnit &unit);
+	bool AutoCastStand(CUnit &unit);
 private:
 	CUnitPtr AutoTarget;
 	int State;

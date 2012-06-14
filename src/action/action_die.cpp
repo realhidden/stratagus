@@ -49,7 +49,7 @@
 --  Functions
 ----------------------------------------------------------------------------*/
 
-/* static */ COrder* COrder::NewActionDie()
+/* static */ COrder *COrder::NewActionDie()
 {
 	return new COrder_Die;
 }
@@ -68,7 +68,12 @@
 	return false;
 }
 
-/* virtual */ PixelPos COrder_Die::Show(const CViewport& , const PixelPos& lastScreenPos) const
+/* virtual */ bool COrder_Die::IsValid() const
+{
+	return true;
+}
+
+/* virtual */ PixelPos COrder_Die::Show(const CViewport & , const PixelPos &lastScreenPos) const
 {
 	return lastScreenPos;
 }
@@ -102,7 +107,7 @@ static bool AnimateActionDie(CUnit &unit)
 	if (unit.Anim.Unbreakable) {
 		return ;
 	}
-	CUnitType &type = *unit.Type;
+	const CUnitType &type = *unit.Type;
 
 	// Die sequence terminated, generate corpse.
 	if (type.CorpseType == NULL) {
@@ -111,7 +116,7 @@ static bool AnimateActionDie(CUnit &unit)
 		return ;
 	}
 
-	CUnitType &corpseType = *type.CorpseType;
+	const CUnitType &corpseType = *type.CorpseType;
 	Assert(type.TileWidth >= corpseType.TileWidth && type.TileHeight >= corpseType.TileHeight);
 
 	// Update sight for new corpse
@@ -120,7 +125,8 @@ static bool AnimateActionDie(CUnit &unit)
 
 	unit.Remove(NULL);
 	unit.Type = &corpseType;
-	unit.Stats = &type.Stats[unit.Player->Index];
+	unit.Stats = &corpseType.Stats[unit.Player->Index];
+	UpdateUnitSightRange(unit);
 	unit.Place(unit.tilePos);
 
 	unit.Frame = 0;

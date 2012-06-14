@@ -43,14 +43,18 @@
 #include <string>
 #include <map>
 
+#include "unittype.h"
+
+#include "animation.h"
+#include "animation/animation_exactframe.h"
+#include "animation/animation_frame.h"
+
 #include "video.h"
 #include "tileset.h"
 #include "map.h"
 #include "sound.h"
 #include "unitsound.h"
 #include "construct.h"
-#include "unittype.h"
-#include "animation.h"
 #include "player.h"
 #include "missile.h"
 #include "script.h"
@@ -108,7 +112,26 @@ std::string ExtraDeathTypes[ANIMATIONS_DEATHTYPES];
 --  Functions
 ----------------------------------------------------------------------------*/
 
-	/// Parse integer in animation frame.
+int GetResourceIdByName(const char *resourceName)
+{
+	for (unsigned int res = 0; res < MaxCosts; ++res) {
+		if (!strcmp(resourceName, DefaultResourceNames[res].c_str())) {
+			return res;
+		}
+	}
+	return -1;
+}
+
+int GetResourceIdByName(lua_State *l, const char *resourceName)
+{
+	const int res = GetResourceIdByName(resourceName);
+	if (res == -1) {
+		LuaError(l, "Resource not found: %s" _C_ resourceName);
+	}
+	return res;
+}
+
+/// Parse integer in animation frame.
 extern int ParseAnimInt(CUnit *unit, const char *parseint);
 
 CUnitType::CUnitType() :
@@ -133,15 +156,13 @@ CUnitType::CUnitType() :
 	BuilderOutside(0), BuilderLost(0), CanHarvest(0), Harvester(0),
 	Neutral(0), SelectableByRectangle(0), IsNotSelectable(0), Decoration(0),
 	Indestructible(0), Teleporter(0), ShieldPiercing(0), SaveCargo(0),
-	NonSolid(0), Wall(0), Variable(NULL),
+	NonSolid(0), Wall(0),
 	GivesResource(0), Supply(0), Demand(0), FieldFlags(0), MovementMask(0),
 	Sprite(NULL), ShadowSprite(NULL)
 {
 #ifdef USE_MNG
 	memset(&Portrait, 0, sizeof(Portrait));
 #endif
-	memset(_Costs, 0, sizeof(_Costs));
-	memset(_Storing, 0, sizeof(_Storing));
 	memset(RepairCosts, 0, sizeof(RepairCosts));
 	memset(CanStore, 0, sizeof(CanStore));
 	memset(ResInfo, 0, sizeof(ResInfo));
@@ -154,19 +175,19 @@ CUnitType::~CUnitType()
 	delete DeathExplosion;
 	delete OnHit;
 
-	delete[] Variable;
 	BoolFlag.clear();
-
-	for (int i = 0; i < PlayerMax; ++i) {
-		delete[] Stats[i].Variables;
-	}
 
 	// Free Building Restrictions if there are any
 	for (std::vector<CBuildRestriction *>::iterator b = BuildingRules.begin();
-			b != BuildingRules.end(); ++b) {
+		 b != BuildingRules.end(); ++b) {
 		delete *b;
 	}
 	BuildingRules.clear();
+	for (std::vector<CBuildRestriction *>::iterator b = AiBuildingRules.begin();
+		 b != AiBuildingRules.end(); ++b) {
+		delete *b;
+	}
+	AiBuildingRules.clear();
 
 	delete[] CanCastSpell;
 	delete[] AutoCastActive;
@@ -190,7 +211,7 @@ CUnitType::~CUnitType()
 		int j;
 		for (j = 0; j < this->Portrait.Num; ++j) {
 			delete this->Portrait.Mngs[j];
-//			delete[] this->Portrait.Files[j];
+			// delete[] this->Portrait.Files[j];
 		}
 		delete[] this->Portrait.Mngs;
 		delete[] this->Portrait.Files;
@@ -200,7 +221,8 @@ CUnitType::~CUnitType()
 }
 
 
-bool CUnitType::CheckUserBoolFlags(char *BoolFlags) {
+bool CUnitType::CheckUserBoolFlags(const char *BoolFlags) const
+{
 	for (unsigned int i = 0; i < UnitTypeVar.GetNumberBoolFlag(); ++i) { // User defined flags
 		if (BoolFlags[i] != CONDITION_TRUE &&
 			((BoolFlags[i] == CONDITION_ONLY) ^ (BoolFlag[i].value))) {
@@ -210,41 +232,54 @@ bool CUnitType::CheckUserBoolFlags(char *BoolFlags) {
 	return true;
 }
 
+bool CUnitType::CanMove() const
+{
+	return Animations && Animations->Move;
+}
+
+
+
 /**
 **  Update the player stats for changed unit types.
 **  @param reset indicates wether default value should be set to each stat (level, upgrades)
 */
 void UpdateStats(int reset)
 {
-	CUnitType *type;
-	CUnitStats *stats;
-
 	//
 	//  Update players stats
 	//
 	for (std::vector<CUnitType *>::size_type j = 0; j < UnitTypes.size(); ++j) {
-		type = UnitTypes[j];
+		CUnitType &type = *UnitTypes[j];
 		if (reset) {
-			// LUDO : FIXME : reset loading of player stats !
 			for (int player = 0; player < PlayerMax; ++player) {
-				stats = &type->Stats[player];
-				for (unsigned int i = 0; i < MaxCosts; ++i) {
-					stats->Costs[i] = type->_Costs[i];
-				}
-				if (!stats->Variables) {
-					stats->Variables = new CVariable[UnitTypeVar.GetNumberVariable()];
-				}
-				memcpy(stats->Variables, type->Variable,
-					UnitTypeVar.GetNumberVariable() * sizeof(*type->Variable));
+				type.Stats[player] = type.DefaultStat;
 			}
+		}
+
+		// Non-solid units can always be entered and they don't block anything
+		if (type.NonSolid) {
+			if (type.Building) {
+				type.MovementMask = MapFieldLandUnit |
+									MapFieldSeaUnit |
+									MapFieldBuilding |
+									MapFieldCoastAllowed |
+									MapFieldWaterAllowed |
+									MapFieldNoBuilding |
+									MapFieldUnpassable;
+				type.FieldFlags = MapFieldNoBuilding;
+			} else {
+				type.MovementMask = 0;
+				type.FieldFlags = 0;
+			}
+			continue;
 		}
 
 		//
 		//  As side effect we calculate the movement flags/mask here.
 		//
-		switch (type->UnitType) {
+		switch (type.UnitType) {
 			case UnitTypeLand:                              // on land
-				type->MovementMask =
+				type.MovementMask =
 					MapFieldLandUnit |
 					MapFieldSeaUnit |
 					MapFieldBuilding | // already occuppied
@@ -253,19 +288,18 @@ void UpdateStats(int reset)
 					MapFieldUnpassable;
 				break;
 			case UnitTypeFly:                               // in air
-				type->MovementMask =
-					MapFieldAirUnit; // already occuppied
+				type.MovementMask = MapFieldAirUnit; // already occuppied
 				break;
 			case UnitTypeNaval:                             // on water
-				if (type->CanTransport()) {
-					type->MovementMask =
+				if (type.CanTransport()) {
+					type.MovementMask =
 						MapFieldLandUnit |
 						MapFieldSeaUnit |
 						MapFieldBuilding | // already occuppied
 						MapFieldLandAllowed; // can't move on this
 					// Johns: MapFieldUnpassable only for land units?
 				} else {
-					type->MovementMask =
+					type.MovementMask =
 						MapFieldLandUnit |
 						MapFieldSeaUnit |
 						MapFieldBuilding | // already occuppied
@@ -276,42 +310,44 @@ void UpdateStats(int reset)
 				break;
 			default:
 				DebugPrint("Where moves this unit?\n");
-				type->MovementMask = 0;
+				type.MovementMask = 0;
 				break;
 		}
-		if (type->Building || type->ShoreBuilding) {
+		if (type.Building || type.ShoreBuilding) {
 			// Shore building is something special.
-			if (type->ShoreBuilding) {
-				type->MovementMask =
+			if (type.ShoreBuilding) {
+				type.MovementMask =
 					MapFieldLandUnit |
 					MapFieldSeaUnit |
 					MapFieldBuilding | // already occuppied
 					MapFieldLandAllowed; // can't build on this
 			}
-			type->MovementMask |= MapFieldNoBuilding;
+			type.MovementMask |= MapFieldNoBuilding;
 			//
-			// A little chaos, buildings without HP or with special flag can be entered.
+			// A little chaos, buildings without HP can be entered.
 			// The oil-patch is a very special case.
 			//
-			if (type->NonSolid || !type->Variable[HP_INDEX].Max) {
-				type->FieldFlags = MapFieldNoBuilding;
+			if (type.DefaultStat.Variables[HP_INDEX].Max) {
+				type.FieldFlags = MapFieldBuilding;
 			} else {
-				type->FieldFlags = MapFieldBuilding;
+				type.FieldFlags = MapFieldNoBuilding;
 			}
-		} else switch (type->UnitType) {
-			case UnitTypeLand: // on land
-				type->FieldFlags = MapFieldLandUnit;
-				break;
-			case UnitTypeFly: // in air
-				type->FieldFlags = MapFieldAirUnit;
-				break;
-			case UnitTypeNaval: // on water
-				type->FieldFlags = MapFieldSeaUnit;
-				break;
-			default:
-				DebugPrint("Where moves this unit?\n");
-				type->FieldFlags = 0;
-				break;
+		} else {
+			switch (type.UnitType) {
+				case UnitTypeLand: // on land
+					type.FieldFlags = MapFieldLandUnit;
+					break;
+				case UnitTypeFly: // in air
+					type.FieldFlags = MapFieldAirUnit;
+					break;
+				case UnitTypeNaval: // on water
+					type.FieldFlags = MapFieldSeaUnit;
+					break;
+				default:
+					DebugPrint("Where moves this unit?\n");
+					type.FieldFlags = 0;
+					break;
+			}
 		}
 	}
 }
@@ -324,16 +360,20 @@ void UpdateStats(int reset)
 **  @param plynr  Player number.
 **  @param file   Output file.
 */
-static void SaveUnitStats(const CUnitStats &stats, const std::string &ident, int plynr,
-	CFile &file)
+static bool SaveUnitStats(const CUnitStats &stats, const CUnitType &type, int plynr,
+						  CFile &file)
 {
 	Assert(plynr < PlayerMax);
-	file.printf("DefineUnitStats(\"%s\", %d,\n  ", ident.c_str(), plynr);
+
+	if (stats == type.DefaultStat) {
+		return false;
+	}
+	file.printf("DefineUnitStats(\"%s\", %d,\n  ", type.Ident.c_str(), plynr);
 	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); ++i) {
 		file.printf("\"%s\", {Value = %d, Max = %d, Increase = %d%s},\n  ",
-			UnitTypeVar.VariableNameLookup[i], stats.Variables[i].Value,
-			stats.Variables[i].Max, stats.Variables[i].Increase,
-			stats.Variables[i].Enable ? ", Enable = true" : "");
+					UnitTypeVar.VariableNameLookup[i], stats.Variables[i].Value,
+					stats.Variables[i].Max, stats.Variables[i].Increase,
+					stats.Variables[i].Enable ? ", Enable = true" : "");
 	}
 	file.printf("\"costs\", {");
 	for (unsigned int i = 0; i < MaxCosts; ++i) {
@@ -342,7 +382,15 @@ static void SaveUnitStats(const CUnitStats &stats, const std::string &ident, int
 		}
 		file.printf("\"%s\", %d,", DefaultResourceNames[i].c_str(), stats.Costs[i]);
 	}
+	file.printf("\"storing\", {");
+	for (unsigned int i = 0; i < MaxCosts; ++i) {
+		if (i) {
+			file.printf(" ");
+		}
+		file.printf("\"%s\", %d,", DefaultResourceNames[i].c_str(), stats.Storing[i]);
+	}
 	file.printf("})\n");
+	return true;
 }
 
 /**
@@ -358,11 +406,15 @@ void SaveUnitTypes(CFile &file)
 	// Save all stats
 	for (std::vector<CUnitType *>::size_type i = 0; i < UnitTypes.size(); ++i) {
 		const CUnitType &type = *UnitTypes[i];
-		file.printf("\n");
+		bool somethingSaved = false;
+
 		for (int j = 0; j < PlayerMax; ++j) {
 			if (Players[j].Type != PlayerNobody) {
-				SaveUnitStats(type.Stats[j], type.Ident, j, file);
+				somethingSaved |= SaveUnitStats(type.Stats[j], type, j, file);
 			}
+		}
+		if (somethingSaved) {
+			file.printf("\n");
 		}
 	}
 }
@@ -378,7 +430,7 @@ CUnitType *UnitTypeByIdent(const std::string &ident)
 {
 	std::map<std::string, CUnitType *>::iterator ret = UnitTypeMap.find(ident);
 	if (ret != UnitTypeMap.end()) {
-		return  (*ret).second;
+		return (*ret).second;
 	}
 	return NULL;
 }
@@ -404,9 +456,9 @@ CUnitType *NewUnitTypeSlot(const std::string &ident)
 	type->Ident = ident;
 	type->BoolFlag.resize(new_bool_size);
 
-	type->Variable = new CVariable[UnitTypeVar.GetNumberVariable()];
-	for (unsigned int i = 0;i < UnitTypeVar.GetNumberVariable(); ++i) {
-		type->Variable[i] = UnitTypeVar.Variable[i];
+	type->DefaultStat.Variables = new CVariable[UnitTypeVar.GetNumberVariable()];
+	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); ++i) {
+		type->DefaultStat.Variables[i] = UnitTypeVar.Variable[i];
 	}
 	UnitTypes.push_back(type);
 	UnitTypeMap[type->Ident] = type;
@@ -462,10 +514,13 @@ static int GetStillFrame(CUnitType *type)
 
 	while (anim) {
 		if (anim->Type == AnimationFrame) {
+			CAnimation_Frame &a_frame = *static_cast<CAnimation_Frame *>(anim);
 			// Use the frame facing down
-			return ParseAnimInt(NoUnitP, anim->D.Frame.Frame) + type->NumDirections / 2;
+			return a_frame.ParseAnimInt(NoUnitP) + type->NumDirections / 2;
 		} else if (anim->Type == AnimationExactFrame) {
-			return ParseAnimInt(NoUnitP, anim->D.Frame.Frame);
+			CAnimation_ExactFrame &a_frame = *static_cast<CAnimation_ExactFrame *>(anim);
+
+			return a_frame.ParseAnimInt(NoUnitP);
 		}
 		anim = anim->Next;
 	}
@@ -491,7 +546,13 @@ void InitUnitTypes(int reset_player_stats)
 
 		// Lookup BuildingTypes
 		for (std::vector<CBuildRestriction *>::iterator b = type->BuildingRules.begin();
-			b < type->BuildingRules.end(); ++b) {
+			 b < type->BuildingRules.end(); ++b) {
+			(*b)->Init();
+		}
+
+		// Lookup AiBuildingTypes
+		for (std::vector<CBuildRestriction *>::iterator b = type->AiBuildingRules.begin();
+			 b < type->AiBuildingRules.end(); ++b) {
 			(*b)->Init();
 		}
 	}
@@ -531,7 +592,7 @@ void LoadUnitTypeSprite(CUnitType &type)
 			}
 			if (!resinfo->FileWhenLoaded.empty()) {
 				resinfo->SpriteWhenLoaded = CPlayerColorGraphic::New(resinfo->FileWhenLoaded,
-					type.Width, type.Height);
+																	 type.Width, type.Height);
 				resinfo->SpriteWhenLoaded->Load();
 				if (type.Flip) {
 					resinfo->SpriteWhenLoaded->Flip();
@@ -539,7 +600,7 @@ void LoadUnitTypeSprite(CUnitType &type)
 			}
 			if (!resinfo->FileWhenEmpty.empty()) {
 				resinfo->SpriteWhenEmpty = CPlayerColorGraphic::New(resinfo->FileWhenEmpty,
-					type.Width, type.Height);
+																	type.Width, type.Height);
 				resinfo->SpriteWhenEmpty->Load();
 				if (type.Flip) {
 					resinfo->SpriteWhenEmpty->Flip();
@@ -580,15 +641,12 @@ void LoadUnitTypes()
 		// Lookup icons.
 		type.Icon.Load();
 		// Lookup missiles.
-		type.Missile.Missile = MissileTypeByIdent(type.Missile.Name);
-		if (!type.Explosion.Name.empty()) {
-			type.Explosion.Missile = MissileTypeByIdent(type.Explosion.Name);
-		}
+		type.Missile.MapMissile();
+		type.Explosion.MapMissile();
+
 		// Lookup impacts
 		for (int i = 0; i < ANIMATIONS_DEATHTYPES + 2; ++i) {
-			if (!type.Impact[i].Name.empty()) {
-				type.Impact[i].Missile = MissileTypeByIdent(type.Impact[i].Name);
-			}
+			type.Impact[i].MapMissile();
 		}
 		// Lookup corpse.
 		if (!type.CorpseName.empty()) {
@@ -620,8 +678,8 @@ void CUnitTypeVar::Clear()
 	Variable.clear();
 
 	for (std::vector<CDecoVar *>::iterator it = DecoVar.begin();
-		it != DecoVar.end(); ++it) {
-		delete (*it);
+		 it != DecoVar.end(); ++it) {
+		delete(*it);
 	}
 	DecoVar.clear();
 }

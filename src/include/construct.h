@@ -108,8 +108,9 @@ enum ConstructionFileType {
 	ConstructionFileMain
 };
 
-	/// Construction frame
-class CConstructionFrame {
+/// Construction frame
+class CConstructionFrame
+{
 public:
 	CConstructionFrame() : Percent(0), File(ConstructionFileConstruction),
 		Frame(0), Next(NULL) {}
@@ -120,18 +121,22 @@ public:
 	CConstructionFrame *Next;       /// Next pointer
 };
 
-	/// Construction shown during construction of a building
-class CConstruction {
+/// Construction shown during construction of a building
+class CConstruction
+{
 public:
 	CConstruction() : Frames(NULL), Sprite(NULL), Width(0),
-		Height(0), ShadowSprite(NULL), ShadowWidth(0), ShadowHeight(0)
-	{
+		Height(0), ShadowSprite(NULL), ShadowWidth(0), ShadowHeight(0) {
 		File.Width = 0;
 		File.Height = 0;
 		ShadowFile.Width = 0;
 		ShadowFile.Height = 0;
 	}
+	~CConstruction();
+	void Clean();
+	void Load();
 
+public:
 	std::string Ident;   /// construction identifier
 	struct {
 		std::string File;/// sprite file
@@ -140,7 +145,7 @@ public:
 	} File, ShadowFile;
 	CConstructionFrame *Frames;  /// construction frames
 
-// --- FILLED UP ---
+	// --- FILLED UP ---
 
 	CPlayerColorGraphic *Sprite;/// construction sprite image
 	int      Width;         /// sprite width
@@ -162,16 +167,16 @@ public:
 --  Functions
 ----------------------------------------------------------------------------*/
 
-	/// Initialize the constructions module
+/// Initialize the constructions module
 extern void InitConstructions();
-	/// Load the graphics for constructions
+/// Load the graphics for constructions
 extern void LoadConstructions();
-	/// Clean up the constructions module
+/// Clean up the constructions module
 extern void CleanConstructions();
-	/// Get construction by identifier
+/// Get construction by identifier
 extern CConstruction *ConstructionByIdent(const std::string &ident);
 
-	/// Register ccl features
+/// Register ccl features
 extern void ConstructionCclRegister();
 
 //@}

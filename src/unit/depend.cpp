@@ -39,18 +39,20 @@
 #include <string.h>
 
 #include "stratagus.h"
-#include "upgrade_structs.h"
-#include "upgrade.h"
+
 #include "depend.h"
+
 #include "player.h"
 #include "script.h"
 #include "unittype.h"
+#include "upgrade_structs.h"
+#include "upgrade.h"
 
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
 
-	/// All dependencies hash
+/// All dependencies hash
 static DependRule *DependHash[101];
 
 /*----------------------------------------------------------------------------
@@ -65,17 +67,11 @@ static DependRule *DependHash[101];
 **  @param count     Amount of the required needed.
 **  @param or_flag   Start of or rule.
 */
-static void AddDependency(const std::string &target, const std::string &required, int count,
-	int or_flag)
+static void AddDependency(const std::string &target, const std::string &required, int count, int or_flag)
 {
 	DependRule rule;
-	DependRule *node;
-	DependRule *temp;
-	int hash;
 
-	//
 	//  Setup structure.
-	//
 	if (!strncmp(target.c_str(), "unit-", 5)) {
 		// target string refers to unit-xxx
 		rule.Type = DependRuleUnitType;
@@ -85,21 +81,19 @@ static void AddDependency(const std::string &target, const std::string &required
 		rule.Type = DependRuleUpgrade;
 		rule.Kind.Upgrade = CUpgrade::Get(target);
 	} else {
-		DebugPrint("dependency target `%s' should be unit-type or upgrade\n" _C_
-			target.c_str());
+		DebugPrint("dependency target `%s' should be unit-type or upgrade\n" _C_ target.c_str());
 		return;
 	}
 
-	hash = (int)((intptr_t)rule.Kind.UnitType % (sizeof(DependHash) / sizeof(*DependHash)));
+	int hash = (int)((intptr_t)rule.Kind.UnitType % (sizeof(DependHash) / sizeof(*DependHash)));
 
-	//
 	//  Find correct hash slot.
-	//
-	if ((node = DependHash[hash])) {  // find correct entry
-		while (node->Type != rule.Type ||
-				node->Kind.Upgrade != rule.Kind.Upgrade) {
+	DependRule *node = DependHash[hash];
+
+	if (node) {  // find correct entry
+		while (node->Type != rule.Type || node->Kind.Upgrade != rule.Kind.Upgrade) {
 			if (!node->Next) {  // end of list
-				temp = new DependRule;
+				DependRule *temp = new DependRule;
 				temp->Next = NULL;
 				temp->Rule = NULL;
 				temp->Type = rule.Type;
@@ -119,21 +113,18 @@ static void AddDependency(const std::string &target, const std::string &required
 		DependHash[hash] = node;
 	}
 
-	//
 	//  Adjust count.
-	//
 	if (count < 0 || count > 255) {
 		DebugPrint("wrong count `%d' range 0 .. 255\n" _C_ count);
 		count = 255;
 	}
 
-	temp = new DependRule;
+	DependRule *temp = new DependRule;
 	temp->Rule = NULL;
 	temp->Next = NULL;
 	temp->Count = count;
-	//
+
 	//  Setup structure.
-	//
 	if (!strncmp(required.c_str(), "unit-", 5)) {
 		// required string refers to unit-xxx
 		temp->Type = DependRuleUnitType;
@@ -143,8 +134,7 @@ static void AddDependency(const std::string &target, const std::string &required
 		temp->Type = DependRuleUpgrade;
 		temp->Kind.Upgrade = CUpgrade::Get(required);
 	} else {
-		DebugPrint("dependency required `%s' should be unit-type or upgrade\n" _C_
-			required.c_str());
+		DebugPrint("dependency required `%s' should be unit-type or upgrade\n" _C_ required.c_str());
 		delete temp;
 		return;
 	}
@@ -161,7 +151,6 @@ static void AddDependency(const std::string &target, const std::string &required
 		if (node->Rule) {
 			temp->Next = node->Rule->Next;
 		}
-
 		node->Rule = temp;
 	}
 
@@ -191,12 +180,11 @@ static void AddDependency(const std::string &target, const std::string &required
 */
 static bool CheckDependByRule(const CPlayer &player, DependRule &rule)
 {
-	const DependRule *node;
-
 	//  Find rule
 	int i = (int)((intptr_t)rule.Kind.UnitType % (sizeof(DependHash) / sizeof(*DependHash)));
+	const DependRule *node = DependHash[i];
 
-	if ((node = DependHash[i])) {  // find correct entry
+	if (node) {  // find correct entry
 		while (node->Type != rule.Type || node->Kind.Upgrade != rule.Kind.Upgrade) {
 			if (!node->Next) {  // end of list
 				return true;
@@ -207,9 +195,7 @@ static bool CheckDependByRule(const CPlayer &player, DependRule &rule)
 		return true;
 	}
 
-	//
 	//  Prove the rules
-	//
 	node = node->Rule;
 
 	while (node) {
@@ -310,34 +296,28 @@ void InitDependencies()
 */
 void CleanDependencies()
 {
-	unsigned u;
-	DependRule *node;
-	DependRule *rule;
-	DependRule *temp;
-	DependRule *next;
-
 	// Free all dependencies
 
-	for (u = 0; u < sizeof(DependHash) / sizeof(*DependHash); ++u) {
-		node = DependHash[u];
+	for (unsigned int u = 0; u < sizeof(DependHash) / sizeof(*DependHash); ++u) {
+		DependRule *node = DependHash[u];
 		while (node) {  // all hash links
 			// All or cases
 
-			rule = node->Rule;
+			DependRule *rule = node->Rule;
 			while (rule) {
 				if (rule) {
-					temp = rule->Rule;
+					DependRule *temp = rule->Rule;
 					while (temp) {
-						next = temp;
+						DependRule *next = temp;
 						temp = temp->Rule;
 						delete next;
 					}
 				}
-				temp = rule;
+				DependRule *temp = rule;
 				rule = rule->Next;
 				delete temp;
 			}
-			temp = node;
+			DependRule *temp = node;
 			node = node->Next;
 			delete temp;
 		}
@@ -356,37 +336,22 @@ void CleanDependencies()
 */
 static int CclDefineDependency(lua_State *l)
 {
-	const char *target;
-	const char *required;
-	int count;
-	const char *value;
-	int or_flag;
-	int args;
-	int j;
-	int subargs;
-	int k;
+	const int args = lua_gettop(l);
+	const char *target = LuaToString(l, 1);
 
-	args = lua_gettop(l);
-	j = 0;
-
-	target = LuaToString(l, j + 1);
-	++j;
-
-	//
 	//  All or rules.
-	//
-	or_flag = 0;
-	for (; j < args; ++j) {
+	int or_flag = 0;
+	for (int j = 1; j < args; ++j) {
 		if (!lua_istable(l, j + 1)) {
 			LuaError(l, "incorrect argument");
 		}
-		subargs = lua_objlen(l, j + 1);
+		const int subargs = lua_rawlen(l, j + 1);
 
-		for (k = 0; k < subargs; ++k) {
+		for (int k = 0; k < subargs; ++k) {
 			lua_rawgeti(l, j + 1, k + 1);
-			required = LuaToString(l, -1);
+			const char *required = LuaToString(l, -1);
 			lua_pop(l, 1);
-			count = 1;
+			int count = 1;
 			if (k + 1 < subargs) {
 				lua_rawgeti(l, j + 1, k + 2);
 				if (lua_isnumber(l, -1)) {
@@ -395,13 +360,12 @@ static int CclDefineDependency(lua_State *l)
 				}
 				lua_pop(l, 1);
 			}
-
 			AddDependency(target, required, count, or_flag);
 			or_flag = 0;
 		}
 		if (j + 1 < args) {
 			++j;
-			value = LuaToString(l, j + 1);
+			const char *value = LuaToString(l, j + 1);
 			if (strcmp(value, "or")) {
 				LuaError(l, "not or symbol: %s" _C_ value);
 				return 0;
@@ -409,7 +373,6 @@ static int CclDefineDependency(lua_State *l)
 			or_flag = 1;
 		}
 	}
-
 	return 0;
 }
 
@@ -422,7 +385,7 @@ static int CclDefineDependency(lua_State *l)
 */
 static int CclGetDependency(lua_State *l)
 {
-	DebugPrint("FIXME: write this %p\n" _C_ (void*)l);
+	DebugPrint("FIXME: write this %p\n" _C_(void *)l);
 
 	return 0;
 }
@@ -436,7 +399,7 @@ static int CclGetDependency(lua_State *l)
 */
 static int CclCheckDependency(lua_State *l)
 {
-	DebugPrint("FIXME: write this %p\n" _C_ (void *)l);
+	DebugPrint("FIXME: write this %p\n" _C_(void *)l);
 
 	return 0;
 }

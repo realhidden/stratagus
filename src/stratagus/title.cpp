@@ -150,7 +150,6 @@ void TitleScreen::ShowTitleImage()
 	}
 
 	int timeout = this->Timeout ? this->Timeout * CYCLES_PER_SECOND : -1;
-	DisplayAutoLocker autolock;
 
 	while (timeout-- && WaitNoEvent) {
 		g->DrawClip((Video.Width - g->Width) / 2, (Video.Height - g->Height) / 2);
@@ -182,8 +181,7 @@ void ShowTitleScreens()
 		}
 
 		if (!TitleScreens[i]->Music.empty()) {
-			if (TitleScreens[i]->Music == "none" ||
-					PlayMusic(TitleScreens[i]->Music) == -1) {
+			if (TitleScreens[i]->Music == "none" || PlayMusic(TitleScreens[i]->Music) == -1) {
 				StopMusic();
 			}
 		}

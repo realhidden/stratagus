@@ -57,6 +57,10 @@ public:
 	SoundConfig() : Sound(NULL) {}
 	SoundConfig(std::string name) : Name(name), Sound(NULL) {}
 
+	bool MapSound();
+	void SetSoundRange(unsigned char range);
+
+public:
 	std::string Name;     /// config sound name
 	CSound *Sound;        /// identifier send to sound server
 };
@@ -66,7 +70,8 @@ public:
 **
 **  Played for the various events.
 */
-class CUnitSound {
+class CUnitSound
+{
 public:
 	SoundConfig Selected;           /// selected by user
 	SoundConfig Acknowledgement;    /// acknowledge of use command
@@ -75,7 +80,7 @@ public:
 	SoundConfig Repair;             /// unit repairing
 	SoundConfig Harvest[MaxCosts];  /// unit harvesting
 	SoundConfig Help;               /// unit is attacked
-	SoundConfig Dead[ANIMATIONS_DEATHTYPES+1];               /// unit is killed
+	SoundConfig Dead[ANIMATIONS_DEATHTYPES + 1];             /// unit is killed
 };
 
 /*----------------------------------------------------------------------------

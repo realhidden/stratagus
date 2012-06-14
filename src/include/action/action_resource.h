@@ -8,7 +8,7 @@
 //                        T H E   W A R   B E G I N S
 //         Stratagus - A free fantasy real time strategy game engine
 //
-/**@name actions.h - The actions headerfile. */
+/**@name actionresource.h - The actions headerfile. */
 //
 //      (c) Copyright 1998-2012 by Lutz Sammer and Jimmy Salmon
 //
@@ -36,14 +36,13 @@
 
 class COrder_Resource : public COrder
 {
-	friend COrder* COrder::NewActionResource(CUnit &harvester, const Vec2i &pos);
-	friend COrder* COrder::NewActionResource(CUnit &harvester, CUnit &mine);
-	friend COrder* COrder::NewActionReturnGoods(CUnit &harvester, CUnit *depot);
+	friend COrder *COrder::NewActionResource(CUnit &harvester, const Vec2i &pos);
+	friend COrder *COrder::NewActionResource(CUnit &harvester, CUnit &mine);
+	friend COrder *COrder::NewActionReturnGoods(CUnit &harvester, CUnit *depot);
 
 public:
 	COrder_Resource(CUnit &harvester) : COrder(UnitActionResource), worker(&harvester),
-		CurrentResource(0), State(0), TimeToHarvest(0), DoneHarvesting(false)
-	{
+		CurrentResource(0), State(0), TimeToHarvest(0), DoneHarvesting(false) {
 		Resource.Pos.x = Resource.Pos.y = -1;
 		goalPos.x = goalPos.y = -1;
 	}
@@ -52,15 +51,18 @@ public:
 
 	virtual COrder_Resource *Clone() const { return new COrder_Resource(*this); }
 
+	virtual bool IsValid() const;
+
 	virtual void Save(CFile &file, const CUnit &unit) const;
 	virtual bool ParseSpecificData(lua_State *l, int &j, const char *value, const CUnit &unit);
 
 	virtual void Execute(CUnit &unit);
-	virtual PixelPos Show(const CViewport& vp, const PixelPos& lastScreenPos) const;
-	virtual void UpdatePathFinderData(PathFinderInput& input);
+	virtual PixelPos Show(const CViewport &vp, const PixelPos &lastScreenPos) const;
+	virtual void UpdatePathFinderData(PathFinderInput &input);
 	virtual bool OnAiHitUnit(CUnit &unit, CUnit *attacker, int /*damage*/);
 
 
+	int GetCurrentResource() const { return CurrentResource; }
 	Vec2i GetHarvestLocation() const;
 	bool IsGatheringStarted() const;
 	bool IsGatheringFinished() const;

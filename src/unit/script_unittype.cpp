@@ -37,47 +37,30 @@
 #include <stdlib.h>
 
 #include "stratagus.h"
-#include "video.h"
-#include "tileset.h"
-#include "map.h"
-#include "sound.h"
-#include "unitsound.h"
+
 #include "unittype.h"
-#include "animation.h"
-#include "icons.h"
-#include "missile.h"
-#include "script.h"
-#include "construct.h"
-#include "spells.h"
-#include "font.h"
-#include "unit.h"
-#include "unit_manager.h"
-#include "player.h"
+
 #include "actions.h"
+#include "animation.h"
+#include "construct.h"
+#include "font.h"
 #include "luacallback.h"
+#include "map.h"
+#include "player.h"
+#include "script.h"
+#include "sound.h"
+#include "spells.h"
+#include "tileset.h"
+#include "unit.h"
+#include "unitsound.h"
+#include "unit_manager.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
 
-CAnimation *AnimationsArray[ANIMATIONS_MAXANIM];
-int NumAnimations;
-
-std::map<std::string, CAnimations *> AnimationMap;/// Animation map
-
 CUnitTypeVar UnitTypeVar;    /// Variables for UnitType and unit.
-
-struct LabelsStruct {
-	CAnimation *Anim;
-	std::string Name;
-};
-static std::vector<LabelsStruct> Labels;
-
-struct LabelsLaterStruct {
-	CAnimation **Anim;
-	std::string Name;
-};
-static std::vector<LabelsLaterStruct> LabelsLater;
 
 // names of boolflags
 static const char COWARD_KEY[] = "Coward";
@@ -143,21 +126,24 @@ static const char SLOT_KEY[] = "Slot";
 static const char SHIELD_KEY[] = "ShieldPoints";
 static const char POINTS_KEY[] = "Points";
 static const char MAXHARVESTERS_KEY[] = "MaxHarvesters";
+static const char AITHRESHOLD_KEY[] = "AiThreshold";
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
 
-CUnitTypeVar::CBoolKeys::CBoolKeys() {
+CUnitTypeVar::CBoolKeys::CBoolKeys()
+{
 
-	const char *const tmp[] = {COWARD_KEY,BUILDING_KEY,FLIP_KEY,REVEALER_KEY,
-		LANDUNIT_KEY,AIRUNIT_KEY,SEAUNIT_KEY,EXPLODEWHENKILLED_KEY,
-		VISIBLEUNDERFOG_KEY, PERMANENTCLOACK_KEY,DETECTCLOAK_KEY,
-		ATTACKFROMTRANSPORTER_KEY,VANISHES_KEY,GROUNDATTACK_KEY,
-		SHOREBUILDING_KEY, CANATTACK_KEY,BUILDEROUTSIDE_KEY,
-		BUILDERLOST_KEY,CANHARVEST_KEY,HARVESTER_KEY,SELECTABLEBYRECTANGLE_KEY,
-		ISNOTSELECTABLE_KEY,DECORATION_KEY,INDESTRUCTIBLE_KEY,TELEPORTER_KEY,SHIELDPIERCE_KEY,
-		SAVECARGO_KEY, NONSOLID_KEY, WALL_KEY};
+	const char *const tmp[] = {COWARD_KEY, BUILDING_KEY, FLIP_KEY, REVEALER_KEY,
+							   LANDUNIT_KEY, AIRUNIT_KEY, SEAUNIT_KEY, EXPLODEWHENKILLED_KEY,
+							   VISIBLEUNDERFOG_KEY, PERMANENTCLOACK_KEY, DETECTCLOAK_KEY,
+							   ATTACKFROMTRANSPORTER_KEY, VANISHES_KEY, GROUNDATTACK_KEY,
+							   SHOREBUILDING_KEY, CANATTACK_KEY, BUILDEROUTSIDE_KEY,
+							   BUILDERLOST_KEY, CANHARVEST_KEY, HARVESTER_KEY, SELECTABLEBYRECTANGLE_KEY,
+							   ISNOTSELECTABLE_KEY, DECORATION_KEY, INDESTRUCTIBLE_KEY, TELEPORTER_KEY, SHIELDPIERCE_KEY,
+							   SAVECARGO_KEY, NONSOLID_KEY, WALL_KEY
+							  };
 
 	for (int i = 0; i < NBARALREADYDEFINED; ++i) {
 		buildin[i].offset = i;
@@ -167,16 +153,18 @@ CUnitTypeVar::CBoolKeys::CBoolKeys() {
 	Init();
 }
 
-CUnitTypeVar::CVariableKeys::CVariableKeys() {
+CUnitTypeVar::CVariableKeys::CVariableKeys()
+{
 
-	const char *const tmp[] = {HITPOINTS_KEY,BUILD_KEY,MANA_KEY,TRANSPORT_KEY,
-		RESEARCH_KEY,TRAINING_KEY,UPGRADETO_KEY,GIVERESOURCE_KEY,
-		CARRYRESOURCE_KEY, XP_KEY,KILL_KEY,	SUPPLY_KEY,DEMAND_KEY,ARMOR_KEY,
-		SIGHTRANGE_KEY, ATTACKRANGE_KEY,PIERCINGDAMAGE_KEY,
-		BASICDAMAGE_KEY,POSX_KEY,POSY_KEY,RADARRANGE_KEY,
-		RADARJAMMERRANGE_KEY,AUTOREPAIRRANGE_KEY,BLOODLUST_KEY,HASTE_KEY,
-		SLOW_KEY, INVISIBLE_KEY, UNHOLYARMOR_KEY, SLOT_KEY, SHIELD_KEY, POINTS_KEY,
-		MAXHARVESTERS_KEY};
+	const char *const tmp[] = {HITPOINTS_KEY, BUILD_KEY, MANA_KEY, TRANSPORT_KEY,
+							   RESEARCH_KEY, TRAINING_KEY, UPGRADETO_KEY, GIVERESOURCE_KEY,
+							   CARRYRESOURCE_KEY, XP_KEY, KILL_KEY,	SUPPLY_KEY, DEMAND_KEY, ARMOR_KEY,
+							   SIGHTRANGE_KEY, ATTACKRANGE_KEY, PIERCINGDAMAGE_KEY,
+							   BASICDAMAGE_KEY, POSX_KEY, POSY_KEY, RADARRANGE_KEY,
+							   RADARJAMMERRANGE_KEY, AUTOREPAIRRANGE_KEY, BLOODLUST_KEY, HASTE_KEY,
+							   SLOW_KEY, INVISIBLE_KEY, UNHOLYARMOR_KEY, SLOT_KEY, SHIELD_KEY, POINTS_KEY,
+							   MAXHARVESTERS_KEY, AITHRESHOLD_KEY
+							  };
 
 	for (int i = 0; i < NVARALREADYDEFINED; ++i) {
 		buildin[i].offset = i;
@@ -189,33 +177,6 @@ CUnitTypeVar::CVariableKeys::CVariableKeys() {
 int GetSpriteIndex(const char *SpriteName);
 
 /**
-**  Get the animations structure by ident.
-**
-**  @param ident  Identifier for the animation.
-**
-**  @return  Pointer to the animation structure.
-*/
-CAnimations *AnimationsByIdent(const std::string &ident)
-{
-	std::map<std::string, CAnimations *>::iterator ret = AnimationMap.find(ident);
-	if (ret != AnimationMap.end()) {
-		return  (*ret).second;
-	}
-	return NULL;
-}
-
-void FreeAnimations()
-{
-	std::map<std::string, CAnimations *>::iterator i;
-	for (i = AnimationMap.begin(); i != AnimationMap.end(); ++i) {
-		CAnimations *anims = (*i).second;
-		delete anims;
-	}
-	AnimationMap.clear();
-	NumAnimations = 0;
-}
-
-/**
 **  Get the resource ID from a SCM object.
 **
 **  @param l  Lua state.
@@ -226,29 +187,11 @@ unsigned CclGetResourceByName(lua_State *l)
 {
 	const char *const tmp = LuaToString(l, -1);
 	const std::string value = tmp ? tmp : "";
+	const int resId = GetResourceIdByName(l, value.c_str());
 
-	for (unsigned int i = 0; i < MaxCosts; ++i) {
-		if (value == DefaultResourceNames[i]) {
-			return i;
-		}
-	}
-	LuaError(l, "GetResourceByName: Unsupported resource tag: %s" _C_ value.c_str());
-	return 0xABCDEF;
+	return resId;
 }
 
-/**
-**  Find the index of a resource
-*/
-static int ResourceIndex(lua_State *l, const char *resource)
-{
-	for (unsigned int res = 0; res < MaxCosts; ++res) {
-		if (!strcmp(resource, DefaultResourceNames[res].c_str())) {
-			return res;
-		}
-	}
-	LuaError(l, "Resource not found: %s" _C_ resource);
-	return 0;
-}
 
 /**
 **  Find the index of a extra death type
@@ -271,16 +214,14 @@ int ExtraDeathIndex(const char *death)
 */
 static void ParseBuildingRules(lua_State *l, std::vector<CBuildRestriction *> &blist)
 {
-	const char *value;
-	int args;
 	CBuildRestrictionAnd *andlist = new CBuildRestrictionAnd();
 
-	args = lua_objlen(l, -1);
+	const int args = lua_rawlen(l, -1);
 	Assert(!(args & 1)); // must be even
 
 	for (int i = 0; i < args; ++i) {
 		lua_rawgeti(l, -1, i + 1);
-		value = LuaToString(l, -1);
+		const char *value = LuaToString(l, -1);
 		lua_pop(l, 1);
 		++i;
 		lua_rawgeti(l, -1, i + 1);
@@ -328,9 +269,9 @@ static void ParseBuildingRules(lua_State *l, std::vector<CBuildRestriction *> &b
 			for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
 				value = LuaToString(l, -2);
 				if (!strcmp(value, "OffsetX")) {
-					b->OffsetX = LuaToNumber(l, -1);
+					b->Offset.x = LuaToNumber(l, -1);
 				} else if (!strcmp(value, "OffsetY")) {
-					b->OffsetY = LuaToNumber(l, -1);
+					b->Offset.y = LuaToNumber(l, -1);
 				} else if (!strcmp(value, "Type")) {
 					b->ParentName = LuaToString(l, -1);
 				} else {
@@ -362,6 +303,40 @@ static void ParseBuildingRules(lua_State *l, std::vector<CBuildRestriction *> &b
 	blist.push_back(andlist);
 }
 
+static void UpdateDefaultBoolFlags(CUnitType& type)
+{
+	// BoolFlag
+	type.BoolFlag[COWARD_INDEX].value                = type.Coward;
+	type.BoolFlag[BUILDING_INDEX].value              = type.Building;
+	type.BoolFlag[FLIP_INDEX].value                  = type.Flip;
+	type.BoolFlag[REVEALER_INDEX].value              = type.Revealer;
+	type.BoolFlag[LANDUNIT_INDEX].value              = type.LandUnit;
+	type.BoolFlag[AIRUNIT_INDEX].value               = type.AirUnit;
+	type.BoolFlag[SEAUNIT_INDEX].value               = type.SeaUnit;
+	type.BoolFlag[EXPLODEWHENKILLED_INDEX].value     = type.ExplodeWhenKilled;
+	type.BoolFlag[VISIBLEUNDERFOG_INDEX].value       = type.VisibleUnderFog;
+	type.BoolFlag[PERMANENTCLOAK_INDEX].value        = type.PermanentCloak;
+	type.BoolFlag[DETECTCLOAK_INDEX].value           = type.DetectCloak;
+	type.BoolFlag[ATTACKFROMTRANSPORTER_INDEX].value = type.AttackFromTransporter;
+	type.BoolFlag[VANISHES_INDEX].value              = type.Vanishes;
+	type.BoolFlag[GROUNDATTACK_INDEX].value          = type.GroundAttack;
+	type.BoolFlag[SHOREBUILDING_INDEX].value         = type.ShoreBuilding;
+	type.BoolFlag[CANATTACK_INDEX].value             = type.CanAttack;
+	type.BoolFlag[BUILDEROUTSIDE_INDEX].value        = type.BuilderOutside;
+	type.BoolFlag[BUILDERLOST_INDEX].value           = type.BuilderLost;
+	type.BoolFlag[CANHARVEST_INDEX].value            = type.CanHarvest;
+	type.BoolFlag[HARVESTER_INDEX].value             = type.Harvester;
+	type.BoolFlag[SELECTABLEBYRECTANGLE_INDEX].value = type.SelectableByRectangle;
+	type.BoolFlag[ISNOTSELECTABLE_INDEX].value       = type.IsNotSelectable;
+	type.BoolFlag[DECORATION_INDEX].value            = type.Decoration;
+	type.BoolFlag[INDESTRUCTIBLE_INDEX].value        = type.Indestructible;
+	type.BoolFlag[TELEPORTER_INDEX].value            = type.Teleporter;
+	type.BoolFlag[SHIELDPIERCE_INDEX].value          = type.ShieldPiercing;
+	type.BoolFlag[SAVECARGO_INDEX].value             = type.SaveCargo;
+	type.BoolFlag[NONSOLID_INDEX].value              = type.NonSolid;
+	type.BoolFlag[WALL_INDEX].value                  = type.Wall;
+}
+
 /**
 **  Parse unit-type.
 **
@@ -369,22 +344,15 @@ static void ParseBuildingRules(lua_State *l, std::vector<CBuildRestriction *> &b
 */
 static int CclDefineUnitType(lua_State *l)
 {
-	const char *value;
-	CUnitType *type;
-	ResourceInfo *res;
-	const char *str;
-	int redefine;
-	int subargs;
-	int k;
-
 	LuaCheckArgs(l, 2);
 	if (!lua_istable(l, 2)) {
 		LuaError(l, "incorrect argument");
 	}
 
 	// Slot identifier
-	str = LuaToString(l, 1);
-	type = UnitTypeByIdent(str);
+	const char *str = LuaToString(l, 1);
+	CUnitType *type = UnitTypeByIdent(str);
+	int redefine;
 	if (type) {
 		redefine = 1;
 	} else {
@@ -395,19 +363,17 @@ static int CclDefineUnitType(lua_State *l)
 	type->NumDirections = 0;
 	type->Flip = 1;
 
-	//
 	//  Parse the list: (still everything could be changed!)
-	//
 	for (lua_pushnil(l); lua_next(l, 2); lua_pop(l, 1)) {
-		value = LuaToString(l, -2);
+		const char *value = LuaToString(l, -2);
 		if (!strcmp(value, "Name")) {
 			type->Name = LuaToString(l, -1);
 		} else if (!strcmp(value, "Image")) {
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
+			int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				value = LuaToString(l, -1);
 				lua_pop(l, 1);
@@ -441,8 +407,8 @@ static int CclDefineUnitType(lua_State *l)
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				value = LuaToString(l, -1);
 				lua_pop(l, 1);
@@ -485,7 +451,7 @@ static int CclDefineUnitType(lua_State *l)
 				type->ShadowSprite = NULL;
 			}
 		} else if (!strcmp(value, "Offset")) {
-			if (!lua_istable(l, -1) || lua_objlen(l, -1) != 2) {
+			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, -1, 1);
@@ -509,12 +475,12 @@ static int CclDefineUnitType(lua_State *l)
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
+			const int subargs = lua_rawlen(l, -1);
 			type->Portrait.Num = subargs;
 			type->Portrait.Files = new std::string[type->Portrait.Num];
 			type->Portrait.Mngs = new Mng *[type->Portrait.Num];
 			memset(type->Portrait.Mngs, 0, type->Portrait.Num * sizeof(Mng *));
-			for (k = 0; k < subargs; ++k) {
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				type->Portrait.Files[k] = LuaToString(l, -1);
 				lua_pop(l, 1);
@@ -524,42 +490,38 @@ static int CclDefineUnitType(lua_State *l)
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
-				int res;
-
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
-				res = CclGetResourceByName(l);
+				const int res = CclGetResourceByName(l);
 				lua_pop(l, 1);
 				++k;
 				lua_rawgeti(l, -1, k + 1);
-				type->_Costs[res] = LuaToNumber(l, -1);
+				type->DefaultStat.Costs[res] = LuaToNumber(l, -1);
 				lua_pop(l, 1);
 			}
 		} else if (!strcmp(value, "Storing")) {
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				const int res = CclGetResourceByName(l);
 				lua_pop(l, 1);
 				++k;
 				lua_rawgeti(l, -1, k + 1);
-				type->_Storing[res] = LuaToNumber(l, -1);
+				type->DefaultStat.Storing[res] = LuaToNumber(l, -1);
 				lua_pop(l, 1);
 			}
 		} else if (!strcmp(value, "ImproveProduction")) {
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
-				int res;
-
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
-				res = CclGetResourceByName(l);
+				const int res = CclGetResourceByName(l);
 				lua_pop(l, 1);
 				++k;
 				lua_rawgeti(l, -1, k + 1);
@@ -576,18 +538,18 @@ static int CclDefineUnitType(lua_State *l)
 		} else if (!strcmp(value, "StartingResources")) {
 			type->StartingResources = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "RegenerationRate")) {
-			type->Variable[HP_INDEX].Increase = LuaToNumber(l, -1);
+			type->DefaultStat.Variables[HP_INDEX].Increase = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "BurnPercent")) {
 			type->BurnPercent = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "BurnDamageRate")) {
 			type->BurnDamageRate = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "ShieldPoints")) {
-			type->Variable[SHIELD_INDEX].Max = LuaToNumber(l, -1);
-			type->Variable[SHIELD_INDEX].Value = 0;
-			type->Variable[SHIELD_INDEX].Increase = 1;
-			type->Variable[SHIELD_INDEX].Enable = 1;
+			type->DefaultStat.Variables[SHIELD_INDEX].Max = LuaToNumber(l, -1);
+			type->DefaultStat.Variables[SHIELD_INDEX].Value = 0;
+			type->DefaultStat.Variables[SHIELD_INDEX].Increase = 1;
+			type->DefaultStat.Variables[SHIELD_INDEX].Enable = 1;
 		} else if (!strcmp(value, "TileSize")) {
-			if (!lua_istable(l, -1) || lua_objlen(l, -1) != 2) {
+			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, -1, 1);
@@ -599,7 +561,7 @@ static int CclDefineUnitType(lua_State *l)
 		} else if (!strcmp(value, "Decoration")) {
 			type->Decoration = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "NeutralMinimapColor")) {
-			if (!lua_istable(l, -1) || lua_objlen(l, -1) != 3) {
+			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 3) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, -1, 1);
@@ -612,7 +574,7 @@ static int CclDefineUnitType(lua_State *l)
 			type->NeutralMinimapColorRGB.b = LuaToNumber(l, -1);
 			lua_pop(l, 1);
 		} else if (!strcmp(value, "BoxSize")) {
-			if (!lua_istable(l, -1) || lua_objlen(l, -1) != 2) {
+			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, -1, 1);
@@ -635,11 +597,11 @@ static int CclDefineUnitType(lua_State *l)
 		} else if (!strcmp(value, "MinAttackRange")) {
 			type->MinAttackRange = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "MaxAttackRange")) {
-			type->Variable[ATTACKRANGE_INDEX].Value = LuaToNumber(l, -1);
-			type->Variable[ATTACKRANGE_INDEX].Max = LuaToNumber(l, -1);
+			type->DefaultStat.Variables[ATTACKRANGE_INDEX].Value = LuaToNumber(l, -1);
+			type->DefaultStat.Variables[ATTACKRANGE_INDEX].Max = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "MaxHarvesters")) {
-			type->Variable[MAXHARVESTERS_INDEX].Value = LuaToNumber(l, -1);
-			type->Variable[MAXHARVESTERS_INDEX].Max = LuaToNumber(l, -1);
+			type->DefaultStat.Variables[MAXHARVESTERS_INDEX].Value = LuaToNumber(l, -1);
+			type->DefaultStat.Variables[MAXHARVESTERS_INDEX].Max = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Priority")) {
 			type->Priority = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "AnnoyComputerFactor")) {
@@ -655,7 +617,7 @@ static int CclDefineUnitType(lua_State *l)
 			type->CorpseType = NULL;
 		} else if (!strcmp(value, "DamageType")) {
 			value = LuaToString(l, -1);
-//			int check = ExtraDeathIndex(value);
+			//int check = ExtraDeathIndex(value);
 			type->DamageType = value;
 		} else if (!strcmp(value, "ExplodeWhenKilled")) {
 			type->ExplodeWhenKilled = 1;
@@ -680,8 +642,8 @@ static int CclDefineUnitType(lua_State *l)
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				value = LuaToString(l, -1);
 				lua_pop(l, 1);
@@ -698,12 +660,11 @@ static int CclDefineUnitType(lua_State *l)
 					type->Impact[ANIMATIONS_DEATHTYPES + 1].Missile = NULL;
 					lua_pop(l, 1);
 				} else {
-					int num;
-
 					lua_rawgeti(l, -1, k + 1);
 					const std::string name = LuaToString(l, -1);
 					lua_pop(l, 1);
-					for (num = 0; num < ANIMATIONS_DEATHTYPES; ++num) {
+					int num = 0;
+					for (; num < ANIMATIONS_DEATHTYPES; ++num) {
 						if (name == ExtraDeathTypes[num]) {
 							++k;
 							break;
@@ -736,7 +697,6 @@ static int CclDefineUnitType(lua_State *l)
 			} else {
 				LuaError(l, "Unsupported RightMouseAction: %s" _C_ value);
 			}
-
 		} else if (!strcmp(value, "CanGroundAttack")) {
 			type->GroundAttack = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "CanAttack")) {
@@ -749,12 +709,10 @@ static int CclDefineUnitType(lua_State *l)
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
-				int res;
-
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
-				res = CclGetResourceByName(l);
+				const int res = CclGetResourceByName(l);
 				lua_pop(l, 1);
 				++k;
 				lua_rawgeti(l, -1, k + 1);
@@ -779,7 +737,6 @@ static int CclDefineUnitType(lua_State *l)
 			} else {
 				type->CanTarget &= ~CanTargetAir;
 			}
-
 		} else if (!strcmp(value, "Building")) {
 			type->Building = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "VisibleUnderFog")) {
@@ -788,19 +745,38 @@ static int CclDefineUnitType(lua_State *l)
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
+			const int subargs = lua_rawlen(l, -1);
 			// Free any old restrictions if they are redefined
 			for (std::vector<CBuildRestriction *>::iterator b = type->BuildingRules.begin();
-				b != type->BuildingRules.end(); ++b) {
+				 b != type->BuildingRules.end(); ++b) {
 				delete *b;
 			}
 			type->BuildingRules.clear();
-			for (k = 0; k < subargs; ++k) {
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				if (!lua_istable(l, -1)) {
 					LuaError(l, "incorrect argument");
 				}
 				ParseBuildingRules(l, type->BuildingRules);
+				lua_pop(l, 1);
+			}
+		} else if (!strcmp(value, "AiBuildingRules")) {
+			if (!lua_istable(l, -1)) {
+				LuaError(l, "incorrect argument");
+			}
+			const int subargs = lua_rawlen(l, -1);
+			// Free any old restrictions if they are redefined
+			for (std::vector<CBuildRestriction *>::iterator b = type->AiBuildingRules.begin();
+				 b != type->AiBuildingRules.end(); ++b) {
+				delete *b;
+			}
+			type->AiBuildingRules.clear();
+			for (int k = 0; k < subargs; ++k) {
+				lua_rawgeti(l, -1, k + 1);
+				if (!lua_istable(l, -1)) {
+					LuaError(l, "incorrect argument");
+				}
+				ParseBuildingRules(l, type->AiBuildingRules);
 				lua_pop(l, 1);
 			}
 		} else if (!strcmp(value, "BuilderOutside")) {
@@ -841,14 +817,14 @@ static int CclDefineUnitType(lua_State *l)
 				type->BoolFlag.resize(UnitTypeVar.GetNumberBoolFlag());
 			}
 
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				value = LuaToString(l, -1);
 				lua_pop(l, 1);
 				++k;
 
-				int index = UnitTypeVar.BoolFlagNameLookup[value];
+				const int index = UnitTypeVar.BoolFlagNameLookup[value];
 				if (index != -1) {
 					lua_rawgeti(l, -1, k + 1);
 					value = LuaToString(l, -1);
@@ -863,18 +839,15 @@ static int CclDefineUnitType(lua_State *l)
 		} else if (!strcmp(value, "Coward")) {
 			type->Coward = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "CanGatherResources")) {
-			int args;
-			int j;
-
-			args = lua_objlen(l, -1);
-			for (j = 0; j < args; ++j) {
+			const int args = lua_rawlen(l, -1);
+			for (int j = 0; j < args; ++j) {
 				lua_rawgeti(l, -1, j + 1);
-				res = new ResourceInfo;
+				ResourceInfo *res = new ResourceInfo;
 				if (!lua_istable(l, -1)) {
 					LuaError(l, "incorrect argument");
 				}
-				subargs = lua_objlen(l, -1);
-				for (k = 0; k < subargs; ++k) {
+				const int subargs = lua_rawlen(l, -1);
+				for (int k = 0; k < subargs; ++k) {
 					lua_rawgeti(l, -1, k + 1);
 					value = LuaToString(l, -1);
 					lua_pop(l, 1);
@@ -925,8 +898,8 @@ static int CclDefineUnitType(lua_State *l)
 						res->FileWhenLoaded = LuaToString(l, -1);
 						lua_pop(l, 1);
 					} else {
-					   printf("\n%s\n", type->Name.c_str());
-					   LuaError(l, "Unsupported tag: %s" _C_ value);
+						printf("\n%s\n", type->Name.c_str());
+						LuaError(l, "Unsupported tag: %s" _C_ value);
 					}
 				}
 				if (!res->FinalResource) {
@@ -946,8 +919,8 @@ static int CclDefineUnitType(lua_State *l)
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				type->CanStore[CclGetResourceByName(l)] = 1;
 				lua_pop(l, 1);
@@ -966,13 +939,13 @@ static int CclDefineUnitType(lua_State *l)
 				type->CanCastSpell = new char[SpellTypeTable.size()];
 				memset(type->CanCastSpell, 0, SpellTypeTable.size() * sizeof(char));
 			}
-			subargs = lua_objlen(l, -1);
+			const int subargs = lua_rawlen(l, -1);
 			if (subargs == 0) {
 				delete[] type->CanCastSpell;
 				type->CanCastSpell = NULL;
 
 			}
-			for (k = 0; k < subargs; ++k) {
+			for (int k = 0; k < subargs; ++k) {
 				const SpellType *spell;
 
 				lua_rawgeti(l, -1, k + 1);
@@ -996,13 +969,13 @@ static int CclDefineUnitType(lua_State *l)
 				type->AutoCastActive = new char[SpellTypeTable.size()];
 				memset(type->AutoCastActive, 0, SpellTypeTable.size() * sizeof(char));
 			}
-			subargs = lua_objlen(l, -1);
+			const int subargs = lua_rawlen(l, -1);
 			if (subargs == 0) {
 				delete[] type->AutoCastActive;
 				type->AutoCastActive = NULL;
 
 			}
-			for (k = 0; k < subargs; ++k) {
+			for (int k = 0; k < subargs; ++k) {
 				const SpellType *spell;
 
 				lua_rawgeti(l, -1, k + 1);
@@ -1028,8 +1001,8 @@ static int CclDefineUnitType(lua_State *l)
 			if (type->BoolFlag.size() < UnitTypeVar.GetNumberBoolFlag()) {
 				type->BoolFlag.resize(UnitTypeVar.GetNumberBoolFlag());
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				value = LuaToString(l, -1);
 				lua_pop(l, 1);
@@ -1043,6 +1016,33 @@ static int CclDefineUnitType(lua_State *l)
 					continue;
 				}
 				LuaError(l, "Unsupported flag tag for can-target-flag: %s" _C_ value);
+			}
+		} else if (!strcmp(value, "PriorityTarget")) {
+			//
+			// Warning: ai-priority-target should only be used AFTER all bool flags
+			// have been defined.
+			//
+			if (!lua_istable(l, -1)) {
+				LuaError(l, "incorrect argument");
+			}
+			if (type->BoolFlag.size() < UnitTypeVar.GetNumberBoolFlag()) {
+				type->BoolFlag.resize(UnitTypeVar.GetNumberBoolFlag());
+			}
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
+				lua_rawgeti(l, -1, k + 1);
+				value = LuaToString(l, -1);
+				lua_pop(l, 1);
+				++k;
+				int index = UnitTypeVar.BoolFlagNameLookup[value];
+				if (index != -1) {
+					lua_rawgeti(l, -1, k + 1);
+					value = LuaToString(l, -1);
+					lua_pop(l, 1);
+					type->BoolFlag[index].AiPriorityTarget = Ccl2Condition(l, value);
+					continue;
+				}
+				LuaError(l, "Unsupported flag tag for ai-priority-target: %s" _C_ value);
 			}
 		} else if (!strcmp(value, "IsNotSelectable")) {
 			type->IsNotSelectable = LuaToBoolean(l, -1);
@@ -1062,8 +1062,8 @@ static int CclDefineUnitType(lua_State *l)
 			if (!lua_istable(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, -1);
-			for (k = 0; k < subargs; ++k) {
+			const int subargs = lua_rawlen(l, -1);
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
 				value = LuaToString(l, -1);
 				lua_pop(l, 1);
@@ -1090,22 +1090,13 @@ static int CclDefineUnitType(lua_State *l)
 					type->Sound.Repair.Name = LuaToString(l, -1);
 					lua_pop(l, 1);
 				} else if (!strcmp(value, "harvest")) {
-					int res;
-
 					lua_rawgeti(l, -1, k + 1);
 					const std::string name = LuaToString(l, -1);
 					lua_pop(l, 1);
 					++k;
-					for (res = 0; res < MaxCosts; ++res) {
-						if (name == DefaultResourceNames[res]) {
-							break;
-						}
-					}
-					if (res == MaxCosts) {
-						LuaError(l, "Resource not found: %s" _C_ value);
-					}
+					const int resId = GetResourceIdByName(l, value);
 					lua_rawgeti(l, -1, k + 1);
-					type->Sound.Harvest[res].Name = LuaToString(l, -1);
+					type->Sound.Harvest[resId].Name = LuaToString(l, -1);
 					lua_pop(l, 1);
 				} else if (!strcmp(value, "help")) {
 					lua_rawgeti(l, -1, k + 1);
@@ -1125,9 +1116,7 @@ static int CclDefineUnitType(lua_State *l)
 					}
 					if (death == ANIMATIONS_DEATHTYPES) {
 						type->Sound.Dead[ANIMATIONS_DEATHTYPES].Name = name;
-					}
-					else
-					{
+					} else {
 						lua_rawgeti(l, -1, k + 1);
 						type->Sound.Dead[death].Name = LuaToString(l, -1);
 						lua_pop(l, 1);
@@ -1140,13 +1129,13 @@ static int CclDefineUnitType(lua_State *l)
 			int index = UnitTypeVar.VariableNameLookup[value];
 			if (index != -1) { // valid index
 				if (lua_isboolean(l, -1)) {
-					type->Variable[index].Enable = LuaToBoolean(l, -1);
+					type->DefaultStat.Variables[index].Enable = LuaToBoolean(l, -1);
 				} else if (lua_istable(l, -1)) {
-					DefineVariableField(l, type->Variable + index, -1);
+					DefineVariableField(l, type->DefaultStat.Variables + index, -1);
 				} else if (lua_isnumber(l, -1)) {
-					type->Variable[index].Enable = 1;
-					type->Variable[index].Value = LuaToNumber(l, -1);
-					type->Variable[index].Max = LuaToNumber(l, -1);
+					type->DefaultStat.Variables[index].Enable = 1;
+					type->DefaultStat.Variables[index].Value = LuaToNumber(l, -1);
+					type->DefaultStat.Variables[index].Max = LuaToNumber(l, -1);
 				} else { // Error
 					LuaError(l, "incorrect argument for the variable in unittype");
 				}
@@ -1179,7 +1168,7 @@ static int CclDefineUnitType(lua_State *l)
 	if (type->MouseAction == MouseActionAttack && !type->CanAttack) {
 		LuaError(l, "Unit-type `%s': right-attack is set, but can-attack is not\n" _C_ type->Name.c_str());
 	}
-
+	UpdateDefaultBoolFlags(*type);
 	return 0;
 }
 
@@ -1190,67 +1179,61 @@ static int CclDefineUnitType(lua_State *l)
 */
 static int CclDefineUnitStats(lua_State *l)
 {
-	const char *value;
-	CUnitType *type;
-	CUnitStats *stats;
-	int i;
-	int args;
-	int j;
+	const int args = lua_gettop(l);
+	int j = 0;
 
-	args = lua_gettop(l);
-	j = 0;
-
-	type = UnitTypeByIdent(LuaToString(l, j + 1));
+	CUnitType *type = UnitTypeByIdent(LuaToString(l, j + 1));
 	Assert(type);
 	++j;
 
-	i = LuaToNumber(l, j + 1);
-	Assert(i < PlayerMax);
+	int playerId = LuaToNumber(l, j + 1);
+	Assert(playerId < PlayerMax);
 	++j;
 
-	stats = &type->Stats[i];
+	CUnitStats *stats = &type->Stats[playerId];
 	if (!stats->Variables) {
 		stats->Variables = new CVariable[UnitTypeVar.GetNumberVariable()];
 	}
 
-	//
 	// Parse the list: (still everything could be changed!)
-	//
 	for (; j < args; ++j) {
-
-		value = LuaToString(l, j + 1);
+		const char *value = LuaToString(l, j + 1);
 		++j;
 
 		if (!strcmp(value, "costs")) {
-			int subargs;
-			int k;
-
 			if (!lua_istable(l, j + 1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, j + 1);
-			for (k = 0; k < subargs; ++k) {
+			const int subargs = lua_rawlen(l, j + 1);
 
+			for (int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, j + 1, k + 1);
 				value = LuaToString(l, -1);
 				lua_pop(l, 1);
 				++k;
+				const int resId = GetResourceIdByName(l, value);
+				lua_rawgeti(l, j + 1, k + 1);
+				stats->Costs[resId] = LuaToNumber(l, -1);
+				lua_pop(l, 1);
+			}
+		} else if (!strcmp(value, "storing")) {
+			if (!lua_istable(l, j + 1)) {
+				LuaError(l, "incorrect argument");
+			}
+			const int subargs = lua_rawlen(l, j + 1);
 
-				for (i = 0; i < MaxCosts; ++i) {
-					if (!strcmp(value, DefaultResourceNames[i].c_str())) {
-						lua_rawgeti(l, j + 1, k + 1);
-						stats->Costs[i] = LuaToNumber(l, -1);
-						lua_pop(l, 1);
-						break;
-					}
-				}
-				if (i == MaxCosts) {
-				   // This leaves half initialized stats
-				   LuaError(l, "Unsupported tag: %s" _C_ value);
-				}
+			for (int k = 0; k < subargs; ++k) {
+				lua_rawgeti(l, j + 1, k + 1);
+				value = LuaToString(l, -1);
+				lua_pop(l, 1);
+				++k;
+				const int resId = GetResourceIdByName(l, value);
+				lua_rawgeti(l, j + 1, k + 1);
+				stats->Storing[resId] = LuaToNumber(l, -1);
+				lua_pop(l, 1);
 			}
 		} else {
-			i = UnitTypeVar.VariableNameLookup[value];// User variables
+			int i = UnitTypeVar.VariableNameLookup[value];// User variables
 			if (i != -1) { // valid index
 				if (lua_istable(l, j + 1)) {
 					DefineVariableField(l, stats->Variables + i, j + 1);
@@ -1263,10 +1246,8 @@ static int CclDefineUnitStats(lua_State *l)
 				}
 				continue;
 			}
-
-
-		   // This leaves a half initialized unit
-		   LuaError(l, "Unsupported tag: %s" _C_ value);
+			// This leaves a half initialized unit
+			LuaError(l, "Unsupported tag: %s" _C_ value);
 		}
 	}
 	return 0;
@@ -1281,15 +1262,12 @@ static int CclDefineUnitStats(lua_State *l)
 */
 CUnitType *CclGetUnitType(lua_State *l)
 {
-	const char *str;
-
 	// Be kind allow also strings or symbols
 	if (lua_isstring(l, -1)) {
-		str = LuaToString(l, -1);
+		const char *str = LuaToString(l, -1);
 		return UnitTypeByIdent(str);
 	} else if (lua_isuserdata(l, -1)) {
-		LuaUserData *data;
-		data = (LuaUserData *)lua_touserdata(l, -1);
+		LuaUserData *data = (LuaUserData *)lua_touserdata(l, -1);
 		if (data->Type == LuaUnitType) {
 			return (CUnitType *)data->Data;
 		}
@@ -1307,15 +1285,11 @@ CUnitType *CclGetUnitType(lua_State *l)
 */
 static int CclUnitType(lua_State *l)
 {
-	const char *str;
-	CUnitType *type;
-	LuaUserData *data;
-
 	LuaCheckArgs(l, 1);
 
-	str = LuaToString(l, 1);
-	type = UnitTypeByIdent(str);
-	data = (LuaUserData *)lua_newuserdata(l, sizeof(LuaUserData));
+	const char *str = LuaToString(l, 1);
+	CUnitType *type = UnitTypeByIdent(str);
+	LuaUserData *data = (LuaUserData *)lua_newuserdata(l, sizeof(LuaUserData));
 	data->Type = LuaUnitType;
 	data->Data = type;
 	return 1;
@@ -1352,11 +1326,9 @@ static int CclUnitTypeArray(lua_State *l)
 */
 static int CclGetUnitTypeIdent(lua_State *l)
 {
-	const CUnitType *type;
-
 	LuaCheckArgs(l, 1);
 
-	type = CclGetUnitType(l);
+	const CUnitType *type = CclGetUnitType(l);
 	if (type) {
 		lua_pushstring(l, type->Ident.c_str());
 	} else {
@@ -1374,11 +1346,9 @@ static int CclGetUnitTypeIdent(lua_State *l)
 */
 static int CclGetUnitTypeName(lua_State *l)
 {
-	const CUnitType *type;
-
 	LuaCheckArgs(l, 1);
 
-	type = CclGetUnitType(l);
+	const CUnitType *type = CclGetUnitType(l);
 	lua_pushstring(l, type->Name.c_str());
 	return 1;
 }
@@ -1392,12 +1362,10 @@ static int CclGetUnitTypeName(lua_State *l)
 */
 static int CclSetUnitTypeName(lua_State *l)
 {
-	CUnitType *type;
-
 	LuaCheckArgs(l, 2);
 
 	lua_pushvalue(l, 1);
-	type = CclGetUnitType(l);
+	CUnitType *type = CclGetUnitType(l);
 	lua_pop(l, 1);
 	type->Name = LuaToString(l, 2);
 
@@ -1406,495 +1374,6 @@ static int CclSetUnitTypeName(lua_State *l)
 }
 
 // ----------------------------------------------------------------------------
-
-/**
-**  Add a label
-*/
-static void AddLabel(lua_State *, CAnimation *anim, const std::string &name)
-{
-	LabelsStruct label;
-	label.Anim = anim;
-	label.Name = name;
-	Labels.push_back(label);
-}
-
-/**
-**  Find a label
-*/
-static CAnimation *FindLabel(lua_State *l, const std::string &name)
-{
-	for (int i = 0; i < (int)Labels.size(); ++i) {
-		if (Labels[i].Name == name) {
-			return Labels[i].Anim;
-		}
-	}
-	LuaError(l, "Label not found: %s" _C_ name.c_str());
-	return NULL;
-}
-
-/**
-**  Find a label later
-*/
-static void FindLabelLater(lua_State *, CAnimation **anim, const std::string &name)
-{
-	LabelsLaterStruct label;
-	label.Anim = anim;
-	label.Name = name;
-	LabelsLater.push_back(label);
-}
-
-/**
-**  Fix labels
-*/
-static void FixLabels(lua_State *l)
-{
-	for (int i = 0; i < (int)LabelsLater.size(); ++i) {
-		*LabelsLater[i].Anim = FindLabel(l, LabelsLater[i].Name);
-	}
-}
-
-/**
-**  Parse an animation frame
-*/
-static void ParseAnimationFrame(lua_State *l, const char *str,
-	CAnimation *anim)
-{
-	std::string op1(str);
-	std::string all2;
-	char* op2;
-	int index;
-	char *next;
-
-	index = op1.find(' ');
-
-	if (index != -1) {
-		all2 = op1.substr(index + 1);
-		op1 = op1.substr(0, index);
-	}
-	op2 = (char *) all2.c_str();
-	if (op2) {
-		while (*op2 == ' ') {
-			*op2++ = '\0';
-		}
-	}
-	if (op1 == "frame") {
-		anim->Type = AnimationFrame;
-		anim->D.Frame.Frame = new_strdup(op2);
-	} else if (op1 == "exact-frame") {
-		anim->Type = AnimationExactFrame;
-		anim->D.Frame.Frame = new_strdup(op2);
-	} else if (op1 == "wait") {
-		anim->Type = AnimationWait;
-		anim->D.Wait.Wait = new_strdup(op2);
-	} else if (op1 == "random-wait") {
-		anim->Type = AnimationRandomWait;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.RandomWait.MinWait = new_strdup(op2);
-		op2 = next;
-		while (*op2 == ' ') {
-			++op2;
-		}
-		anim->D.RandomWait.MaxWait = new_strdup(op2);
-	} else if (op1 == "sound") {
-		anim->Type = AnimationSound;
-		anim->D.Sound.Name = new_strdup(op2);
-	} else if (op1 == "random-sound") {
-		int count;
-
-		anim->Type = AnimationRandomSound;
-		count = 0;
-		while (op2 && *op2) {
-			next = strchr(op2, ' ');
-			if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-			++count;
-			anim->D.RandomSound.Name = (const char**)
-				realloc(anim->D.RandomSound.Name, count * sizeof(const char *));
-			anim->D.RandomSound.Name[count - 1] = new_strdup(op2);
-			op2 = next;
-		}
-		anim->D.RandomSound.NumSounds = count;
-		anim->D.RandomSound.Sound = new CSound *[count];
-	} else if (op1 == "attack") {
-		anim->Type = AnimationAttack;
-	} else if (op1 == "spawn-missile") {
-		anim->Type = AnimationSpawnMissile;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SpawnMissile.Missile = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SpawnMissile.StartX = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			anim->D.SpawnMissile.StartY = new_strdup(op2);
-			}
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-				anim->D.SpawnMissile.DestX = new_strdup(op2);
-			}
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-				anim->D.SpawnMissile.DestY = new_strdup(op2);
-			}
-		op2 = next;
-		if (next) {
-			while (*op2 == ' ') {
-				++op2;
-			}
-			anim->D.SpawnMissile.Flags = new_strdup(op2);
-		}
-	} else if (op1 == "spawn-unit") {
-		anim->Type = AnimationSpawnUnit;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SpawnUnit.Unit = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SpawnUnit.OffX = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SpawnUnit.OffY = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SpawnUnit.Range = new_strdup(op2);
-		op2 = next;
-		while (*op2 == ' ') {
-			++op2;
-		}
-		anim->D.SpawnUnit.Player = new_strdup(op2);
-	} else if (op1 == "if-var") {
-		anim->Type = AnimationIfVar;		
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.IfVar.LeftVar = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.IfVar.RightVar = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		if (!strcmp(op2,">=")) {
-			anim->D.IfVar.Type = 1;
-		} else if (!strcmp(op2,">")) {
-			anim->D.IfVar.Type = 2;
-		} else if (!strcmp(op2,"<=")) {
-			anim->D.IfVar.Type = 3;
-		} else if (!strcmp(op2,"<")) {
-			anim->D.IfVar.Type = 4;
-		} else if (!strcmp(op2,"==")) {
-			anim->D.IfVar.Type = 5;
-		} else if (!strcmp(op2,"!=")) {
-			anim->D.IfVar.Type = 6;
-		} else {
-			anim->D.IfVar.Type = atoi(op2);
-		} 
-		op2 = next;
-		while (*op2 == ' ') {
-			++op2;
-		}
-		FindLabelLater(l, &anim->D.IfVar.Goto, op2);
-	} else if (op1 == "set-var") {
-		anim->Type = AnimationSetVar;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SetVar.Var = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SetVar.Mod = atoi(op2);
-		op2 = next;
-		while (*op2 == ' ') {
-			++op2;
-		}
-		anim->D.SetVar.Value = new_strdup(op2);
-	} else if (op1 == "set-player-var") {
-		anim->Type = AnimationSetPlayerVar;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SetPlayerVar.Player = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SetPlayerVar.Var = new_strdup(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SetPlayerVar.Mod = atoi(op2);
-		op2 = next;
-		next = strchr(op2, ' ');
-		if (next) {
-				while (*next == ' ') {
-					*next++ = '\0';
-				}
-			}
-		anim->D.SetPlayerVar.Value = new_strdup(op2);
-		op2 = next;
-		while (*op2 == ' ') {
-			++op2;
-		}
-		anim->D.SetPlayerVar.Arg = new_strdup(op2);
-	} else if (op1 == "die") {
-		anim->Type = AnimationDie;
-		if (op2!='\0')
-			anim->D.Die.DeathType = new_strdup(op2);
-		else
-			anim->D.Die.DeathType = "\0";
-	} else if (op1 == "rotate") {
-		anim->Type = AnimationRotate;
-		anim->D.Rotate.Rotate = new_strdup(op2);
-	} else if (op1 == "random-rotate") {
-		anim->Type = AnimationRandomRotate;
-		anim->D.Rotate.Rotate = new_strdup(op2);
-	} else if (op1 == "move") {
-		anim->Type = AnimationMove;
-		anim->D.Move.Move = new_strdup(op2);
-	} else if (op1 == "unbreakable") {
-		anim->Type = AnimationUnbreakable;
-		if (!strcmp(op2, "begin")) {
-			anim->D.Unbreakable.Begin = 1;
-		} else if (!strcmp(op2, "end")) {
-			anim->D.Unbreakable.Begin = 0;
-		} else {
-			LuaError(l, "Unbreakable must be 'begin' or 'end'.  Found: %s" _C_ op2);
-		}
-	} else if (op1 == "label") {
-		anim->Type = AnimationLabel;
-		AddLabel(l, anim, op2);
-	} else if (op1 == "goto") {
-		anim->Type = AnimationGoto;
-		FindLabelLater(l, &anim->D.Goto.Goto, op2);
-	} else if (op1 == "random-goto") {
-		char *label;
-
-		anim->Type = AnimationRandomGoto;
-		label = strchr(op2, ' ');
-		if (!label) {
-			LuaError(l, "Missing random-goto label");
-		} else {
-			while (*label == ' ') {
-				*label++ = '\0';
-			}
-		}
-		anim->D.RandomGoto.Random = new_strdup(op2);
-		FindLabelLater(l, &anim->D.RandomGoto.Goto, label);
-	} else {
-		LuaError(l, "Unknown animation: %s" _C_ op1.c_str());
-	}
-}
-
-/**
-**  Parse an animation
-*/
-static CAnimation *ParseAnimation(lua_State *l, int idx)
-{
-	CAnimation *anim;
-	CAnimation *tail;
-	int args;
-	int j;
-	const char *str;
-
-	if (!lua_istable(l, idx)) {
-		LuaError(l, "incorrect argument");
-	}
-	args = lua_objlen(l, idx);
-	anim = new CAnimation[args + 1];
-	tail = NULL;
-	Labels.clear();
-	LabelsLater.clear();
-
-	for (j = 0; j < args; ++j) {
-		lua_rawgeti(l, idx, j + 1);
-		str = LuaToString(l, -1);
-		lua_pop(l, 1);
-		ParseAnimationFrame(l, str, &anim[j]);
-		if (!tail) {
-			tail = &anim[j];
-		} else {
-			tail->Next = &anim[j];
-			tail = &anim[j];
-		}
-	}
-	FixLabels(l);
-
-	return anim;
-}
-
-/**
-**  Add animation to AnimationsArray
-*/
-static void AddAnimationToArray(CAnimation *anim)
-{
-	if (!anim) {
-		return;
-	}
-
-	AnimationsArray[NumAnimations++] = anim;
-	Assert(NumAnimations != ANIMATIONS_MAXANIM);
-}
-
-/**
-**  Define a unit-type animation set.
-**
-**  @param l  Lua state.
-*/
-static int CclDefineAnimations(lua_State *l)
-{
-	const char *name;
-	const char *value;
-	CAnimations *anims;
-	int res = -1;
-	int death = ANIMATIONS_DEATHTYPES;
-
-	LuaCheckArgs(l, 2);
-	if (!lua_istable(l, 2)) {
-		LuaError(l, "incorrect argument");
-	}
-
-	name = LuaToString(l, 1);
-	anims = AnimationsByIdent(name);
-	if (!anims) {
-		anims = new CAnimations;
-		AnimationMap[name] = anims;
-	}
-
-	lua_pushnil(l);
-	while (lua_next(l, 2)) {
-		value = LuaToString(l, -2);
-
-		if (!strcmp(value, "Start")) {
-			anims->Start = ParseAnimation(l, -1);
-		} else if (!strncmp(value, "Still", 5)) {
-			anims->Still = ParseAnimation(l, -1);
-		} else if (!strncmp(value, "Death", 5)) {
-			if (strlen(value)>5)
-			{
-				death = ExtraDeathIndex(value + 6);
-				if (death==ANIMATIONS_DEATHTYPES)
-					anims->Death[ANIMATIONS_DEATHTYPES] = ParseAnimation(l, -1);
-				else
-					anims->Death[death] = ParseAnimation(l, -1);
-			}
-			else
-				anims->Death[ANIMATIONS_DEATHTYPES] = ParseAnimation(l, -1);
-		} else if (!strcmp(value, "Attack")) {
-			anims->Attack = ParseAnimation(l, -1);
-		} else if (!strcmp(value, "SpellCast")) {
-			anims->SpellCast = ParseAnimation(l, -1);
-		} else if (!strcmp(value, "Move")) {
-			anims->Move = ParseAnimation(l, -1);
-		} else if (!strcmp(value, "Repair")) {
-			anims->Repair = ParseAnimation(l, -1);
-		} else if (!strcmp(value, "Train")) {
-			anims->Train = ParseAnimation(l, -1);
-		} else if (!strcmp(value, "Research")) {
-			anims->Research = ParseAnimation(l, -1);
-		} else if (!strcmp(value, "Upgrade")) {
-			anims->Upgrade = ParseAnimation(l, -1);
-		} else if (!strcmp(value, "Build")) {
-			anims->Build = ParseAnimation(l, -1);
-		} else if (!strncmp(value, "Harvest_", 8)) {
-			res = ResourceIndex(l, value + 8);
-			anims->Harvest[res] = ParseAnimation(l, -1);
-		} else {
-			LuaError(l, "Unsupported animation: %s" _C_ value);
-		}
-		lua_pop(l, 1);
-	}
-	// Must add to array in a fixed order for save games
-	AddAnimationToArray(anims->Start);
-	AddAnimationToArray(anims->Still);
-	AddAnimationToArray(anims->Death[death]);
-	AddAnimationToArray(anims->Attack);
-	AddAnimationToArray(anims->SpellCast);
-	AddAnimationToArray(anims->Move);
-	AddAnimationToArray(anims->Repair);
-	AddAnimationToArray(anims->Train);
-	if(res != -1)
-		AddAnimationToArray(anims->Harvest[res]);
-	return 0;
-}
 
 /**
 **  Define the field of the UserDefined variables.
@@ -1912,9 +1391,8 @@ void DefineVariableField(lua_State *l, CVariable *var, int lua_index)
 	}
 	lua_pushnil(l);
 	while (lua_next(l, lua_index)) {
-		const char *key;
+		const char *key = LuaToString(l, -2);
 
-		key = LuaToString(l, -2);
 		if (!strcmp(key, "Value")) {
 			var->Value = LuaToNumber(l, -1);
 		} else if (!strcmp(key, "Max")) {
@@ -1937,18 +1415,14 @@ void DefineVariableField(lua_State *l, CVariable *var, int lua_index)
 */
 static int CclDefineVariables(lua_State *l)
 {
-	const char *str;
-	int index;
-	int j;
-	int args;
 	int old = UnitTypeVar.GetNumberVariable();
 
-	args = lua_gettop(l);
-	for (j = 0; j < args; ++j) {
-		str = LuaToString(l, j + 1);
+	const int args = lua_gettop(l);
+	for (int j = 0; j < args; ++j) {
+		const char *str = LuaToString(l, j + 1);
 
-		index = UnitTypeVar.VariableNameLookup.AddKey(str);
-		if(index == old) {
+		const int index = UnitTypeVar.VariableNameLookup.AddKey(str);
+		if (index == old) {
 			old++;
 			UnitTypeVar.Variable.resize(old);
 		} else {
@@ -1970,15 +1444,11 @@ static int CclDefineVariables(lua_State *l)
 */
 static int CclDefineBoolFlags(lua_State *l)
 {
-	const char *str;    // Name of the bool flags to define.
-	int args;           // number of arguments.
-	unsigned int old;   // Old number of defined bool flags
-
-	old = UnitTypeVar.GetNumberBoolFlag();
-	args = lua_gettop(l);
+	const unsigned int old = UnitTypeVar.GetNumberBoolFlag();
+	const int args = lua_gettop(l);
 	for (int j = 0; j < args; ++j) {
-		str = LuaToString(l, j + 1);
-		//int index =
+		const char *str = LuaToString(l, j + 1);
+
 		UnitTypeVar.BoolFlagNameLookup.AddKey(str);
 
 	}
@@ -2002,10 +1472,6 @@ static int CclDefineBoolFlags(lua_State *l)
 */
 static int CclDefineDecorations(lua_State *l)
 {
-	int i;                  // iterator for arguments.
-	int nargs;              // number of arguments.
-	const char *key;        // key of lua table.
-	CDecoVar *decovar;      // variable for transit.
 	struct {
 		int Index;
 		int OffsetX;
@@ -2024,14 +1490,14 @@ static int CclDefineDecorations(lua_State *l)
 		bool ShowOpponent;
 	} tmp;
 
-	nargs = lua_gettop(l);
-	for (i = 0; i < nargs; i++) {
+	const int nargs = lua_gettop(l);
+	for (int i = 0; i < nargs; i++) {
 		Assert(lua_istable(l, i + 1));
-		decovar = NULL;
+		CDecoVar *decovar = NULL;
 		memset(&tmp, 0, sizeof(tmp));
 		lua_pushnil(l);
 		while (lua_next(l, i + 1)) {
-			key = LuaToString(l, -2);
+			const char *key = LuaToString(l, -2);
 			if (!strcmp(key, "Index")) {
 				const char *const value = LuaToString(l, -1);
 				tmp.Index = UnitTypeVar.VariableNameLookup[value];// User variables
@@ -2118,15 +1584,14 @@ static int CclDefineDecorations(lua_State *l)
 
 					decovartext->Font = CFont::Get(LuaToString(l, -1));
 					lua_pop(l, 1);
-// FIXME : More arguments ? color...
+					// FIXME : More arguments ? color...
 					decovar = decovartext;
 				} else if (!strcmp(key, "sprite")) {
 					CDecoVarSpriteBar *decovarspritebar = new CDecoVarSpriteBar;
 					lua_rawgeti(l, -1, 1);
 					decovarspritebar->NSprite = GetSpriteIndex(LuaToString(l, -1));
 					if (decovarspritebar->NSprite == -1) {
-						LuaError(l, "invalid sprite-name '%s' for Method in DefineDecorations" _C_
-							LuaToString(l, -1));
+						LuaError(l, "invalid sprite-name '%s' for Method in DefineDecorations" _C_ LuaToString(l, -1));
 					}
 					lua_pop(l, 1);
 					// FIXME : More arguments ?
@@ -2177,10 +1642,9 @@ static int CclDefineDecorations(lua_State *l)
 */
 void UpdateUnitVariables(CUnit &unit)
 {
-	int i;
-	CUnitType *type = unit.Type;
+	const CUnitType *type = unit.Type;
 
-	for (i = 0; i < NVARALREADYDEFINED; i++) { // default values
+	for (int i = 0; i < NVARALREADYDEFINED; i++) { // default values
 		if (i == ARMOR_INDEX || i == PIERCINGDAMAGE_INDEX || i == BASICDAMAGE_INDEX
 			|| i == MANA_INDEX || i == KILL_INDEX || i == XP_INDEX
 			|| i == BLOODLUST_INDEX || i == HASTE_INDEX || i == SLOW_INDEX
@@ -2223,11 +1687,11 @@ void UpdateUnitVariables(CUnit &unit)
 	unit.Variable[DEMAND_INDEX].Enable = unit.Type->Demand > 0;
 
 	// SightRange
-	unit.Variable[SIGHTRANGE_INDEX].Value = type->Variable[SIGHTRANGE_INDEX].Value;
+	unit.Variable[SIGHTRANGE_INDEX].Value = type->DefaultStat.Variables[SIGHTRANGE_INDEX].Value;
 	unit.Variable[SIGHTRANGE_INDEX].Max = unit.Stats->Variables[SIGHTRANGE_INDEX].Max;
 
 	// AttackRange
-	unit.Variable[ATTACKRANGE_INDEX].Value = type->Variable[ATTACKRANGE_INDEX].Max;
+	unit.Variable[ATTACKRANGE_INDEX].Value = type->DefaultStat.Variables[ATTACKRANGE_INDEX].Max;
 	unit.Variable[ATTACKRANGE_INDEX].Max = unit.Stats->Variables[ATTACKRANGE_INDEX].Max;
 
 	// Position
@@ -2248,52 +1712,20 @@ void UpdateUnitVariables(CUnit &unit)
 	unit.Variable[SLOT_INDEX].Value = unit.Slot;
 	unit.Variable[SLOT_INDEX].Max = UnitSlotFree - 1;
 
-	for (i = 0; i < NVARALREADYDEFINED; i++) { // default values
+	for (int i = 0; i < NVARALREADYDEFINED; i++) { // default values
 		unit.Variable[i].Enable &= unit.Variable[i].Max > 0;
 #ifdef DEBUG
 		if (unit.Variable[i].Value > unit.Variable[i].Max) {
 			DebugPrint("Value out of range: '%s'(%d), for variable '%s',"
-						" value = %d, max = %d\n"
-						_C_ type->Ident.c_str() _C_ unit.Slot _C_ UnitTypeVar.VariableNameLookup[i]
-						_C_ unit.Variable[i].Value _C_ unit.Variable[i].Max);
+					   " value = %d, max = %d\n"
+					   _C_ type->Ident.c_str() _C_ unit.Slot _C_ UnitTypeVar.VariableNameLookup[i]
+					   _C_ unit.Variable[i].Value _C_ unit.Variable[i].Max);
 			unit.Variable[i].Value = unit.Variable[i].Max;
 		} else
 #endif
-		Assert(unit.Variable[i].Value <= unit.Variable[i].Max);
+			Assert(unit.Variable[i].Value <= unit.Variable[i].Max);
 	}
-
-	// BoolFlag
-	type->BoolFlag[COWARD_INDEX].value                = type->Coward;
-	type->BoolFlag[BUILDING_INDEX].value              = type->Building;
-	type->BoolFlag[FLIP_INDEX].value                  = type->Flip;
-	type->BoolFlag[REVEALER_INDEX].value              = type->Revealer;
-	type->BoolFlag[LANDUNIT_INDEX].value              = type->LandUnit;
-	type->BoolFlag[AIRUNIT_INDEX].value               = type->AirUnit;
-	type->BoolFlag[SEAUNIT_INDEX].value               = type->SeaUnit;
-	type->BoolFlag[EXPLODEWHENKILLED_INDEX].value     = type->ExplodeWhenKilled;
-	type->BoolFlag[VISIBLEUNDERFOG_INDEX].value       = type->VisibleUnderFog;
-	type->BoolFlag[PERMANENTCLOAK_INDEX].value        = type->PermanentCloak;
-	type->BoolFlag[DETECTCLOAK_INDEX].value           = type->DetectCloak;
-	type->BoolFlag[ATTACKFROMTRANSPORTER_INDEX].value = type->AttackFromTransporter;
-	type->BoolFlag[VANISHES_INDEX].value              = type->Vanishes;
-	type->BoolFlag[GROUNDATTACK_INDEX].value          = type->GroundAttack;
-	type->BoolFlag[SHOREBUILDING_INDEX].value         = type->ShoreBuilding;
-	type->BoolFlag[CANATTACK_INDEX].value             = type->CanAttack;
-	type->BoolFlag[BUILDEROUTSIDE_INDEX].value        = type->BuilderOutside;
-	type->BoolFlag[BUILDERLOST_INDEX].value           = type->BuilderLost;
-	type->BoolFlag[CANHARVEST_INDEX].value            = type->CanHarvest;
-	type->BoolFlag[HARVESTER_INDEX].value             = type->Harvester;
-	type->BoolFlag[SELECTABLEBYRECTANGLE_INDEX].value = type->SelectableByRectangle;
-	type->BoolFlag[ISNOTSELECTABLE_INDEX].value       = type->IsNotSelectable;
-	type->BoolFlag[DECORATION_INDEX].value            = type->Decoration;
-	type->BoolFlag[INDESTRUCTIBLE_INDEX].value        = type->Indestructible;
-	type->BoolFlag[TELEPORTER_INDEX].value            = type->Teleporter;
-	type->BoolFlag[SHIELDPIERCE_INDEX].value          = type->ShieldPiercing;
-	type->BoolFlag[SAVECARGO_INDEX].value             = type->SaveCargo;
-	type->BoolFlag[NONSOLID_INDEX].value              = type->NonSolid;
-	type->BoolFlag[WALL_INDEX].value                  = type->Wall;
 }
-
 
 /**
 **  Register CCL features for unit-type.
@@ -2314,8 +1746,6 @@ void UnitTypeCclRegister()
 	lua_register(Lua, "GetUnitTypeIdent", CclGetUnitTypeIdent);
 	lua_register(Lua, "GetUnitTypeName", CclGetUnitTypeName);
 	lua_register(Lua, "SetUnitTypeName", CclSetUnitTypeName);
-
-	lua_register(Lua, "DefineAnimations", CclDefineAnimations);
 }
 
 //@}

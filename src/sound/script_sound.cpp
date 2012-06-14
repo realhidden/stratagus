@@ -134,7 +134,7 @@ static int CclMakeSound(lua_State *l)
 		id = MakeSound(c_name, &c_file, 1);
 	} else if (lua_istable(l, 2)) {
 		// several files
-		args = lua_objlen(l, 2);
+		args = lua_rawlen(l, 2);
 		c_files = new char *[args];
 		for (j = 0; j < args; ++j) {
 			lua_rawgeti(l, 2, j + 1);
@@ -231,33 +231,30 @@ static int CclPlaySound(lua_State *l)
 static int CclDefineGameSounds(lua_State *l)
 {
 	//FIXME: should allow to define ALL the game sounds
-	const char *value;
-	unsigned int i, k;
-	int args;
-	int j;
-	LuaUserData *data;
+	unsigned int i;
 
-	args = lua_gettop(l);
-	data = NULL;
-	for (j = 0; j < args; ++j) {
-		value = LuaToString(l, j + 1);
+	const int args = lua_gettop(l);
+	for (int j = 0; j < args; ++j) {
+		const char *value = LuaToString(l, j + 1);
 		++j;
+
+		LuaUserData *data = NULL;
 
 		// let's handle now the different cases
 		if (!strcmp(value, "click")) {
-			if (!lua_isuserdata(l, j + 1) ||
-					(data = (LuaUserData *)lua_touserdata(l, j + 1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, j + 1)
+				|| (data = (LuaUserData *)lua_touserdata(l, j + 1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			GameSounds.Click.Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "transport-docking")) {
-			if (!lua_isuserdata(l, j + 1) ||
-					(data = (LuaUserData *)lua_touserdata(l, j + 1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, j + 1)
+				|| (data = (LuaUserData *)lua_touserdata(l, j + 1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			GameSounds.Docking.Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "placement-error")) {
-			if (!lua_istable(l, j + 1) || lua_objlen(l, j + 1) != 2) {
+			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
@@ -272,14 +269,14 @@ static int CclDefineGameSounds(lua_State *l)
 				LuaError(l, "Unknown race: %s" _C_ value);
 			}
 			lua_rawgeti(l, j + 1, 2);
-			if (!lua_isuserdata(l, -1) ||
-					(data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, -1)
+				|| (data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			lua_pop(l, 1);
 			GameSounds.PlacementError[i].Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "placement-success")) {
-			if (!lua_istable(l, j + 1) || lua_objlen(l, j + 1) != 2) {
+			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
@@ -294,14 +291,14 @@ static int CclDefineGameSounds(lua_State *l)
 				LuaError(l, "Unknown race: %s" _C_ value);
 			}
 			lua_rawgeti(l, j + 1, 2);
-			if (!lua_isuserdata(l, -1) ||
-					(data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, -1)
+				|| (data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			lua_pop(l, 1);
 			GameSounds.PlacementSuccess[i].Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "work-complete")) {
-			if (!lua_istable(l, j + 1) || lua_objlen(l, j + 1) != 2) {
+			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
@@ -316,14 +313,14 @@ static int CclDefineGameSounds(lua_State *l)
 				LuaError(l, "Unknown race: %s" _C_ value);
 			}
 			lua_rawgeti(l, j + 1, 2);
-			if (!lua_isuserdata(l, -1) ||
-					(data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, -1)
+				|| (data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			lua_pop(l, 1);
 			GameSounds.WorkComplete[i].Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "research-complete")) {
-			if (!lua_istable(l, j + 1) || lua_objlen(l, j + 1) != 2) {
+			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
@@ -338,26 +335,20 @@ static int CclDefineGameSounds(lua_State *l)
 				LuaError(l, "Unknown race: %s" _C_ value);
 			}
 			lua_rawgeti(l, j + 1, 2);
-			if (!lua_isuserdata(l, -1) ||
-					(data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, -1)
+				|| (data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			lua_pop(l, 1);
 			GameSounds.ResearchComplete[i].Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "not-enough-res")) {
-			if (!lua_istable(l, j + 1) || lua_objlen(l, j + 1) != 3) {
+			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 3) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
 			value = LuaToString(l, -1);
 			lua_pop(l, 1);
-			for (k = 0; k < MaxCosts; ++k) {
-				if (!strcmp(DefaultResourceNames[k].c_str(), value)) {
-					break;
-				}
-			}
-			if (j == MaxCosts)
-				LuaError(l, "Invalid resource \"%s\"" _C_ value);
+			const int resId = GetResourceIdByName(l, value);
 			lua_rawgeti(l, j + 1, 2);
 			value = LuaToString(l, -1);
 			lua_pop(l, 1);
@@ -370,14 +361,14 @@ static int CclDefineGameSounds(lua_State *l)
 				LuaError(l, "Unknown race: %s" _C_ value);
 			}
 			lua_rawgeti(l, j + 1, 3);
-			if (!lua_isuserdata(l, -1) ||
-					(data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, -1)
+				|| (data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			lua_pop(l, 1);
-			GameSounds.NotEnoughRes[i][k].Sound = (CSound *)data->Data;
-		}else if (!strcmp(value, "not-enough-food")) {
-			if (!lua_istable(l, j + 1) || lua_objlen(l, j + 1) != 2) {
+			GameSounds.NotEnoughRes[i][resId].Sound = (CSound *)data->Data;
+		} else if (!strcmp(value, "not-enough-food")) {
+			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
@@ -392,14 +383,14 @@ static int CclDefineGameSounds(lua_State *l)
 				LuaError(l, "Unknown race: %s" _C_ value);
 			}
 			lua_rawgeti(l, j + 1, 2);
-			if (!lua_isuserdata(l, -1) ||
-					(data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, -1)
+				|| (data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			lua_pop(l, 1);
 			GameSounds.NotEnoughFood[i].Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "rescue")) {
-			if (!lua_istable(l, j + 1) || lua_objlen(l, j + 1) != 2) {
+			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
@@ -414,14 +405,14 @@ static int CclDefineGameSounds(lua_State *l)
 				LuaError(l, "Unknown race: %s" _C_ value);
 			}
 			lua_rawgeti(l, j + 1, 2);
-			if (!lua_isuserdata(l, -1) ||
-					(data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, -1)
+				|| (data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			lua_pop(l, 1);
 			GameSounds.Rescue[i].Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "building-construction")) {
-			if (!lua_istable(l, j + 1) || lua_objlen(l, j + 1) != 2) {
+			if (!lua_istable(l, j + 1) || lua_rawlen(l, j + 1) != 2) {
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
@@ -436,15 +427,15 @@ static int CclDefineGameSounds(lua_State *l)
 				LuaError(l, "Unknown race: %s" _C_ value);
 			}
 			lua_rawgeti(l, j + 1, 2);
-			if (!lua_isuserdata(l, -1) ||
-					(data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, -1)
+				|| (data = (LuaUserData *)lua_touserdata(l, -1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			lua_pop(l, 1);
 			GameSounds.BuildingConstruction[i].Sound = (CSound *)data->Data;
 		} else if (!strcmp(value, "chat-message")) {
-			if (!lua_isuserdata(l, j + 1) ||
-					(data = (LuaUserData *)lua_touserdata(l, j + 1))->Type != LuaSoundType) {
+			if (!lua_isuserdata(l, j + 1)
+				|| (data = (LuaUserData *)lua_touserdata(l, j + 1))->Type != LuaSoundType) {
 				LuaError(l, "Sound id expected");
 			}
 			GameSounds.ChatMessage.Sound = (CSound *)data->Data;
@@ -479,23 +470,17 @@ static int CclSetGlobalSoundRange(lua_State *l)
 **
 **  @param l  Lua state.
 */
-static int CclSetSoundRange(lua_State *l) {
-	unsigned char theRange;
-	int tmp;
-	CSound *id;
+static int CclSetSoundRange(lua_State *l)
+{
 
 	LuaCheckArgs(l, 2);
 
-	tmp = LuaToNumber(l, 2);
-	if (tmp < 0) {
-		theRange = 0;
-	} else if (tmp > 255) {
-		theRange = 255;
-	} else {
-		theRange = (unsigned char)tmp;
-	}
+	int tmp = LuaToNumber(l, 2);
+	clamp(&tmp, 0, 255);
+	const unsigned char theRange = static_cast<unsigned char>(tmp);
+
 	lua_pushvalue(l, 1);
-	id = CclGetSound(l);
+	CSound *id = CclGetSound(l);
 	SetSoundRange(id, theRange);
 	return 1;
 }

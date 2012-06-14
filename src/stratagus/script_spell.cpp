@@ -70,7 +70,7 @@ static void CclSpellMissileLocation(lua_State *l, SpellActionMissileLocation *lo
 	if (!lua_istable(l, -1)) {
 		LuaError(l, "incorrect argument");
 	}
-	args = lua_objlen(l, -1);
+	args = lua_rawlen(l, -1);
 	j = 0;
 
 	for (j = 0; j < args; ++j) {
@@ -125,7 +125,7 @@ static SpellActionType *CclSpellAction(lua_State *l)
 	if (!lua_istable(l, -1)) {
 		LuaError(l, "incorrect argument");
 	}
-	args = lua_objlen(l, -1);
+	args = lua_rawlen(l, -1);
 	j = 0;
 
 	lua_rawgeti(l, -1, j + 1);
@@ -421,7 +421,7 @@ static SpellActionType *CclSpellAction(lua_State *l)
 				lua_pop(l, 1);
 				spellaction->NewForm = UnitTypeByIdent(value);
 				if (!spellaction->NewForm) {
-					spellaction->NewForm= 0;
+					spellaction->NewForm = 0;
 					DebugPrint("unit type \"%s\" not found for polymorph spell.\n" _C_ value);
 				}
 				// FIXME: temp polymorphs? hard to do.
@@ -522,6 +522,7 @@ static void CclSpellCondition(lua_State *l, ConditionInfo *condition)
 	condition->Variable = new ConditionInfoVariable[UnitTypeVar.GetNumberVariable()];
 	// Initialize min/max stuff to values with no effect.
 	for (i = 0; i < UnitTypeVar.GetNumberVariable(); i++) {
+		condition->Variable[i].Check = false;
 		condition->Variable[i].MinValue = -1;
 		condition->Variable[i].MaxValue = -1;
 		condition->Variable[i].MinMax = -1;
@@ -532,7 +533,7 @@ static void CclSpellCondition(lua_State *l, ConditionInfo *condition)
 	if (!lua_istable(l, -1)) {
 		LuaError(l, "incorrect argument");
 	}
-	args = lua_objlen(l, -1);
+	args = lua_rawlen(l, -1);
 	for (j = 0; j < args; ++j) {
 		lua_rawgeti(l, -1, j + 1);
 		value = LuaToString(l, -1);
@@ -566,6 +567,7 @@ static void CclSpellCondition(lua_State *l, ConditionInfo *condition)
 				}
 				for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
 					const char *const key = LuaToString(l, -2);
+					condition->Variable[index].Check = true;
 					if (!strcmp(key, "Enable")) {
 						condition->Variable[index].Enable = Ccl2Condition(l, LuaToString(l, -1));
 					} else if (!strcmp(key, "MinValue")) {
@@ -609,7 +611,7 @@ static void CclSpellAutocast(lua_State *l, AutoCastInfo *autocast)
 	if (!lua_istable(l, -1)) {
 		LuaError(l, "incorrect argument");
 	}
-	args = lua_objlen(l, -1);
+	args = lua_rawlen(l, -1);
 	for (j = 0; j < args; ++j) {
 		lua_rawgeti(l, -1, j + 1);
 		value = LuaToString(l, -1);
@@ -713,7 +715,7 @@ static int CclDefineSpell(lua_State *l)
 			if (!lua_istable(l, i + 1)) {
 				LuaError(l, "incorrect argument");
 			}
-			subargs = lua_objlen(l, i + 1);
+			subargs = lua_rawlen(l, i + 1);
 			for (k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, i + 1, k + 1);
 				spell->Action.push_back(CclSpellAction(l));
@@ -743,7 +745,7 @@ static int CclDefineSpell(lua_State *l)
 		} else if (!strcmp(value, "sound-when-cast")) {
 			//  Free the old name, get the new one
 			spell->SoundWhenCast.Name = LuaToString(l, i + 1);
-			spell->SoundWhenCast.Sound = SoundForName(spell->SoundWhenCast.Name);
+			spell->SoundWhenCast.MapSound();
 			//  Check for sound.
 			if (!spell->SoundWhenCast.Sound) {
 				spell->SoundWhenCast.Name.clear();

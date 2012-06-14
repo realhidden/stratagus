@@ -82,28 +82,28 @@ void DrawMenuButtonArea()
 	if (!IsNetworkGame()) {
 		if (UI.MenuButton.X != -1) {
 			DrawMenuButton(UI.MenuButton.Style,
-				(ButtonAreaUnderCursor == ButtonAreaMenu &&
-					ButtonUnderCursor == ButtonUnderMenu ? MI_FLAGS_ACTIVE : 0) |
-				(GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
-				UI.MenuButton.X, UI.MenuButton.Y,
-				UI.MenuButton.Text);
+						   (ButtonAreaUnderCursor == ButtonAreaMenu
+							&& ButtonUnderCursor == ButtonUnderMenu ? MI_FLAGS_ACTIVE : 0) |
+						   (GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
+						   UI.MenuButton.X, UI.MenuButton.Y,
+						   UI.MenuButton.Text);
 		}
 	} else {
 		if (UI.NetworkMenuButton.X != -1) {
 			DrawMenuButton(UI.NetworkMenuButton.Style,
-				(ButtonAreaUnderCursor == ButtonAreaMenu &&
-					ButtonUnderCursor == ButtonUnderNetworkMenu ? MI_FLAGS_ACTIVE : 0) |
-				(GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
-				UI.NetworkMenuButton.X, UI.NetworkMenuButton.Y,
-				UI.NetworkMenuButton.Text);
+						   (ButtonAreaUnderCursor == ButtonAreaMenu
+							&& ButtonUnderCursor == ButtonUnderNetworkMenu ? MI_FLAGS_ACTIVE : 0) |
+						   (GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
+						   UI.NetworkMenuButton.X, UI.NetworkMenuButton.Y,
+						   UI.NetworkMenuButton.Text);
 		}
 		if (UI.NetworkDiplomacyButton.X != -1) {
 			DrawMenuButton(UI.NetworkDiplomacyButton.Style,
-				(ButtonAreaUnderCursor == ButtonAreaMenu &&
-					ButtonUnderCursor == ButtonUnderNetworkDiplomacy ? MI_FLAGS_ACTIVE : 0) |
-				(GameDiplomacyButtonClicked ? MI_FLAGS_CLICKED : 0),
-				UI.NetworkDiplomacyButton.X, UI.NetworkDiplomacyButton.Y,
-				UI.NetworkDiplomacyButton.Text);
+						   (ButtonAreaUnderCursor == ButtonAreaMenu
+							&& ButtonUnderCursor == ButtonUnderNetworkDiplomacy ? MI_FLAGS_ACTIVE : 0) |
+						   (GameDiplomacyButtonClicked ? MI_FLAGS_CLICKED : 0),
+						   UI.NetworkDiplomacyButton.X, UI.NetworkDiplomacyButton.Y,
+						   UI.NetworkDiplomacyButton.Text);
 		}
 	}
 }
@@ -125,7 +125,7 @@ static void UiDrawLifeBar(const CUnit &unit, int x, int y)
 	// FIXME: add icon borders
 	y += unit.Type->Icon.Icon->G->Height;
 	Video.FillRectangleClip(ColorBlack, x, y,
-		unit.Type->Icon.Icon->G->Width, 7);
+							unit.Type->Icon.Icon->G->Width, 7);
 
 	if (unit.Variable[HP_INDEX].Value) {
 		Uint32 color;
@@ -158,8 +158,7 @@ static void UiDrawManaBar(const CUnit &unit, int x, int y)
 {
 	// FIXME: add icon borders
 	y += unit.Type->Icon.Icon->G->Height;
-	Video.FillRectangleClip(ColorBlack, x, y + 3,
-		unit.Type->Icon.Icon->G->Width, 4);
+	Video.FillRectangleClip(ColorBlack, x, y + 3, unit.Type->Icon.Icon->G->Width, 4);
 
 	if (unit.Stats->Variables[MANA_INDEX].Max) {
 		int f = (100 * unit.Variable[MANA_INDEX].Value) / unit.Variable[MANA_INDEX].Max;
@@ -182,10 +181,10 @@ static bool CanShowContent(const ConditionPanel *condition, const CUnit &unit)
 	if (!condition) {
 		return true;
 	}
-	if ((condition->ShowOnlySelected && !unit.Selected) ||
-			(unit.Player->Type == PlayerNeutral && condition->HideNeutral) ||
-			(ThisPlayer->IsEnemy(unit) && !condition->ShowOpponent) ||
-			(ThisPlayer->IsAllied(unit) && (unit.Player != ThisPlayer) && condition->HideAllied)) {
+	if ((condition->ShowOnlySelected && !unit.Selected)
+		|| (unit.Player->Type == PlayerNeutral && condition->HideNeutral)
+		|| (ThisPlayer->IsEnemy(unit) && !condition->ShowOpponent)
+		|| (ThisPlayer->IsAllied(unit) && (unit.Player != ThisPlayer) && condition->HideAllied)) {
 		return false;
 	}
 	if (condition->BoolFlags && !unit.Type->CheckUserBoolFlags(condition->BoolFlags)) {
@@ -234,7 +233,7 @@ UStrInt GetComponent(const CUnit &unit, int index, EnumVariable e, int t)
 			var = &unit.Variable[index];
 			break;
 		case 1: // Type:
-			var = &unit.Type->Variable[index];
+			var = &unit.Type->DefaultStat.Variables[index];
 			break;
 		case 2: // Stats:
 			var = &unit.Stats->Variables[index];
@@ -283,6 +282,48 @@ UStrInt GetComponent(const CUnit &unit, int index, EnumVariable e, int t)
 	return val;
 }
 
+UStrInt GetComponent(const CUnitType &type, int index, EnumVariable e)
+{
+	UStrInt val;
+	CVariable *var = &type.Stats[ThisPlayer->Index].Variables[index];
+
+	Assert((unsigned int) index < UnitTypeVar.GetNumberVariable());
+
+	switch (e) {
+		case VariableValue:
+			val.type = USTRINT_INT;
+			val.i = var->Value;
+			break;
+		case VariableMax:
+			val.type = USTRINT_INT;
+			val.i = var->Max;
+			break;
+		case VariableIncrease:
+			val.type = USTRINT_INT;
+			val.i = var->Increase;
+			break;
+		case VariableDiff:
+			val.type = USTRINT_INT;
+			val.i = var->Max - var->Value;
+			break;
+		case VariablePercent:
+			Assert(type.Stats[ThisPlayer->Index].Variables[index].Max != 0);
+			val.type = USTRINT_INT;
+			val.i = 100 * var->Value / var->Max;
+			break;
+		case VariableName:
+			if (index == GIVERESOURCE_INDEX) {
+				val.type = USTRINT_STR;
+				val.s = DefaultResourceNames[type.GivesResource].c_str();
+			} else {
+				val.type = USTRINT_STR;
+				val.s = UnitTypeVar.VariableNameLookup[index];
+			}
+			break;
+	}
+	return val;
+}
+
 /**
 **  Get unit from a unit depending of the relation.
 **
@@ -302,7 +343,7 @@ static const CUnit *GetUnitRef(const CUnit &unit, EnumUnit e)
 			return unit.Container;
 		case UnitRefWorker :
 			if (unit.CurrentAction() == UnitActionBuilt) {
-				COrder_Built &order = *static_cast<COrder_Built*>(unit.CurrentOrder());
+				COrder_Built &order = *static_cast<COrder_Built *>(unit.CurrentOrder());
 
 				return order.GetWorkerPtr();
 			} else {
@@ -371,14 +412,14 @@ void CContentTypeText::Draw(const CUnit &unit, CFont *defaultfont) const
 					Assert(0);
 			}
 		} else {
-			int value = unit.Type->Variable[this->Index].Value;
+			int value = unit.Type->DefaultStat.Variables[this->Index].Value;
 			int diff = unit.Stats->Variables[this->Index].Value - value;
 
 			if (!diff) {
 				label.Draw(x, y, value);
 			} else {
 				char buf[64];
-				snprintf(buf,sizeof(buf), diff > 0 ? "%d~<+%d~>" : "%d~<-%d~>", value, diff);
+				snprintf(buf, sizeof(buf), diff > 0 ? "%d~<+%d~>" : "%d~<-%d~>", value, diff);
 				label.Draw(x, y, buf);
 			}
 		}
@@ -409,9 +450,9 @@ void CContentTypeFormattedText::Draw(const CUnit &unit, CFont *defaultfont) cons
 	Assert((unsigned int) this->Index < UnitTypeVar.GetNumberVariable());
 	usi1 = GetComponent(unit, this->Index, this->Component, 0);
 	if (usi1.type == USTRINT_STR) {
-		snprintf(buf,sizeof(buf), this->Format.c_str(), usi1.s);
+		snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.s);
 	} else {
-		snprintf(buf,sizeof(buf), this->Format.c_str(), usi1.i);
+		snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.i);
 	}
 
 	if (this->Centered) {
@@ -445,15 +486,15 @@ void CContentTypeFormattedText2::Draw(const CUnit &unit, CFont *defaultfont) con
 	usi2 = GetComponent(unit, this->Index2, this->Component2, 0);
 	if (usi1.type == USTRINT_STR) {
 		if (usi2.type == USTRINT_STR) {
-			snprintf(buf,sizeof(buf), this->Format.c_str(), usi1.s, usi2.s);
+			snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.s, usi2.s);
 		} else {
-			snprintf(buf,sizeof(buf), this->Format.c_str(), usi1.s, usi2.i);
+			snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.s, usi2.i);
 		}
 	} else {
 		if (usi2.type == USTRINT_STR) {
-			snprintf(buf,sizeof(buf), this->Format.c_str(), usi1.i, usi2.s);
+			snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.i, usi2.s);
 		} else {
-			snprintf(buf,sizeof(buf), this->Format.c_str(), usi1.i, usi2.i);
+			snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.i, usi2.i);
 		}
 	}
 	if (this->Centered) {
@@ -471,7 +512,7 @@ void CContentTypeFormattedText2::Draw(const CUnit &unit, CFont *defaultfont) con
 */
 void CContentTypeIcon::Draw(const CUnit &unit, CFont *) const
 {
-	const CUnit* unitToDraw = GetUnitRef(unit, this->UnitRef);
+	const CUnit *unitToDraw = GetUnitRef(unit, this->UnitRef);
 
 	if (unitToDraw && unitToDraw->Type->Icon.Icon) {
 		unitToDraw->Type->Icon.Icon->DrawIcon(*unitToDraw->Player, this->PosX, this->PosY);
@@ -509,10 +550,10 @@ void CContentTypeLifeBar::Draw(const CUnit &unit, CFont *) const
 
 	// Border
 	Video.FillRectangleClip(ColorBlack, this->PosX - 1, this->PosY - 1,
-		this->Width + 2, this->Height + 2);
+							this->Width + 2, this->Height + 2);
 
 	Video.FillRectangleClip(color, this->PosX, this->PosY,
-		(f * this->Width) / 100, this->Height);
+							(f * this->Width) / 100, this->Height);
 }
 
 /**
@@ -541,43 +582,42 @@ void CContentTypeCompleteBar::Draw(const CUnit &unit, CFont *) const
 	Assert(h > 4);
 
 	//FIXME: ugly
-	switch (this->Color)
-		{
-			case 1:
-				color = ColorRed;
-				break;
-			case 2:
-				color = ColorYellow;
-				break;
-			case 3:
-				color = ColorGreen;
-				break;
-			case 4:
-				color = ColorGray;
-				break;
-			case 5:
-				color = ColorWhite;
-				break;
-			case 6:
-				color = ColorOrange;
-				break;
-			case 7:
-				color = ColorBlue;
-				break;
-			case 8:
-				color = ColorDarkGreen;
-				break;
-			case 9:
-				color = ColorBlack;
-				break;
-			default:
-				color = UI.CompletedBarColor;
-				break;
-		}
+	switch (this->Color) {
+		case 1:
+			color = ColorRed;
+			break;
+		case 2:
+			color = ColorYellow;
+			break;
+		case 3:
+			color = ColorGreen;
+			break;
+		case 4:
+			color = ColorGray;
+			break;
+		case 5:
+			color = ColorWhite;
+			break;
+		case 6:
+			color = ColorOrange;
+			break;
+		case 7:
+			color = ColorBlue;
+			break;
+		case 8:
+			color = ColorDarkGreen;
+			break;
+		case 9:
+			color = ColorBlack;
+			break;
+		default:
+			color = UI.CompletedBarColor;
+			break;
+	}
 
 	int f = (100 * unit.Variable[this->Index].Value) / unit.Variable[this->Index].Max;
 	if (!this->Border) {
-			Video.FillRectangleClip(color, x, y, f * w / 100, h);
+		Video.FillRectangleClip(color, x, y, f * w / 100, h);
 		if (UI.CompletedBarShadow) {
 			// Shadow
 			Video.DrawVLine(ColorGray, x + f * w / 100, y, h);
@@ -588,8 +628,8 @@ void CContentTypeCompleteBar::Draw(const CUnit &unit, CFont *) const
 			Video.DrawHLine(ColorWhite, x, y, f * w / 100);
 		}
 	} else {
-		Video.DrawRectangleClip(ColorGray, x,     y,     w + 4, h );
-		Video.DrawRectangleClip(ColorBlack,x + 1, y + 1, w + 2, h - 2);
+		Video.DrawRectangleClip(ColorGray,  x,     y,     w + 4, h);
+		Video.DrawRectangleClip(ColorBlack, x + 1, y + 1, w + 2, h - 2);
 		Video.FillRectangleClip(color, x + 2, y + 2, f * w / 100, h - 4);
 	}
 }
@@ -599,13 +639,12 @@ static void DrawUnitInfo_Training(const CUnit &unit)
 	if (unit.Orders.size() == 1 || unit.Orders[1]->Action != UnitActionTrain) {
 		if (!UI.SingleTrainingText.empty()) {
 			CLabel label(UI.SingleTrainingFont);
-			label.Draw(UI.SingleTrainingTextX, UI.SingleTrainingTextY,
-				UI.SingleTrainingText);
+			label.Draw(UI.SingleTrainingTextX, UI.SingleTrainingTextY, UI.SingleTrainingText);
 		}
 		if (UI.SingleTrainingButton) {
-			const COrder_Train &order = *static_cast<COrder_Train*>(unit.CurrentOrder());
+			const COrder_Train &order = *static_cast<COrder_Train *>(unit.CurrentOrder());
 			const unsigned int flags = (ButtonAreaUnderCursor == ButtonAreaTraining && ButtonUnderCursor == 0) ?
-					(IconActive | (MouseButtons & LeftButton)) : 0;
+									   (IconActive | (MouseButtons & LeftButton)) : 0;
 
 			order.GetUnitType().Icon.Icon->DrawUnitIcon(
 				UI.SingleTrainingButton->Style, flags,
@@ -614,21 +653,20 @@ static void DrawUnitInfo_Training(const CUnit &unit)
 	} else {
 		if (!UI.TrainingText.empty()) {
 			CLabel label(UI.TrainingFont);
-			label.Draw(UI.TrainingTextX, UI.TrainingTextY,
-				UI.TrainingText);
+			label.Draw(UI.TrainingTextX, UI.TrainingTextY, UI.TrainingText);
 		}
 		if (!UI.TrainingButtons.empty()) {
 			for (size_t i = 0; i < unit.Orders.size()
-				&& i < UI.TrainingButtons.size(); ++i) {
+				 && i < UI.TrainingButtons.size(); ++i) {
 				if (unit.Orders[i]->Action == UnitActionTrain) {
-					const COrder_Train &order = *static_cast<COrder_Train*>(unit.Orders[i]);
+					const COrder_Train &order = *static_cast<COrder_Train *>(unit.Orders[i]);
 
 					const int flag = (ButtonAreaUnderCursor == ButtonAreaTraining
-							&& static_cast<size_t>(ButtonUnderCursor) == i) ?
-							(IconActive | (MouseButtons & LeftButton)) : 0;
+									  && static_cast<size_t>(ButtonUnderCursor) == i) ?
+									 (IconActive | (MouseButtons & LeftButton)) : 0;
 
 					order.GetUnitType().Icon.Icon->DrawUnitIcon(
-						 UI.TrainingButtons[i].Style, flag,
+						UI.TrainingButtons[i].Style, flag,
 						UI.TrainingButtons[i].X, UI.TrainingButtons[i].Y, "");
 				}
 			}
@@ -645,13 +683,11 @@ static void DrawUnitInfo_Training(const CUnit &unit)
 */
 static void DrawUnitInfo(CUnit &unit)
 {
-	if (CPU_NUM == 1) {
-		UpdateUnitVariables(unit);
-	}
+	UpdateUnitVariables(unit);
 	for (size_t i = 0; i < UI.InfoPanelContents.size(); ++i) {
 		if (CanShowContent(UI.InfoPanelContents[i]->Condition, unit)) {
 			for (std::vector<CContentType *>::const_iterator content = UI.InfoPanelContents[i]->Contents.begin();
-					content != UI.InfoPanelContents[i]->Contents.end(); ++content) {
+				 content != UI.InfoPanelContents[i]->Contents.end(); ++content) {
 				if (CanShowContent((*content)->Condition, unit)) {
 					(*content)->Draw(unit, UI.InfoPanelContents[i]->DefaultFont);
 				}
@@ -660,7 +696,7 @@ static void DrawUnitInfo(CUnit &unit)
 	}
 
 
-	CUnitType &type = *unit.Type;
+	const CUnitType &type = *unit.Type;
 	Assert(&type);
 
 	// Draw IconUnit
@@ -681,17 +717,16 @@ static void DrawUnitInfo(CUnit &unit)
 		}
 	} else
 #endif
-	if (UI.SingleSelectedButton) {
-		const int x = UI.SingleSelectedButton->X;
-		const int y = UI.SingleSelectedButton->Y;
-		const int flag = (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == 0) ?
-				(IconActive | (MouseButtons & LeftButton)) : 0;
+		if (UI.SingleSelectedButton) {
+			const int x = UI.SingleSelectedButton->X;
+			const int y = UI.SingleSelectedButton->Y;
+			const int flag = (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == 0) ?
+							 (IconActive | (MouseButtons & LeftButton)) : 0;
 
-		type.Icon.Icon->DrawUnitIcon(UI.SingleSelectedButton->Style, flag, x, y, "");
-	}
+			type.Icon.Icon->DrawUnitIcon(UI.SingleSelectedButton->Style, flag, x, y, "");
+		}
 
-	if (unit.Player != ThisPlayer && !ThisPlayer->IsAllied(*unit.Player) )
-	{
+	if (unit.Player != ThisPlayer && !ThisPlayer->IsAllied(*unit.Player)) {
 		return;
 	}
 
@@ -706,12 +741,12 @@ static void DrawUnitInfo(CUnit &unit)
 			}
 			case UnitActionUpgradeTo: { //  Building upgrading to better type.
 				if (UI.UpgradingButton) {
-					const COrder_UpgradeTo &order = *static_cast<COrder_UpgradeTo*>(unit.CurrentOrder());
+					const COrder_UpgradeTo &order = *static_cast<COrder_UpgradeTo *>(unit.CurrentOrder());
 					order.GetUnitType().Icon.Icon->DrawUnitIcon(
 						UI.UpgradingButton->Style,
-						(ButtonAreaUnderCursor == ButtonAreaUpgrading &&
-							ButtonUnderCursor == 0) ?
-							(IconActive | (MouseButtons & LeftButton)) : 0,
+						(ButtonAreaUnderCursor == ButtonAreaUpgrading
+						 && ButtonUnderCursor == 0) ?
+						(IconActive | (MouseButtons & LeftButton)) : 0,
 						UI.UpgradingButton->X, UI.UpgradingButton->Y, "");
 				}
 				return;
@@ -722,9 +757,9 @@ static void DrawUnitInfo(CUnit &unit)
 
 					order.GetUpgrade().Icon->DrawUnitIcon(
 						UI.ResearchingButton->Style,
-						(ButtonAreaUnderCursor == ButtonAreaResearching &&
-							ButtonUnderCursor == 0) ?
-							(IconActive | (MouseButtons & LeftButton)) : 0,
+						(ButtonAreaUnderCursor == ButtonAreaResearching
+						 && ButtonUnderCursor == 0) ?
+						(IconActive | (MouseButtons & LeftButton)) : 0,
 						UI.ResearchingButton->X, UI.ResearchingButton->Y, "");
 				}
 				return;
@@ -744,9 +779,9 @@ static void DrawUnitInfo(CUnit &unit)
 		for (int i = 0; i < unit.InsideCount; ++i, uins = uins->NextContained) {
 			if (uins->Boarded && j < UI.TransportingButtons.size()) {
 				uins->Type->Icon.Icon->DrawUnitIcon(UI.TransportingButtons[j].Style,
-					(ButtonAreaUnderCursor == ButtonAreaTransporting && static_cast<size_t>(ButtonUnderCursor) == j) ?
-						(IconActive | (MouseButtons & LeftButton)) : 0,
-					UI.TransportingButtons[j].X, UI.TransportingButtons[j].Y, "");
+													(ButtonAreaUnderCursor == ButtonAreaTransporting && static_cast<size_t>(ButtonUnderCursor) == j) ?
+													(IconActive | (MouseButtons & LeftButton)) : 0,
+													UI.TransportingButtons[j].X, UI.TransportingButtons[j].Y, "");
 				UiDrawLifeBar(*uins, UI.TransportingButtons[j].X, UI.TransportingButtons[j].Y);
 				if (uins->Type->CanCastSpell && uins->Variable[MANA_INDEX].Max) {
 					UiDrawManaBar(*uins, UI.TransportingButtons[j].X, UI.TransportingButtons[j].Y);
@@ -775,10 +810,10 @@ void DrawResources()
 	CLabel label(GetGameFont());
 
 	// Draw all icons of resource.
-	for (int i = 0; i <= ScoreCost; ++i) {
+	for (int i = 0; i <= ManaResCost; ++i) {
 		if (UI.Resources[i].G) {
 			UI.Resources[i].G->DrawFrameClip(UI.Resources[i].IconFrame,
-				UI.Resources[i].IconX, UI.Resources[i].IconY);
+											 UI.Resources[i].IconX, UI.Resources[i].IconY);
 		}
 	}
 	for (int i = 0; i < MaxCosts; ++i) {
@@ -786,8 +821,9 @@ void DrawResources()
 			const int resourceAmount = ThisPlayer->Resources[i];
 
 			if (ThisPlayer->MaxResources[i] != -1) {
+				const int resAmount = ThisPlayer->StoredResources[i] + ThisPlayer->Resources[i];
 				char tmp[128];
-				snprintf(tmp, sizeof(tmp), "%d/%d", resourceAmount, ThisPlayer->MaxResources[i]);
+				snprintf(tmp, sizeof(tmp), "%d (%d)", resAmount, ThisPlayer->MaxResources[i] - ThisPlayer->StoredResources[i]);
 				label.SetFont(GetSmallFont());
 
 				label.Draw(UI.Resources[i].TextX, UI.Resources[i].TextY + 3, tmp);
@@ -800,7 +836,7 @@ void DrawResources()
 	}
 	if (UI.Resources[FoodCost].TextX != -1) {
 		char tmp[128];
-		snprintf(tmp,sizeof(tmp), "%d/%d", ThisPlayer->Demand, ThisPlayer->Supply);
+		snprintf(tmp, sizeof(tmp), "%d/%d", ThisPlayer->Demand, ThisPlayer->Supply);
 		label.SetFont(GetGameFont());
 		if (ThisPlayer->Supply < ThisPlayer->Demand) {
 			label.DrawReverse(UI.Resources[FoodCost].TextX, UI.Resources[FoodCost].TextY, tmp);
@@ -831,8 +867,7 @@ static int  MessagesEventIndex;                  /// FIXME: docu
 class MessagesDisplay
 {
 public:
-	MessagesDisplay() : show(true)
-	{
+	MessagesDisplay() : show(true) {
 #ifdef DEBUG
 		showBuilList = false;
 #endif
@@ -923,22 +958,21 @@ void MessagesDisplay::DrawMessages()
 			for (int z = 0; z < count; ++z) {
 				if (z == 0) {
 					PushClipping();
-					SetClipping(UI.MapArea.X + 8, UI.MapArea.Y + 8, Video.Width - 1,
-						Video.Height - 1);
+					SetClipping(UI.MapArea.X + 8, UI.MapArea.Y + 8,
+								Video.Width - 1, Video.Height - 1);
 				}
 
 				snprintf(buffer, 256, "%s (%d/%d) Wait %lu [%d,%d]",
-						ThisPlayer->Ai->UnitTypeBuilt[z].Type->Name.c_str(),
-						ThisPlayer->Ai->UnitTypeBuilt[z].Made,
-						ThisPlayer->Ai->UnitTypeBuilt[z].Want,
-						ThisPlayer->Ai->UnitTypeBuilt[z].Wait,
-						ThisPlayer->Ai->UnitTypeBuilt[z].X,
-						ThisPlayer->Ai->UnitTypeBuilt[z].Y);
+						 ThisPlayer->Ai->UnitTypeBuilt[z].Type->Name.c_str(),
+						 ThisPlayer->Ai->UnitTypeBuilt[z].Made,
+						 ThisPlayer->Ai->UnitTypeBuilt[z].Want,
+						 ThisPlayer->Ai->UnitTypeBuilt[z].Wait,
+						 ThisPlayer->Ai->UnitTypeBuilt[z].Pos.x,
+						 ThisPlayer->Ai->UnitTypeBuilt[z].Pos.y);
 
 				label.DrawClip(UI.MapArea.X + 8,
-						UI.MapArea.Y + 8 +
-						z * (UI.MessageFont->Height() + 1),
-						buffer);
+							   UI.MapArea.Y + 8 + z * (UI.MessageFont->Height() + 1),
+							   buffer);
 
 				if (z == 0) {
 					PopClipping();
@@ -946,42 +980,42 @@ void MessagesDisplay::DrawMessages()
 			}
 		} else {
 #endif
-		// background so the text is easier to read
-		if (MessagesCount) {
-			int textHeight = MessagesCount * (UI.MessageFont->Height() + 1);
-			Uint32 color = Video.MapRGB(TheScreen->format, 38, 38, 78);
-			Video.FillTransRectangleClip(color, UI.MapArea.X + 7, UI.MapArea.Y + 7,
-				UI.MapArea.EndX - UI.MapArea.X - 16,
-				textHeight - MessagesScrollY + 1, 0x80);
+			// background so the text is easier to read
+			if (MessagesCount) {
+				int textHeight = MessagesCount * (UI.MessageFont->Height() + 1);
+				Uint32 color = Video.MapRGB(TheScreen->format, 38, 38, 78);
+				Video.FillTransRectangleClip(color, UI.MapArea.X + 7, UI.MapArea.Y + 7,
+											 UI.MapArea.EndX - UI.MapArea.X - 16,
+											 textHeight - MessagesScrollY + 1, 0x80);
 
-			Video.DrawRectangle(color, UI.MapArea.X + 6, UI.MapArea.Y + 6,
-				UI.MapArea.EndX - UI.MapArea.X - 15,
-				textHeight - MessagesScrollY + 2);
-		}
+				Video.DrawRectangle(color, UI.MapArea.X + 6, UI.MapArea.Y + 6,
+									UI.MapArea.EndX - UI.MapArea.X - 15,
+									textHeight - MessagesScrollY + 2);
+			}
 
-		// Draw message line(s)
-		for (int z = 0; z < MessagesCount; ++z) {
-			if (z == 0) {
-				PushClipping();
-				SetClipping(UI.MapArea.X + 8, UI.MapArea.Y + 8, Video.Width - 1,
-					Video.Height - 1);
+			// Draw message line(s)
+			for (int z = 0; z < MessagesCount; ++z) {
+				if (z == 0) {
+					PushClipping();
+					SetClipping(UI.MapArea.X + 8, UI.MapArea.Y + 8, Video.Width - 1,
+								Video.Height - 1);
+				}
+				/*
+				 * Due parallel drawing we have to force message copy due temp
+				 * std::string(Messages[z]) creation because
+				 * char * pointer may change during text drawing.
+				 */
+				label.DrawClip(UI.MapArea.X + 8,
+							   UI.MapArea.Y + 8 +
+							   z * (UI.MessageFont->Height() + 1) - MessagesScrollY,
+							   std::string(Messages[z]));
+				if (z == 0) {
+					PopClipping();
+				}
 			}
-			/*
-			 * Due parallel drawing we have to force message copy due temp
-			 * std::string(Messages[z]) creation because
-			 * char * pointer may change during text drawing.
-			 */
-			label.DrawClip(UI.MapArea.X + 8,
-				UI.MapArea.Y + 8 +
-				z * (UI.MessageFont->Height() + 1) - MessagesScrollY,
-				std::string(Messages[z]));
-			if (z == 0) {
-				PopClipping();
+			if (MessagesCount < 1) {
+				MessagesSameCount = 0;
 			}
-		}
-		if (MessagesCount < 1) {
-			MessagesSameCount = 0;
-		}
 #ifdef DEBUG
 		}
 #endif
@@ -1122,7 +1156,8 @@ static MessagesDisplay allmessages;
 /**
 **  Update messages
 */
-void UpdateMessages() {
+void UpdateMessages()
+{
 	allmessages.UpdateMessages();
 }
 
@@ -1184,7 +1219,7 @@ void ShiftMessagesEvent()
 **  @note FIXME: vladi: I know this can be just separated func w/o msg but
 **               it is handy to stick all in one call, someone?
 */
-void SetMessageEvent(const Vec2i& pos, const char *fmt, ...)
+void SetMessageEvent(const Vec2i &pos, const char *fmt, ...)
 {
 	Assert(Map.Info.IsPointOnMap(pos));
 
@@ -1220,17 +1255,19 @@ void CenterOnMessage()
 		return;
 	}
 	const Vec2i pos = {MessagesEventX[MessagesEventIndex], MessagesEventY[MessagesEventIndex]};
-	UI.SelectedViewport->Center(pos, PixelTileSize / 2);
+	UI.SelectedViewport->Center(Map.TilePosToMapPixelPos_Center(pos));
 	SetMessage(_("~<Event: %s~>"), MessagesEvent[MessagesEventIndex]);
 	++MessagesEventIndex;
 }
 
-void ToggleShowMessages() {
+void ToggleShowMessages()
+{
 	allmessages.ToggleShowMessages();
 }
 
 #ifdef DEBUG
-void ToggleShowBuilListMessages() {
+void ToggleShowBuilListMessages()
+{
 	allmessages.ToggleShowBuilListMessages();
 }
 #endif
@@ -1247,7 +1284,7 @@ void CStatusLine::Draw()
 	if (!this->StatusLine.empty()) {
 		PushClipping();
 		SetClipping(this->TextX, this->TextY,
-			this->TextX + this->Width - 1, Video.Height - 1);
+					this->TextX + this->Width - 1, Video.Height - 1);
 		CLabel(this->Font).DrawClip(this->TextX, this->TextY, this->StatusLine);
 		PopClipping();
 	}
@@ -1279,15 +1316,13 @@ void CStatusLine::Clear()
 --  COSTS
 ----------------------------------------------------------------------------*/
 
-static int CostsMana;                    /// mana cost to display in status line
-static int Costs[MaxCosts + 1];          /// costs to display in status line
+static int Costs[MaxCosts + 2];          /// costs to display in status line
 
 /**
 **  Draw costs in status line.
 **
 **  @todo FIXME : make DrawCosts more configurable.
 **  @todo FIXME : 'time' resource should be shown too.
-**  @todo FIXME : remove hardcoded image for mana.
 **
 **  @internal MaxCost == FoodCost.
 */
@@ -1295,23 +1330,22 @@ void DrawCosts()
 {
 	int x = UI.StatusLine.TextX + 268;
 	CLabel label(GetGameFont());
-	if (CostsMana) {
-		// FIXME: hardcoded image!!!
-		UI.Resources[GoldCost].G->DrawFrameClip(3, x, UI.StatusLine.TextY);
+	if (Costs[MaxCosts + 1]) {
+		UI.Resources[ManaResCost].G->DrawFrameClip(3, x, UI.StatusLine.TextY);
 
 		x += 20;
-		x+=label.Draw(x, UI.StatusLine.TextY, CostsMana);
+		x += label.Draw(x, UI.StatusLine.TextY, Costs[MaxCosts + 1]);
 	}
 
 	for (unsigned int i = 1; i <= MaxCosts; ++i) {
 		if (Costs[i]) {
-			x+= 5;
+			x += 5;
 			if (UI.Resources[i].G) {
 				UI.Resources[i].G->DrawFrameClip(UI.Resources[i].IconFrame,
-					x, UI.StatusLine.TextY);
-				x+= 20;
+												 x, UI.StatusLine.TextY);
+				x += 20;
 			}
-			x+=label.Draw(x, UI.StatusLine.TextY, Costs[i]);
+			x += label.Draw(x, UI.StatusLine.TextY, Costs[i]);
 			if (x > Video.Width - 60) {
 				break;
 			}
@@ -1328,7 +1362,7 @@ void DrawCosts()
 */
 void SetCosts(int mana, int food, const int *costs)
 {
-	CostsMana = mana;
+	Costs[MaxCosts + 1] = mana;
 	if (costs) {
 		memcpy(Costs, costs, MaxCosts * sizeof(*costs));
 	} else {
@@ -1358,8 +1392,7 @@ void ClearCosts()
 static void DrawInfoPanelBackground(unsigned frame)
 {
 	if (UI.InfoPanel.G) {
-		UI.InfoPanel.G->DrawFrameClip(frame,
-			UI.InfoPanel.X, UI.InfoPanel.Y);
+		UI.InfoPanel.G->DrawFrameClip(frame, UI.InfoPanel.X, UI.InfoPanel.Y);
 	}
 }
 
@@ -1374,57 +1407,52 @@ static void DrawInfoPanelBackground(unsigned frame)
 */
 void CInfoPanel::Draw()
 {
-	int i;
-
 	if (NumSelected) {
 		if (NumSelected > 1) {
 			//
 			//  If there are more units selected draw their pictures and a health bar
 			//
 			DrawInfoPanelBackground(0);
-			for (i = 0; i < (NumSelected > (int)UI.SelectedButtons.size() ?
-					(int)UI.SelectedButtons.size() : NumSelected); ++i) {
-				Selected[i]->Type->Icon.Icon->DrawUnitIcon(ThisPlayer,
-					UI.SelectedButtons[i].Style,
-					(ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == i) ?
-						(IconActive | (MouseButtons & LeftButton)) : 0,
-					UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y, "");
-				UiDrawLifeBar(Selected[i],
-					UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y);
+			for (int i = 0; i < std::min<int>(NumSelected, UI.SelectedButtons.size()); ++i) {
+				Selected[i]->Type->Icon.Icon->DrawUnitIcon(UI.SelectedButtons[i].Style,
+														   (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == i) ?
+														   (IconActive | (MouseButtons & LeftButton)) : 0,
+														   UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y, "");
+				UiDrawLifeBar(*Selected[i], UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y);
 
-				if (ButtonAreaUnderCursor == ButtonAreaSelected &&
-						ButtonUnderCursor == i) {
+				if (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == i) {
 					UI.StatusLine.Set(Selected[i]->Type->Name);
 				}
 			}
 			if (NumSelected > (int)UI.SelectedButtons.size()) {
 				char buf[5];
 
-				sprintf(buf, "+%u", static_cast<unsigned int> (NumSelected - UI.SelectedButtons.size()));
+				sprintf(buf, "+%u", static_cast<unsigned int>(NumSelected - UI.SelectedButtons.size()));
 				CLabel(UI.MaxSelectedFont).Draw(UI.MaxSelectedTextX, UI.MaxSelectedTextY, buf);
 			}
 			return;
 		} else {
+			int panelIndex;
 			// FIXME: not correct for enemy's units
-			if (Selected[0]->Player == ThisPlayer ||
-					ThisPlayer->IsTeamed(Selected[0]) ||
-					ThisPlayer->IsAllied(Selected[0]) ||
-					ReplayRevealMap) {
-				if (Selected[0]->Orders[0]->Action == UnitActionBuilt ||
-					Selected[0]->Orders[0]->Action == UnitActionResearch ||
-					Selected[0]->Orders[0]->Action == UnitActionUpgradeTo ||
-					Selected[0]->Orders[0]->Action == UnitActionTrain) {
-					i = 3;
+			if (Selected[0]->Player == ThisPlayer
+				|| ThisPlayer->IsTeamed(*Selected[0])
+				|| ThisPlayer->IsAllied(*Selected[0])
+				|| ReplayRevealMap) {
+				if (Selected[0]->Orders[0]->Action == UnitActionBuilt
+					|| Selected[0]->Orders[0]->Action == UnitActionResearch
+					|| Selected[0]->Orders[0]->Action == UnitActionUpgradeTo
+					|| Selected[0]->Orders[0]->Action == UnitActionTrain) {
+					panelIndex = 3;
 				} else if (Selected[0]->Stats->Variables[MANA_INDEX].Max) {
-					i = 2;
+					panelIndex = 2;
 				} else {
-					i = 1;
+					panelIndex = 1;
 				}
 			} else {
-				i = 0;
+				panelIndex = 0;
 			}
-			DrawInfoPanelBackground(i);
-			DrawUnitInfo(Selected[0]);
+			DrawInfoPanelBackground(panelIndex);
+			DrawUnitInfo(*Selected[0]);
 			if (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == 0) {
 				UI.StatusLine.Set(Selected[0]->Type->Name);
 			}
@@ -1435,45 +1463,44 @@ void CInfoPanel::Draw()
 	//  Nothing selected
 
 	DrawInfoPanelBackground(0);
-	if (UnitUnderCursor && UnitUnderCursor->IsVisible(ThisPlayer)) {
+	if (UnitUnderCursor && UnitUnderCursor->IsVisible(*ThisPlayer)) {
 		// FIXME: not correct for enemies units
-		DrawUnitInfo(UnitUnderCursor);
+		DrawUnitInfo(*UnitUnderCursor);
 	} else {
-		int x;
-		int y;
-		std::string nc;
-		std::string rc;
 		// FIXME: need some cool ideas for this.
 
-		x = UI.InfoPanel.X + 16;
-		y = UI.InfoPanel.Y + 8;
+		int x = UI.InfoPanel.X + 16;
+		int y = UI.InfoPanel.Y + 8;
 
-		CLabel(GetGameFont()).Draw(x, y, "Stratagus");
+		CLabel label(GetGameFont());
+		label.Draw(x, y, "Stratagus");
 		y += 16;
-		CLabel(GetGameFont()).Draw(x, y,  "Cycle:");
-		VideoDrawNumberClip(x + 48, y, GetGameFont(), GameCycle);
-		VideoDrawNumberClip(x + 110, y, GetGameFont(),
-			CYCLES_PER_SECOND * VideoSyncSpeed / 100);
+		label.Draw(x, y,  "Cycle:");
+		label.Draw(x + 48, y, GameCycle);
+		label.Draw(x + 110, y, CYCLES_PER_SECOND * VideoSyncSpeed / 100);
 		y += 20;
 
+		std::string nc;
+		std::string rc;
+
 		GetDefaultTextColors(nc, rc);
-		for (i = 0; i < PlayerMax - 1; ++i) {
+		for (int i = 0; i < PlayerMax - 1; ++i) {
 			if (Players[i].Type != PlayerNobody) {
-				if (ThisPlayer->Allied & (1 << Players[i].Index)) {
+				if (ThisPlayer->IsAllied(Players[i])) {
 					SetDefaultTextColors(FontGreen, rc);
-				} else if (ThisPlayer->Enemy & (1 << Players[i].Index)) {
+				} else if (ThisPlayer->IsEnemy(Players[i])) {
 					SetDefaultTextColors(FontRed, rc);
 				} else {
 					SetDefaultTextColors(nc, rc);
 				}
 
-				VideoDrawNumberClip(x + 15, y, GetGameFont(), i);
+				label.Draw(x + 15, y, i);
 
-				Video.DrawRectangleClip(ColorWhite,x, y, 12, 12);
+				Video.DrawRectangleClip(ColorWhite, x, y, 12, 12);
 				Video.FillRectangleClip(Players[i].Color, x + 1, y + 1, 10, 10);
 
-				CLabel(GetGameFont()).Draw(x + 27, y, Players[i].Name);
-				VideoDrawNumberClip(x + 117, y, GetGameFont(),Players[i].Score);
+				label.Draw(x + 27, y, Players[i].Name);
+				label.Draw(x + 117, y, Players[i].Score);
 				y += 14;
 			}
 		}
@@ -1492,8 +1519,8 @@ static void DrawInfoPanelMultipleSelected()
 		bool mouseOver = (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == i);
 
 		Selected[i]->Type->Icon.Icon->DrawUnitIcon(button->Style,
-			mouseOver ? (IconActive | (MouseButtons & LeftButton)) : 0,
-			button->X, button->Y, "");
+												   mouseOver ? (IconActive | (MouseButtons & LeftButton)) : 0,
+												   button->X, button->Y, "");
 		UiDrawLifeBar(*Selected[i], button->X, button->Y);
 
 		if (mouseOver) {
@@ -1506,8 +1533,7 @@ static void DrawInfoPanelMultipleSelected()
 		std::ostringstream os;
 		os << "+" << (unsigned)(NumSelected - UI.SelectedButtons.size());
 
-		CLabel(UI.MaxSelectedFont).Draw(UI.MaxSelectedTextX,
-										 UI.MaxSelectedTextY, os.str());
+		CLabel(UI.MaxSelectedFont).Draw(UI.MaxSelectedTextX, UI.MaxSelectedTextY, os.str());
 	}
 }
 
@@ -1527,7 +1553,7 @@ static void DrawInfoPanelSingleSelected()
 */
 static void DrawInfoPanelNoneSelected()
 {
-	CUnitPtr lock(UnitUnderCursor);
+	CUnit *lock = UnitUnderCursor;
 	// Check if a unit is under the cursor
 	if (lock != NULL && lock->IsVisible(*ThisPlayer)) {
 		DrawUnitInfo(*lock);
@@ -1540,7 +1566,7 @@ static void DrawInfoPanelNoneSelected()
 	int y = UI.InfoPanel.Y + 8;
 	CLabel label(GetGameFont());
 
-	label.Draw(x,y, "Stratagus");
+	label.Draw(x, y, "Stratagus");
 	y += 16;
 	label.Draw(x, y, "Cycle:");
 	label.Draw(x + 48, y, GameCycle);
@@ -1565,7 +1591,7 @@ static void DrawInfoPanelNoneSelected()
 
 			label.Draw(x + 15, y, i);
 
-			Video.DrawRectangle(ColorWhite,x, y, 12, 12);
+			Video.DrawRectangle(ColorWhite, x, y, 12, 12);
 			Video.FillRectangle(Players[i].Color, x + 1, y + 1, 10, 10);
 
 			label.Draw(x + 27, y, Players[i].Name);

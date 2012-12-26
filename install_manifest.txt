@@ -1,5 +1,0 @@
-/usr/local/games/stratagus
-/usr/local/bin/png2stratagus
-/usr/local/include/stratagus-game-installer.nsi
-/usr/local/include/stratagus-game-launcher.h
-/usr/local/include/stratagus-maemo-extract.h

@@ -15,3 +15,5 @@ tolua.cpp
 png2stratagus
 
 install_manifest.txt
+
+.DS_Store

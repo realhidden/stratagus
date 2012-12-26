@@ -19,5 +19,6 @@ cp ../bundlefiles/Info.plist Wargus.app/Contents/Info.plist
 
 cp ../stratagus Wargus.app/Contents/Resources/stratagus
 cp -R /usr/local/share/games/stratagus/wargus/ Wargus.app/Contents/Resources/data/
+cp -R ../wargus/data/ Wargus.app/Contents/Resources/data/
 
-dylibbundler -od -b -x ./Wargus.app/Contents/Resources/stratagus -d ./Wargus.app/Contents/libs/
+dylibbundler -od -b -x ./Wargus.app/Contents/Resources/stratagus -d ./Wargus.app/Contents/lib/

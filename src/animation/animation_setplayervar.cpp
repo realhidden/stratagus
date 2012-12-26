@@ -40,6 +40,8 @@
 #include "animation.h"
 #include "unit.h"
 
+#include <stdio.h>
+
 //Modify types
 #define MOD_ADD 1
 #define MOD_SUB 2
@@ -56,7 +58,7 @@
 **
 **  @return  Returning value (only integer).
 */
-int GetPlayerData(int player, const char *prop, const char *arg)
+int GetPlayerData(const int player, const char *prop, const char *arg)
 {
 	if (!strcmp(prop, "RaceName")) {
 		return Players[player].Race;
@@ -84,6 +86,7 @@ int GetPlayerData(int player, const char *prop, const char *arg)
 	} else if (!strcmp(prop, "UnitTypesCount")) {
 		const std::string unit(arg);
 		CUnitType *type = UnitTypeByIdent(unit);
+		Assert(type);
 		return Players[player].UnitTypesCount[type->Slot];
 	} else if (!strcmp(prop, "AiEnabled")) {
 		return Players[player].AiEnabled;
@@ -128,7 +131,7 @@ int GetPlayerData(int player, const char *prop, const char *arg)
 /**
 **  Sets the player data.
 */
-static void SetPlayerData(int player, const char *prop, const char *arg, int value)
+static void SetPlayerData(const int player, const char *prop, const char *arg, int value)
 {
 	if (!strcmp(prop, "RaceName")) {
 		Players[player].Race = value;
@@ -138,14 +141,14 @@ static void SetPlayerData(int player, const char *prop, const char *arg, int val
 			fprintf(stderr, "Invalid resource \"%s\"", arg);
 			Exit(1);
 		}
-		Players[player].SetResource(resId, value);
+		Players[player].SetResource(resId, value, STORE_BOTH);
 	} else if (!strcmp(prop, "StoredResources")) {
 		const int resId = GetResourceIdByName(arg);
 		if (resId == -1) {
 			fprintf(stderr, "Invalid resource \"%s\"", arg);
 			Exit(1);
 		}
-		Players[player].SetResource(resId, value, true);
+		Players[player].SetResource(resId, value, STORE_BUILDING);
 	} else if (!strcmp(prop, "UnitLimit")) {
 		Players[player].UnitLimit = value;
 	} else if (!strcmp(prop, "BuildingLimit")) {
@@ -182,7 +185,7 @@ static void SetPlayerData(int player, const char *prop, const char *arg, int val
 
 	const char *var = this->varStr.c_str();
 	const char *arg = this->argStr.c_str();
-	int playerId = ParseAnimInt(&unit, this->playerStr.c_str());
+	const int playerId = ParseAnimInt(&unit, this->playerStr.c_str());
 	int rop = ParseAnimInt(&unit, this->valueStr.c_str());
 	int data = GetPlayerData(playerId, var, arg);
 

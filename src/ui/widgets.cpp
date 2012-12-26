@@ -67,9 +67,10 @@ static void MenuHandleButtonDown(unsigned)
 static void MenuHandleButtonUp(unsigned)
 {
 }
-static void MenuHandleMouseMove(int x, int y)
+static void MenuHandleMouseMove(const PixelPos &screenPos)
 {
-	HandleCursorMove(&x, &y);
+	PixelPos pos(screenPos);
+	HandleCursorMove(&pos.x, &pos.y);
 }
 static void MenuHandleKeyDown(unsigned key, unsigned keychar)
 {
@@ -252,8 +253,8 @@ void MyOpenGLGraphics::drawPoint(int x, int y)
 void MyOpenGLGraphics::drawLine(int x1, int y1, int x2, int y2)
 {
 	gcn::Color c = this->getColor();
-	const PixelPos pos1 = {x1 + mClipStack.top().xOffset, y1 + mClipStack.top().yOffset};
-	const PixelPos pos2 = {x2 + mClipStack.top().xOffset, y2 + mClipStack.top().yOffset};
+	const PixelPos pos1(x1 + mClipStack.top().xOffset, y1 + mClipStack.top().yOffset);
+	const PixelPos pos2(x2 + mClipStack.top().xOffset, y2 + mClipStack.top().yOffset);
 
 	Video.DrawLineClip(Video.MapRGBA(0, c.r, c.g, c.b, c.a), pos1, pos2);
 }
@@ -1198,8 +1199,8 @@ void Windows::mouseMotion(int x, int y)
 	// Move the cursor.
 	// Usefull only when window reachs the limit.
 	getAbsolutePosition(absx, absy);
-	CursorX = absx + mMouseXOffset;
-	CursorY = absy + mMouseYOffset;
+	CursorScreenPos.x = absx + mMouseXOffset;
+	CursorScreenPos.y = absy + mMouseYOffset;
 }
 
 /**
@@ -1549,7 +1550,7 @@ void MenuScreen::stop(int result, bool stopAll)
 			GamePaused = false;
 			UI.StatusLine.Clear();
 			if (GameRunning) {
-				UIHandleMouseMove(CursorX, CursorY);
+				UIHandleMouseMove(CursorScreenPos);
 			}
 		}
 	}

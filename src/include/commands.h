@@ -32,26 +32,97 @@
 
 //@{
 
-#include "unit.h"
+#include "vec2i.h"
 
 /*----------------------------------------------------------------------------
 --  Declarations
 ----------------------------------------------------------------------------*/
 
+class CUnit;
 class CFile;
+class SpellType;
 class CUnitType;
 class CUpgrade;
-
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
+/*----------------------------------------------------------------------------
+--  Commands: in command.c
+----------------------------------------------------------------------------*/
+
+/**
+**  This function gives a unit a new command. If the command is given
+**  by the user the function with Send prefix should be used.
+*/
+
+/// Prepare command quit
+extern void CommandQuit(int player);
+/// Prepare command stop
+extern void CommandStopUnit(CUnit &unit);
+/// Prepare command stand ground
+extern void CommandStandGround(CUnit &unit, int flush);
+/// Prepare command follow
+extern void CommandFollow(CUnit &unit, CUnit &dest, int flush);
+/// Prepare command move
+extern void CommandMove(CUnit &unit, const Vec2i &pos, int flush);
+/// Prepare command repair
+extern void CommandRepair(CUnit &unit, const Vec2i &pos, CUnit *dest, int flush);
+/// Send auto repair command
+extern void CommandAutoRepair(CUnit &unit, int on);
+/// Prepare command attack
+extern void CommandAttack(CUnit &unit, const Vec2i &pos, CUnit *dest, int flush);
+/// Prepare command attack ground
+extern void CommandAttackGround(CUnit &unit, const Vec2i &pos, int flush);
+/// Prepare command patrol
+extern void CommandPatrolUnit(CUnit &unit, const Vec2i &pos, int flush);
+/// Prepare command board
+extern void CommandBoard(CUnit &unit, CUnit &dest, int flush);
+/// Prepare command unload
+extern void CommandUnload(CUnit &unit, const Vec2i &pos, CUnit *what, int flush);
+/// Prepare command build
+extern void CommandBuildBuilding(CUnit &unit, const Vec2i &pos, CUnitType &, int flush);
+/// Prepare command dismiss
+extern void CommandDismiss(CUnit &unit);
+/// Prepare command resource location
+extern void CommandResourceLoc(CUnit &unit, const Vec2i &pos, int flush);
+/// Prepare command resource
+extern void CommandResource(CUnit &unit, CUnit &dest, int flush);
+/// Prepare command return
+extern void CommandReturnGoods(CUnit &unit, CUnit *depot, int flush);
+/// Prepare command train
+extern void CommandTrainUnit(CUnit &unit, CUnitType &what, int flush);
+/// Prepare command cancel training
+extern void CommandCancelTraining(CUnit &unit, int slot, const CUnitType *type);
+/// Prepare command upgrade to
+extern void CommandUpgradeTo(CUnit &unit, CUnitType &what, int flush);
+/// immediate transforming into type.
+extern void CommandTransformIntoType(CUnit &unit, CUnitType &type);
+/// Prepare command cancel upgrade to
+extern void CommandCancelUpgradeTo(CUnit &unit);
+/// Prepare command research
+extern void CommandResearch(CUnit &unit, CUpgrade &what, int flush);
+/// Prepare command cancel research
+extern void CommandCancelResearch(CUnit &unit);
+/// Prepare command spellcast
+extern void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, const SpellType &spell, int flush);
+/// Prepare command auto spellcast
+extern void CommandAutoSpellCast(CUnit &unit, int spellid, int on);
+/// Prepare diplomacy command
+extern void CommandDiplomacy(int player, int state, int opponent);
+/// Prepare shared vision command
+extern void CommandSharedVision(int player, bool state, int opponent);
 
 /*
 **  The send command functions sends a command, if needed over the
 **  Network, this is only for user commands. Automatic reactions which
 **  are on all computers equal, should use the functions without Send.
 */
+
+/**
+**  Unit references over network, or for memory saving.
+*/
+typedef unsigned short UnitRef;
 
 /// Send stop command
 extern void SendCommandStopUnit(CUnit &unit);
@@ -94,7 +165,7 @@ extern void SendCommandUpgradeTo(CUnit &unit, CUnitType &what, int flush);
 /// Send cancel upgrade to command
 extern void SendCommandCancelUpgradeTo(CUnit &unit);
 /// Send research command
-extern void SendCommandResearch(CUnit &unit, CUpgrade *what, int flush);
+extern void SendCommandResearch(CUnit &unit, CUpgrade &what, int flush);
 /// Send cancel research command
 extern void SendCommandCancelResearch(CUnit &unit);
 /// Send spell cast command
@@ -113,6 +184,10 @@ extern void ParseCommand(unsigned char type, UnitRef unum, unsigned short x,
 extern void ParseExtendedCommand(unsigned char type, int status,
 								 unsigned char arg1, unsigned short arg2, unsigned short arg3,
 								 unsigned short arg4);
+
+
+
+#define FlushCommands 1          /// Flush commands in queue
 
 //@}
 

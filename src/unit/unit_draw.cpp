@@ -33,9 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <vector>
 
 #include "stratagus.h"
@@ -55,6 +52,7 @@
 #include "sound.h"
 #include "tileset.h"
 #include "unit.h"
+#include "unit_find.h"
 #include "unitsound.h"
 #include "unittype.h"
 #include "ui.h"
@@ -70,11 +68,10 @@
 class Decoration
 {
 public:
-	Decoration() : HotX(0), HotY(0), Width(0), Height(0), Sprite(NULL) {}
+	Decoration() : HotPos(0, 0), Width(0), Height(0), Sprite(NULL) {}
 
 	std::string File; /// File containing the graphics data
-	int HotX;         /// X drawing position (relative)
-	int HotY;         /// Y drawing position (relative)
+	PixelPos HotPos;  /// drawing position (relative)
 	int Width;        /// width of the decoration
 	int Height;       /// height of the decoration
 
@@ -84,7 +81,7 @@ public:
 
 
 /**
-**	Structure grouping all Sprites for decoration.
+**  Structure grouping all Sprites for decoration.
 */
 class DecoSpriteType
 {
@@ -110,7 +107,7 @@ unsigned long ShowNameTime;                  /// Show unit's name for some time
 **  @param x1,y1    Coordinates of the top left corner.
 **  @param x2,y2    Coordinates of the bottom right corner.
 */
-void (*DrawSelection)(Uint32 color, int x1, int y1, int x2, int y2) = DrawSelectionNone;
+void (*DrawSelection)(IntColor color, int x1, int y1, int x2, int y2) = DrawSelectionNone;
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -128,9 +125,9 @@ const CViewport *CurrentViewport;  /// FIXME: quick hack for split screen
 **
 **  @param unit  Pointer to unit.
 */
-void DrawUnitSelection(const CViewport *vp, const CUnit &unit)
+void DrawUnitSelection(const CViewport &vp, const CUnit &unit)
 {
-	Uint32 color;
+	IntColor color;
 
 	// FIXME: make these colors customizable with scripts.
 
@@ -145,17 +142,12 @@ void DrawUnitSelection(const CViewport *vp, const CUnit &unit)
 		} else if (ThisPlayer->IsEnemy(unit)) {
 			color = ColorRed;
 		} else {
-			int i;
+			color = unit.Player->Color;
 
-			for (i = 0; i < PlayerMax; ++i) {
+			for (int i = 0; i < PlayerMax; ++i) {
 				if (unit.TeamSelected & (1 << i)) {
-					break;
+					color = Players[i].Color;
 				}
-			}
-			if (i == PlayerMax) {
-				color = unit.Player->Color;
-			} else {
-				color = Players[i].Color;
 			}
 		}
 	} else if (CursorBuilding && unit.Type->Building
@@ -168,13 +160,11 @@ void DrawUnitSelection(const CViewport *vp, const CUnit &unit)
 	}
 
 	const CUnitType &type = *unit.Type;
-	const PixelPos screenPos = vp->TilePosToScreen_TopLeft(unit.tilePos);
-	const int x = screenPos.x + unit.IX + type.TileWidth * PixelTileSize.x / 2
-				  - type.BoxWidth / 2 - (type.Width - type.Sprite->Width) / 2;
-	const int y = screenPos.y + unit.IY + type.TileHeight * PixelTileSize.y / 2
-				  - type.BoxHeight / 2 - (type.Height - type.Sprite->Height) / 2;
+	const PixelPos screenPos = vp.MapToScreenPixelPos(unit.GetMapPixelPosCenter());
+	const int x = screenPos.x - type.BoxWidth / 2 - (type.Width - type.Sprite->Width) / 2;
+	const int y = screenPos.y - type.BoxHeight / 2 - (type.Height - type.Sprite->Height) / 2;
 
-	DrawSelection(color, x, y, x + type.BoxWidth, y + type.BoxHeight);
+	DrawSelection(color, x + type.BoxOffsetX, y + type.BoxOffsetY, x + type.BoxWidth + type.BoxOffsetX, y + type.BoxHeight + type.BoxOffsetY);
 }
 
 /**
@@ -184,7 +174,7 @@ void DrawUnitSelection(const CViewport *vp, const CUnit &unit)
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionNone(Uint32, int, int, int, int)
+void DrawSelectionNone(IntColor, int, int, int, int)
 {
 }
 
@@ -195,7 +185,7 @@ void DrawSelectionNone(Uint32, int, int, int, int)
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionCircle(Uint32 color, int x1, int y1, int x2, int y2)
+void DrawSelectionCircle(IntColor color, int x1, int y1, int x2, int y2)
 {
 	Video.DrawCircleClip(color, (x1 + x2) / 2, (y1 + y2) / 2,
 						 std::min((x2 - x1) / 2, (y2 - y1) / 2) + 2);
@@ -208,7 +198,7 @@ void DrawSelectionCircle(Uint32 color, int x1, int y1, int x2, int y2)
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionCircleWithTrans(Uint32 color, int x1, int y1, int x2, int y2)
+void DrawSelectionCircleWithTrans(IntColor color, int x1, int y1, int x2, int y2)
 {
 	Video.FillTransCircleClip(color, (x1 + x2) / 2, (y1 + y2) / 2,
 							  std::min((x2 - x1) / 2, (y2 - y1) / 2), 95);
@@ -223,7 +213,7 @@ void DrawSelectionCircleWithTrans(Uint32 color, int x1, int y1, int x2, int y2)
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionRectangle(Uint32 color, int x1, int y1, int x2, int y2)
+void DrawSelectionRectangle(IntColor color, int x1, int y1, int x2, int y2)
 {
 	Video.DrawRectangleClip(color, x1, y1, x2 - x1, y2 - y1);
 }
@@ -235,7 +225,7 @@ void DrawSelectionRectangle(Uint32 color, int x1, int y1, int x2, int y2)
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionRectangleWithTrans(Uint32 color, int x1, int y1, int x2, int y2)
+void DrawSelectionRectangleWithTrans(IntColor color, int x1, int y1, int x2, int y2)
 {
 	Video.DrawRectangleClip(color, x1, y1, x2 - x1, y2 - y1);
 	Video.FillTransRectangleClip(color, x1 + 1, y1 + 1,
@@ -249,9 +239,9 @@ void DrawSelectionRectangleWithTrans(Uint32 color, int x1, int y1, int x2, int y
 **  @param x1,y1  Coordinates of the top left corner.
 **  @param x2,y2  Coordinates of the bottom right corner.
 */
-void DrawSelectionCorners(Uint32 color, int x1, int y1, int x2, int y2)
+void DrawSelectionCorners(IntColor color, int x1, int y1, int x2, int y2)
 {
-#define CORNER_PIXELS 6
+	const int CORNER_PIXELS = 6;
 
 	Video.DrawVLineClip(color, x1, y1, CORNER_PIXELS);
 	Video.DrawHLineClip(color, x1 + 1, y1, CORNER_PIXELS - 1);
@@ -264,7 +254,6 @@ void DrawSelectionCorners(Uint32 color, int x1, int y1, int x2, int y2)
 
 	Video.DrawVLineClip(color, x2, y2 - CORNER_PIXELS + 1, CORNER_PIXELS);
 	Video.DrawHLineClip(color, x2 - CORNER_PIXELS + 1, y2, CORNER_PIXELS - 1);
-#undef CORNER_PIXELS
 }
 
 
@@ -293,42 +282,23 @@ int GetSpriteIndex(const char *SpriteName)
 */
 static int CclDefineSprites(lua_State *l)
 {
-	const char *name;     // name of the current sprite.
-	int args;             // number of arguments.
-	int i;                // iterator on argument.
-	const char *key;      // Current key of the lua table.
-	int index;            // Index of the Sprite.
+	const int args = lua_gettop(l);
 
-	args = lua_gettop(l);
-	for (i = 0; i < args; ++i) {
+	for (int i = 0; i < args; ++i) {
 		Decoration deco;
 
 		lua_pushnil(l);
-		name = 0;
+		const char *name = NULL;// name of the current sprite.
 		while (lua_next(l, i + 1)) {
-			key = LuaToString(l, -2); // key name
+			const char *key = LuaToString(l, -2); // key name
 			if (!strcmp(key, "Name")) {
 				name = LuaToString(l, -1);
 			} else if (!strcmp(key, "File")) {
 				deco.File = LuaToString(l, -1);
 			} else if (!strcmp(key, "Offset")) {
-				if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-					LuaError(l, "incorrect argument");
-				}
-				lua_rawgeti(l, -1, 1); // offsetX
-				lua_rawgeti(l, -2, 2); // offsetY
-				deco.HotX = LuaToNumber(l, -2);
-				deco.HotY = LuaToNumber(l, -1);
-				lua_pop(l, 2); // Pop offsetX and Y
+				CclGetPos(l, &deco.HotPos.x, &deco.HotPos.y);
 			} else if (!strcmp(key, "Size")) {
-				if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-					LuaError(l, "incorrect argument");
-				}
-				lua_rawgeti(l, -1, 1); // Width
-				lua_rawgeti(l, -2, 2); // Height
-				deco.Width = LuaToNumber(l, -2);
-				deco.Height = LuaToNumber(l, -1);
-				lua_pop(l, 2); // Pop Width and Height
+				CclGetPos(l, &deco.Width, &deco.Height);
 			} else { // Error.
 				LuaError(l, "incorrect field '%s' for the DefineSprite." _C_ key);
 			}
@@ -337,7 +307,7 @@ static int CclDefineSprites(lua_State *l)
 		if (name == NULL) {
 			LuaError(l, "CclDefineSprites requires the Name flag for sprite.");
 		}
-		index = GetSpriteIndex(name);
+		int index = GetSpriteIndex(name); // Index of the Sprite.
 		if (index == -1) { // new sprite.
 			index = DecoSprite.SpriteArray.size();
 			DecoSprite.Name.push_back(name);
@@ -401,36 +371,27 @@ void CleanDecorations()
 **  @todo fix color configuration.
 */
 void CDecoVarBar::Draw(int x, int y,
-					   const CUnitType *Type, const CVariable &Variable) const
+					   const CUnitType &type, const CVariable &var) const
 {
-	int height;
-	int width;
+	Assert(var.Max);
+
+	int height = this->Height;
+	if (height == 0) { // Default value
+		height = type.BoxHeight; // Better size ? {,Box, Tile}
+	}
+	int width = this->Width;
+	if (width == 0) { // Default value
+		width = type.BoxWidth; // Better size ? {,Box, Tile}
+	}
 	int h;
 	int w;
-	char b;        // BorderSize.
-	Uint32 bcolor; // Border color.
-	Uint32 color;  // inseide color.
-	int f;         // 100 * value / max.
-
-	Assert(Type);
-	Assert(Variable.Max);
-
-	height = this->Height;
-	if (height == 0) { // Default value
-		height = Type->BoxHeight; // Better size ? {,Box, Tile}
-	}
-	width = this->Width;
-	if (width == 0) { // Default value
-		width = Type->BoxWidth; // Better size ? {,Box, Tile}
-	}
 	if (this->IsVertical)  { // Vertical
 		w = width;
-		h = Variable.Value * height / Variable.Max;
+		h = var.Value * height / var.Max;
 	} else {
-		w = Variable.Value * width / Variable.Max;
+		w = var.Value * width / var.Max;
 		h = height;
 	}
-
 	if (this->IsCenteredInX) {
 		x -= w / 2;
 	}
@@ -438,11 +399,11 @@ void CDecoVarBar::Draw(int x, int y,
 		y -= h / 2;
 	}
 
-	b = this->BorderSize;
+	char b = this->BorderSize; // BorderSize.
 	// Could depend of (value / max)
-	f = Variable.Value * 100 / Variable.Max;
-	bcolor = ColorBlack; // Deco->Data.Bar.BColor
-	color = f > 50 ? (f > 75 ? ColorGreen : ColorYellow) : (f > 25 ? ColorOrange : ColorRed);
+	int f = var.Value * 100 / var.Max;
+	IntColor bcolor = ColorBlack; // Deco->Data.Bar.BColor  // Border color.
+	IntColor color = f > 50 ? (f > 75 ? ColorGreen : ColorYellow) : (f > 25 ? ColorOrange : ColorRed);// inside color.
 	// Deco->Data.Bar.Color
 	if (b) {
 		if (this->ShowFullBackground) {
@@ -471,8 +432,7 @@ void CDecoVarBar::Draw(int x, int y,
 **  @param unit    Unit pointer
 **  @todo fix font/color configuration.
 */
-void CDecoVarText::Draw(int x, int y,
-						const CUnitType *, const CVariable &Variable) const
+void CDecoVarText::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &var) const
 {
 	if (this->IsCenteredInX) {
 		x -= 2; // GetGameFont()->Width(buf) / 2, with buf = str(Value)
@@ -480,7 +440,7 @@ void CDecoVarText::Draw(int x, int y,
 	if (this->IsCenteredInY) {
 		y -= this->Font->Height() / 2;
 	}
-	CLabel(this->Font).DrawClip(x, y, Variable.Value);
+	CLabel(*this->Font).DrawClip(x, y, var.Value);
 }
 
 /**
@@ -491,31 +451,26 @@ void CDecoVarText::Draw(int x, int y,
 **  @param unit    Unit pointer
 **  @todo fix sprite configuration.
 */
-void CDecoVarSpriteBar::Draw(int x, int y,
-							 const CUnitType *, const CVariable &Variable) const
+void CDecoVarSpriteBar::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &var) const
 {
-	int n;                   // frame of the sprite to show.
-	CGraphic *sprite;        // the sprite to show.
-	Decoration *decosprite;  // Info on the sprite.
-
-	Assert(Variable.Max);
+	Assert(var.Max);
 	Assert(this->NSprite != -1);
 
-	decosprite = &DecoSprite.SpriteArray[(int)this->NSprite];
-	sprite = decosprite->Sprite;
-	x += decosprite->HotX; // in addition of OffsetX... Usefull ?
-	y += decosprite->HotY; // in addition of OffsetY... Usefull ?
+	Decoration &decosprite = DecoSprite.SpriteArray[(int)this->NSprite];
+	CGraphic &sprite = *decosprite.Sprite;
+	x += decosprite.HotPos.x; // in addition of OffsetX... Usefull ?
+	y += decosprite.HotPos.y; // in addition of OffsetY... Usefull ?
 
-	n = sprite->NumFrames - 1;
-	n -= (n * Variable.Value) / Variable.Max;
+	int n = sprite.NumFrames - 1; // frame of the sprite to show.
+	n -= (n * var.Value) / var.Max;
 
 	if (this->IsCenteredInX) {
-		x -= sprite->Width / 2;
+		x -= sprite.Width / 2;
 	}
 	if (this->IsCenteredInY) {
-		y -= sprite->Height / 2;
+		y -= sprite.Height / 2;
 	}
-	sprite->DrawFrameClip(n, x, y);
+	sprite.DrawFrameClip(n, x, y);
 }
 
 /**
@@ -527,75 +482,63 @@ void CDecoVarSpriteBar::Draw(int x, int y,
 **
 **  @todo fix sprite configuration configuration.
 */
-void CDecoVarStaticSprite::Draw(int x, int y,
-								const CUnitType *, const CVariable &) const
+void CDecoVarStaticSprite::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &/*var*/) const
 {
-	CGraphic *sprite;         // the sprite to show.
-	Decoration *decosprite;  // Info on the sprite.
+	Decoration &decosprite = DecoSprite.SpriteArray[(int)this->NSprite];
+	CGraphic &sprite = *decosprite.Sprite;
 
-	decosprite = &DecoSprite.SpriteArray[(int)this->NSprite];
-	sprite = decosprite->Sprite;
-	x += decosprite->HotX; // in addition of OffsetX... Usefull ?
-	y += decosprite->HotY; // in addition of OffsetY... Usefull ?
+	x += decosprite.HotPos.x; // in addition of OffsetX... Usefull ?
+	y += decosprite.HotPos.y; // in addition of OffsetY... Usefull ?
 	if (this->IsCenteredInX) {
-		x -= sprite->Width / 2;
+		x -= sprite.Width / 2;
 	}
 	if (this->IsCenteredInY) {
-		y -= sprite->Height / 2;
+		y -= sprite.Height / 2;
 	}
-	sprite->DrawFrameClip(this->n, x, y);
+	sprite.DrawFrameClip(this->n, x, y);
 }
-
-
-extern void UpdateUnitVariables(CUnit &unit);
-
 
 /**
 **  Draw decoration (invis, for the unit.)
 **
-**  @param unit  Pointer to the unit.
-**  @param type  Type of the unit.
-**  @param x     Screen X position of the unit.
-**  @param y     Screen Y position of the unit.
+**  @param unit       Pointer to the unit.
+**  @param type       Type of the unit.
+**  @param screenPos  Screen position of the unit.
 */
-static void DrawDecoration(const CUnit &unit, const CUnitType *type, int x, int y)
+static void DrawDecoration(const CUnit &unit, const CUnitType &type, const PixelPos &screenPos)
 {
+	int x = screenPos.x;
+	int y = screenPos.y;
 #ifdef REFS_DEBUG
-	//
 	// Show the number of references.
-	//
-	//VideoDrawNumberClip(x + 1, y + 1, GetGameFont(), unit.Refs);
+	VideoDrawNumberClip(x + 1, y + 1, GetGameFont(), unit.Refs);
 #endif
 
 	UpdateUnitVariables(const_cast<CUnit &>(unit));
 	// Now show decoration for each variable.
 	for (std::vector<CDecoVar *>::const_iterator i = UnitTypeVar.DecoVar.begin();
 		 i < UnitTypeVar.DecoVar.end(); ++i) {
-		int value;
-		int max;
-		const CDecoVar *var = (*i);
-		value = unit.Variable[var->Index].Value;
-		max = unit.Variable[var->Index].Max;
+		const CDecoVar &var = *(*i);
+		const int value = unit.Variable[var.Index].Value;
+		const int max = unit.Variable[var.Index].Max;
 		Assert(value <= max);
 
-		if (!((value == 0 && !var->ShowWhenNull) || (value == max && !var->ShowWhenMax)
-			  || (var->HideHalf && value != 0 && value != max)
-			  || (!var->ShowIfNotEnable && !unit.Variable[var->Index].Enable)
-			  || (var->ShowOnlySelected && !unit.Selected)
-			  || (unit.Player->Type == PlayerNeutral && var->HideNeutral)
-			  || (ThisPlayer->IsEnemy(unit) && !var->ShowOpponent)
-			  || (ThisPlayer->IsAllied(unit) && (unit.Player != ThisPlayer) && var->HideAllied)
+		if (!((value == 0 && !var.ShowWhenNull) || (value == max && !var.ShowWhenMax)
+			  || (var.HideHalf && value != 0 && value != max)
+			  || (!var.ShowIfNotEnable && !unit.Variable[var.Index].Enable)
+			  || (var.ShowOnlySelected && !unit.Selected)
+			  || (unit.Player->Type == PlayerNeutral && var.HideNeutral)
+			  || (ThisPlayer->IsEnemy(unit) && !var.ShowOpponent)
+			  || (ThisPlayer->IsAllied(unit) && (unit.Player != ThisPlayer) && var.HideAllied)
 			  || max == 0)) {
-			var->Draw(
-				x + var->OffsetX + var->OffsetXPercent * unit.Type->TileWidth * PixelTileSize.x / 100,
-				y + var->OffsetY + var->OffsetYPercent * unit.Type->TileHeight * PixelTileSize.y / 100,
-				type, unit.Variable[var->Index]);
+			var.Draw(
+				x + var.OffsetX + var.OffsetXPercent * unit.Type->TileWidth * PixelTileSize.x / 100,
+				y + var.OffsetY + var.OffsetYPercent * unit.Type->TileHeight * PixelTileSize.y / 100,
+				type, unit.Variable[var.Index]);
 		}
 	}
 
-	//
 	// Draw group number
-	//
 	if (unit.Selected && unit.GroupId != 0
 #ifndef DEBUG
 		&& unit.Player == ThisPlayer
@@ -609,10 +552,10 @@ static void DrawDecoration(const CUnit &unit, const CUnitType *type, int x, int 
 			for (groupId = 0; !(unit.GroupId & (1 << groupId)); ++groupId) {
 			}
 		}
-		int width = GetGameFont()->Width(groupId);
+		const int width = GetGameFont().Width(groupId);
 		x += (unit.Type->TileWidth * PixelTileSize.x + unit.Type->BoxWidth) / 2 - width;
-		width = GetGameFont()->Height();
-		y += (unit.Type->TileHeight * PixelTileSize.y + unit.Type->BoxHeight) / 2 - width;
+		const int height = GetGameFont().Height();
+		y += (unit.Type->TileHeight * PixelTileSize.y + unit.Type->BoxHeight) / 2 - height;
 		CLabel(GetGameFont()).DrawClip(x, y, groupId);
 	}
 }
@@ -622,27 +565,27 @@ static void DrawDecoration(const CUnit &unit, const CUnitType *type, int x, int 
 **
 **  @param type   Pointer to the unit type.
 **  @param frame  Frame number
-**  @param x      Screen X position of the unit.
-**  @param y      Screen Y position of the unit.
+**  @param screenPos  Screen position of the unit.
 **
 **  @todo FIXME: combine new shadow code with old shadow code.
 */
-void DrawShadow(const CUnitType &type, int frame, int x, int y)
+void DrawShadow(const CUnitType &type, int frame, const PixelPos &screenPos)
 {
 	// Draw normal shadow sprite if available
 	if (!type.ShadowSprite) {
 		return;
 	}
-	x -= (type.ShadowWidth - type.TileWidth * PixelTileSize.x) / 2;
-	y -= (type.ShadowHeight - type.TileHeight * PixelTileSize.y) / 2;
-	x += type.OffsetX + type.ShadowOffsetX;
-	y += type.OffsetY + type.ShadowOffsetY;
+	PixelPos pos = screenPos;
+	pos.x -= (type.ShadowWidth - type.TileWidth * PixelTileSize.x) / 2;
+	pos.y -= (type.ShadowHeight - type.TileHeight * PixelTileSize.y) / 2;
+	pos.x += type.OffsetX + type.ShadowOffsetX;
+	pos.y += type.OffsetY + type.ShadowOffsetY;
 
 	if (type.Flip) {
 		if (frame < 0) {
-			type.ShadowSprite->DrawFrameClipX(-frame - 1, x, y);
+			type.ShadowSprite->DrawFrameClipX(-frame - 1, pos.x, pos.y);
 		} else {
-			type.ShadowSprite->DrawFrameClip(frame, x, y);
+			type.ShadowSprite->DrawFrameClip(frame, pos.x, pos.y);
 		}
 	} else {
 		int row = type.NumDirections / 2 + 1;
@@ -651,7 +594,7 @@ void DrawShadow(const CUnitType &type, int frame, int x, int y)
 		} else {
 			frame = (frame / row) * type.NumDirections + frame % row;
 		}
-		type.ShadowSprite->DrawFrameClip(frame, x, y);
+		type.ShadowSprite->DrawFrameClip(frame, pos.x, pos.y);
 	}
 }
 
@@ -674,9 +617,9 @@ void ShowOrder(const CUnit &unit)
 	// Get current position
 	const PixelPos mapPos = unit.GetMapPixelPosCenter();
 	PixelPos screenStartPos = CurrentViewport->MapToScreenPixelPos(mapPos);
-	COrderPtr order;
 	const bool flushed = unit.Orders[0]->Finished;
 
+	COrderPtr order;
 	// If the current order is cancelled show the next one
 	if (unit.Orders.size() > 1 && flushed) {
 		order = unit.Orders[1];
@@ -700,12 +643,11 @@ void ShowOrder(const CUnit &unit)
 **
 **  @param unit  Unit pointer of drawn unit.
 **  @param type  Unit-type pointer.
-**  @param x     X screen pixel position of unit.
-**  @param y     Y screen pixel position of unit.
+**  @param screenPos  screen pixel (top left) position of unit.
 **
 **  @todo FIXME: The different styles should become a function call.
 */
-static void DrawInformations(const CUnit &unit, const CUnitType &type, int x, int y)
+static void DrawInformations(const CUnit &unit, const CUnitType &type, const PixelPos &screenPos)
 {
 #if 0 && DEBUG // This is for showing vis counts and refs.
 	char buf[10];
@@ -713,18 +655,14 @@ static void DrawInformations(const CUnit &unit, const CUnitType &type, int x, in
 			unit.Seen.ByPlayer & (1 << ThisPlayer->Index) ? 'Y' : 'N',
 			unit.Seen.Destroyed & (1 << ThisPlayer->Index) ? 'Y' : 'N',
 			unit.Refs);
-	CLabel(GetSmallFont()).Draw(x + 10, y + 10, buf);
+	CLabel(GetSmallFont()).Draw(screenPos.x + 10, screenPos.y + 10, buf);
 #endif
 
 	const CUnitStats &stats = *unit.Stats;
 
-	//
 	// For debug draw sight, react and attack range!
-	//
 	if (NumSelected == 1 && unit.Selected) {
-		const PixelPos center = {x + type.TileWidth *PixelTileSize.x / 2,
-								 y + type.TileHeight *PixelTileSize.y / 2
-								};
+		const PixelPos center(screenPos + type.GetPixelSize() / 2);
 
 		if (Preference.ShowSightRange) {
 			const int value = stats.Variables[SIGHTRANGE_INDEX].Max;
@@ -758,69 +696,9 @@ static void DrawInformations(const CUnit &unit, const CUnitType &type, int x, in
 
 	// FIXME: johns: ugly check here, should be removed!
 	if (unit.CurrentAction() != UnitActionDie && unit.IsVisible(*ThisPlayer)) {
-		DrawDecoration(unit, &type, x, y);
+		DrawDecoration(unit, type, screenPos);
 	}
 }
-
-#if 0
-/**
-**  Draw the sprite with the player colors
-**
-**  @param type      Unit type
-**  @param sprite    Original sprite
-**  @param player    Player number
-**  @param frame     Frame number to draw.
-**  @param x         X position.
-**  @param y         Y position.
-*/
-void DrawUnitPlayerColor(const CUnitType *type, CGraphic *sprite,
-						 int player, int frame, int x, int y)
-{
-	int f;
-
-	if (type->Flip) {
-		if (frame < 0) {
-			f = -frame - 1;
-		} else {
-			f = frame;
-		}
-	} else {
-		int row;
-
-		row = type->NumDirections / 2 + 1;
-		if (frame < 0) {
-			f = ((-frame - 1) / row) * type->NumDirections + type->NumDirections - (-frame - 1) % row;
-		} else {
-			f = (frame / row) * type->NumDirections + frame % row;
-		}
-	}
-	if (!sprite->PlayerColorTextures[player]) {
-		MakePlayerColorTexture(sprite, player, &Players[player].UnitColors);
-	}
-
-	// FIXME: move this calculation to high level.
-	x -= (type->Width - type->TileWidth * PixelTileSize.x) / 2;
-	y -= (type->Height - type->TileHeight * PixelTileSize.y) / 2;
-
-	if (type->Flip) {
-		if (frame < 0) {
-			VideoDrawClipX(glsprite[player], -frame - 1, x, y);
-		} else {
-			VideoDrawClip(glsprite[player], frame, x, y);
-		}
-	} else {
-		int row;
-
-		row = type->NumDirections / 2 + 1;
-		if (frame < 0) {
-			frame = ((-frame - 1) / row) * type->NumDirections + type->NumDirections - (-frame - 1) % row;
-		} else {
-			frame = (frame / row) * type->NumDirections + frame % row;
-		}
-		VideoDrawClip(glsprite[player], frame, x, y);
-	}
-}
-#endif
 
 /**
 **  Draw construction shadow.
@@ -828,34 +706,34 @@ void DrawUnitPlayerColor(const CUnitType *type, CGraphic *sprite,
 **  @param unit    Unit pointer.
 **  @param cframe  Construction frame
 **  @param frame   Frame number to draw.
-**  @param x       X position.
-**  @param y       Y position.
+**  @param screenPos  screen (top left) position of the unit.
 */
 static void DrawConstructionShadow(const CUnitType &type, const CConstructionFrame *cframe,
-								   int frame, int x, int y)
+								   int frame, const PixelPos &screenPos)
 {
+	PixelPos pos = screenPos;
 	if (cframe->File == ConstructionFileConstruction) {
 		if (type.Construction->ShadowSprite) {
-			x -= (type.Construction->Width - type.TileWidth * PixelTileSize.x) / 2;
-			x += type.OffsetX;
-			y -= (type.Construction->Height - type.TileHeight * PixelTileSize.y) / 2;
-			y += type.OffsetY;
+			pos.x -= (type.Construction->Width - type.TileWidth * PixelTileSize.x) / 2;
+			pos.x += type.OffsetX;
+			pos.y -= (type.Construction->Height - type.TileHeight * PixelTileSize.y) / 2;
+			pos.y += type.OffsetY;
 			if (frame < 0) {
-				type.Construction->ShadowSprite->DrawFrameClipX(-frame - 1, x, y);
+				type.Construction->ShadowSprite->DrawFrameClipX(-frame - 1, pos.x, pos.y);
 			} else {
-				type.Construction->ShadowSprite->DrawFrameClip(frame, x, y);
+				type.Construction->ShadowSprite->DrawFrameClip(frame, pos.x, pos.y);
 			}
 		}
 	} else {
 		if (type.ShadowSprite) {
-			x -= (type.ShadowWidth - type.TileWidth * PixelTileSize.x) / 2;
-			x += type.ShadowOffsetX + type.OffsetX;
-			y -= (type.ShadowHeight - type.TileHeight * PixelTileSize.y) / 2;
-			y += type.ShadowOffsetY + type.OffsetY;
+			pos.x -= (type.ShadowWidth - type.TileWidth * PixelTileSize.x) / 2;
+			pos.x += type.ShadowOffsetX + type.OffsetX;
+			pos.y -= (type.ShadowHeight - type.TileHeight * PixelTileSize.y) / 2;
+			pos.y += type.ShadowOffsetY + type.OffsetY;
 			if (frame < 0) {
-				type.ShadowSprite->DrawFrameClipX(-frame - 1, x, y);
+				type.ShadowSprite->DrawFrameClipX(-frame - 1, pos.x, pos.y);
 			} else {
-				type.ShadowSprite->DrawFrameClip(frame, x, y);
+				type.ShadowSprite->DrawFrameClip(frame, pos.x, pos.y);
 			}
 		}
 	}
@@ -868,30 +746,28 @@ static void DrawConstructionShadow(const CUnitType &type, const CConstructionFra
 **  @param cframe  Construction frame to draw.
 **  @param type    Unit type.
 **  @param frame   Frame number.
-**  @param x       X position.
-**  @param y       Y position.
+**  @param screenPos  screen (top left) position of the unit.
 */
 static void DrawConstruction(const int player, const CConstructionFrame *cframe,
-							 const CUnitType &type, int frame, int x, int y)
+							 const CUnitType &type, int frame, const PixelPos &screenPos)
 {
+	PixelPos pos = screenPos;
 	if (cframe->File == ConstructionFileConstruction) {
-		const CConstruction *construction;
-
-		construction = type.Construction;
-		x -= construction->Width / 2;
-		y -= construction->Height / 2;
+		const CConstruction &construction = *type.Construction;
+		pos.x -= construction.Width / 2;
+		pos.y -= construction.Height / 2;
 		if (frame < 0) {
-			construction->Sprite->DrawPlayerColorFrameClipX(player, -frame - 1, x, y);
+			construction.Sprite->DrawPlayerColorFrameClipX(player, -frame - 1, pos.x, pos.y);
 		} else {
-			construction->Sprite->DrawPlayerColorFrameClip(player, frame, x, y);
+			construction.Sprite->DrawPlayerColorFrameClip(player, frame, pos.x, pos.y);
 		}
 	} else {
-		x += type.OffsetX - type.Width / 2;
-		y += type.OffsetY - type.Height / 2;
+		pos.x += type.OffsetX - type.Width / 2;
+		pos.y += type.OffsetY - type.Height / 2;
 		if (frame < 0) {
 			frame = -frame - 1;
 		}
-		type.Sprite->DrawPlayerColorFrameClip(player, frame, x, y);
+		type.Sprite->DrawPlayerColorFrameClip(player, frame, pos.x, pos.y);
 	}
 }
 
@@ -902,15 +778,11 @@ static void DrawConstruction(const int player, const CConstructionFrame *cframe,
 /**
 **  Draw unit on map.
 */
-void CUnit::Draw(const CViewport *vp) const
+void CUnit::Draw(const CViewport &vp) const
 {
-	int x;
-	int y;
 	int frame;
 	int state;
 	int constructed;
-	CPlayerColorGraphic *sprite;
-	ResourceInfo *resinfo;
 	const CConstructionFrame *cframe;
 	const CUnitType *type;
 
@@ -925,12 +797,11 @@ void CUnit::Draw(const CViewport *vp) const
 
 	int player = this->RescuedFrom ? this->RescuedFrom->Index : this->Player->Index;
 	int action = this->CurrentAction();
+	PixelPos screenPos;
 	if (ReplayRevealMap || IsVisible) {
-		const PixelPos &screenPos = vp->TilePosToScreen_TopLeft(this->tilePos);
+		screenPos = vp.MapToScreenPixelPos(this->GetMapPixelPosTopLeft());
 		type = this->Type;
 		frame = this->Frame;
-		x = screenPos.x + this->IX;
-		y = screenPos.y + this->IY;
 		state = (action == UnitActionBuilt) | ((action == UnitActionUpgradeTo) << 1);
 		constructed = this->Constructed;
 		// Reset Type to the type being upgraded to
@@ -948,10 +819,10 @@ void CUnit::Draw(const CViewport *vp) const
 			cframe = NULL;
 		}
 	} else {
-		const PixelPos &screenPos = vp->TilePosToScreen_TopLeft(this->Seen.tilePos);
+		screenPos = vp.TilePosToScreen_TopLeft(this->Seen.tilePos);
 
-		x = screenPos.x + this->Seen.IX;
-		y = screenPos.y + this->Seen.IY;
+		screenPos.x += this->Seen.IX;
+		screenPos.y += this->Seen.IY;
 		frame = this->Seen.Frame;
 		type = this->Seen.Type;
 		constructed = this->Seen.Constructed;
@@ -967,16 +838,16 @@ void CUnit::Draw(const CViewport *vp) const
 
 	if (!IsVisible && frame == UnitNotSeen) {
 		DebugPrint("FIXME: Something is wrong, unit %d not seen but drawn time %lu?.\n" _C_
-				   this->Slot _C_ GameCycle);
+				   UnitNumber(*this) _C_ GameCycle);
 		return;
 	}
 
 
 	if (state == 1 && constructed) {
-		DrawConstructionShadow(*type, cframe, frame, x, y);
+		DrawConstructionShadow(*type, cframe, frame, screenPos);
 	} else {
 		if (action != UnitActionDie) {
-			DrawShadow(*type, frame, x, y);
+			DrawShadow(*type, frame, screenPos);
 		}
 	}
 
@@ -988,9 +859,9 @@ void CUnit::Draw(const CViewport *vp) const
 	//
 	// Adjust sprite for Harvesters.
 	//
-	sprite = type->Sprite;
+	CPlayerColorGraphic *sprite = type->Sprite;
 	if (type->Harvester && this->CurrentResource) {
-		resinfo = type->ResInfo[this->CurrentResource];
+		ResourceInfo *resinfo = type->ResInfo[this->CurrentResource];
 		if (this->ResourcesHeld) {
 			if (resinfo->SpriteWhenLoaded) {
 				sprite = resinfo->SpriteWhenLoaded;
@@ -1008,22 +879,20 @@ void CUnit::Draw(const CViewport *vp) const
 	//
 	if (state == 1) {
 		if (constructed) {
-			DrawConstruction(player, cframe, *type, frame,
-							 x + (type->TileWidth * PixelTileSize.x) / 2,
-							 y + (type->TileHeight * PixelTileSize.y) / 2);
+			const PixelPos pos(screenPos + (type->GetPixelSize()) / 2);
+			DrawConstruction(player, cframe, *type, frame, pos);
+		} else {
+			DrawUnitType(*type, sprite, player, frame, screenPos);
 		}
 		//
 		// Draw the future unit type, if upgrading to it.
 		//
-	} else if (state == 2) {
-		// FIXME: this frame is hardcoded!!!
-		DrawUnitType(*type, sprite, player, frame < 0 ? /*-1*/ - 1 : 1, x, y);
 	} else {
-		DrawUnitType(*type, sprite, player, frame, x, y);
+		DrawUnitType(*type, sprite, player, frame, screenPos);
 	}
 
 	// Unit's extras not fully supported.. need to be decorations themselves.
-	DrawInformations(*this, *type, x, y);
+	DrawInformations(*this, *type, screenPos);
 }
 
 /**
@@ -1041,11 +910,10 @@ static inline bool DrawLevelCompare(const CUnit *c1, const CUnit *c2)
 	if (drawlevel1 == drawlevel2) {
 		// diffpos compares unit's Y positions (bottom of sprite) on the map
 		// and uses X position in case Y positions are equal.
-		// FIXME: Use BoxHeight?
-		const int pos1 = (c1->tilePos.y * PixelTileSize.y + c1->IY + c1->Type->Height);
-		const int pos2 = (c2->tilePos.y * PixelTileSize.y + c2->IY + c2->Type->Height);
+		const int pos1 = (c1->tilePos.y + c1->Type->TileHeight - 1) * PixelTileSize.y + c1->IY;
+		const int pos2 = (c2->tilePos.y + c2->Type->TileHeight - 1) * PixelTileSize.y + c2->IY;
 		return pos1 == pos2 ?
-			   (c1->tilePos.x - c2->tilePos.x ? c1->tilePos.x < c2->tilePos.x : c1->Slot < c2->Slot) : pos1 < pos2;
+			   (c1->tilePos.x != c2->tilePos.x ? c1->tilePos.x < c2->tilePos.x : UnitNumber(*c1) < UnitNumber(*c2)) : pos1 < pos2;
 	} else {
 		return drawlevel1 < drawlevel2;
 	}
@@ -1058,15 +926,15 @@ static inline bool DrawLevelCompare(const CUnit *c1, const CUnit *c2)
 **  @param table  Table of units to return in sorted order
 **
 */
-int FindAndSortUnits(const CViewport *vp, std::vector<CUnit *> &table)
+int FindAndSortUnits(const CViewport &vp, std::vector<CUnit *> &table)
 {
 	//  Select all units touching the viewpoint.
-	const Vec2i offset = {1, 1};
-	const Vec2i vpSize = {vp->MapWidth, vp->MapHeight};
-	const Vec2i minPos = vp->MapPos - offset;
-	const Vec2i maxPos = vp->MapPos + vpSize + offset;
+	const Vec2i offset(1, 1);
+	const Vec2i vpSize(vp.MapWidth, vp.MapHeight);
+	const Vec2i minPos = vp.MapPos - offset;
+	const Vec2i maxPos = vp.MapPos + vpSize + offset;
 
-	Map.Select(minPos, maxPos, table);
+	Select(minPos, maxPos, table);
 
 	size_t n = table.size();
 	for (size_t i = 0; i < table.size(); ++i) {
@@ -1076,9 +944,7 @@ int FindAndSortUnits(const CViewport *vp, std::vector<CUnit *> &table)
 		}
 	}
 	Assert(n == table.size());
-	if (n > 1) {
-		std::sort(table.begin(), table.begin() + n, DrawLevelCompare);
-	}
+	std::sort(table.begin(), table.begin() + n, DrawLevelCompare);
 	return n;
 }
 

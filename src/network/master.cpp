@@ -34,8 +34,6 @@
 ----------------------------------------------------------------------------*/
 
 #include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <stdarg.h>
 #include <ctype.h>
 #include <limits.h>
@@ -48,12 +46,15 @@
 
 #include "SDL.h"
 
-#include "iocompat.h"
-#include "network.h"
-#include "netconnect.h"
-#include "script.h"
 #include "master.h"
+
+#include "game.h"
+#include "iocompat.h"
+#include "netconnect.h"
+#include "network.h"
 #include "net_lowlevel.h"
+#include "script.h"
+#include "version.h"
 
 
 /*----------------------------------------------------------------------------

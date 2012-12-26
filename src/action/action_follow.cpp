@@ -33,10 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
 
 #include "action/action_follow.h"
@@ -46,7 +42,9 @@
 #include "script.h"
 #include "ui.h"
 #include "unit.h"
+#include "unit_find.h"
 #include "unittype.h"
+#include "video.h"
 
 enum {
 	State_Init = 0,
@@ -258,7 +256,7 @@ enum {
 		DebugPrint("Goal gone\n");
 		this->goalPos = goal->tilePos + goal->Type->GetHalfTileSize();
 		this->ClearGoal();
-		goal = NoUnitP;
+		goal = NULL;
 	}
 
 	if (unit.Anim.Unbreakable) {
@@ -273,14 +271,16 @@ enum {
 		CUnit *target = AttackUnitsInReactRange(unit);
 		if (target) {
 			// Save current command to come back.
-			COrder *savedOrder = this->Clone();
+			COrder *savedOrder = NULL;
+			if (unit.CanStoreOrder(unit.CurrentOrder())) {
+				savedOrder = this->Clone();
+			}
 
 			this->Finished = true;
 			unit.Orders.insert(unit.Orders.begin() + 1, COrder::NewActionAttack(unit, target->tilePos));
 
-			if (unit.StoreOrder(savedOrder) == false) {
-				delete savedOrder;
-				savedOrder = NULL;
+			if (savedOrder != NULL) {
+				unit.SavedOrder = savedOrder;
 			}
 		}
 	}

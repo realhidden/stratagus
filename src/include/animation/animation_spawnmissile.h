@@ -50,6 +50,7 @@ private:
 	std::string destXStr;
 	std::string destYStr;
 	std::string flagsStr;
+	std::string offsetNumStr;
 };
 
 //@}

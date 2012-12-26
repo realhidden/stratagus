@@ -33,14 +33,11 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <assert.h>
 #include <limits.h>
 
 #include "stratagus.h"
 
-#include "unit.h"
+#include "unit_find.h"
 
 #include "actions.h"
 #include "map.h"
@@ -48,7 +45,469 @@
 #include "pathfinder.h"
 #include "player.h"
 #include "spells.h"
+#include "unit.h"
+#include "unit_manager.h"
 #include "unittype.h"
+
+/*----------------------------------------------------------------------------
+  -- Finding units
+  ----------------------------------------------------------------------------*/
+
+class NoFilter
+{
+public:
+	bool operator()(const CUnit *) const { return true; }
+};
+
+void Select(const Vec2i &ltPos, const Vec2i &rbPos, std::vector<CUnit *> &units)
+{
+	Select(ltPos, rbPos, units, NoFilter());
+}
+
+void SelectFixed(const Vec2i &ltPos, const Vec2i &rbPos, std::vector<CUnit *> &units)
+{
+	Select(ltPos, rbPos, units, NoFilter());
+}
+
+void SelectAroundUnit(const CUnit &unit, int range, std::vector<CUnit *> &around)
+{
+	SelectAroundUnit(unit, range, around, NoFilter());
+}
+
+CUnit *UnitFinder::FindUnitAtPos(const Vec2i &pos) const
+{
+	CUnitCache &cache = Map.Field(pos)->UnitCache;
+
+	for (CUnitCache::iterator it = cache.begin(); it != cache.end(); ++it) {
+		CUnit *unit = *it;
+
+		if (std::find(units.begin(), units.end(), unit) != units.end()) {
+			return unit;
+		}
+	}
+	return NULL;
+}
+
+VisitResult UnitFinder::Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from)
+{
+	if (!player.AiEnabled && !Map.Field(pos)->playerInfo.IsExplored(player)) {
+		return VisitResult_DeadEnd;
+	}
+	// Look if found what was required.
+	CUnit *unit = FindUnitAtPos(pos);
+	if (unit) {
+		*unitP = unit;
+		return VisitResult_Finished;
+	}
+	if (CanMoveToMask(pos, movemask)) { // reachable
+		if (terrainTraversal.Get(pos) <= maxDist) {
+			return VisitResult_Ok;
+		} else {
+			return VisitResult_DeadEnd;
+		}
+	} else { // unreachable
+		return VisitResult_DeadEnd;
+	}
+}
+
+class TerrainFinder
+{
+public:
+	TerrainFinder(const CPlayer &player, int maxDist, int movemask, int resmask, Vec2i *resPos) :
+		player(player), maxDist(maxDist), movemask(movemask), resmask(resmask), resPos(resPos) {}
+	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
+private:
+	const CPlayer &player;
+	int maxDist;
+	int movemask;
+	int resmask;
+	Vec2i *resPos;
+};
+
+VisitResult TerrainFinder::Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from)
+{
+	if (!player.AiEnabled && !Map.Field(pos)->playerInfo.IsExplored(player)) {
+		return VisitResult_DeadEnd;
+	}
+	// Look if found what was required.
+	if (Map.Field(pos)->CheckMask(resmask)) {
+		if (resPos) {
+			*resPos = pos;
+		}
+		return VisitResult_Finished;
+	}
+	if (CanMoveToMask(pos, movemask)) { // reachable
+		if (terrainTraversal.Get(pos) <= maxDist) {
+			return VisitResult_Ok;
+		} else {
+			return VisitResult_DeadEnd;
+		}
+	} else { // unreachable
+		return VisitResult_DeadEnd;
+	}
+}
+
+/**
+**  Find the closest piece of terrain with the given flags.
+**
+**  @param movemask    The movement mask to reach that location.
+**  @param resmask     Result tile mask.
+**  @param range       Maximum distance for the search.
+**  @param player      Only search fields explored by player
+**  @param startPos    Map start position for the search.
+**
+**  @param terrainPos  OUT: Map position of tile.
+**
+**  @note Movement mask can be 0xFFFFFFFF to have no effect
+**  Range is not circular, but square.
+**  Player is ignored if nil(search the entire map)
+**
+**  @return            True if wood was found.
+*/
+bool FindTerrainType(int movemask, int resmask, int range,
+					 const CPlayer &player, const Vec2i &startPos, Vec2i *terrainPos)
+{
+	TerrainTraversal terrainTraversal;
+
+	terrainTraversal.SetSize(Map.Info.MapWidth, Map.Info.MapHeight);
+	terrainTraversal.Init();
+
+	terrainTraversal.PushPos(startPos);
+
+	TerrainFinder terrainFinder(player, range, movemask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit), resmask, terrainPos);
+
+	return terrainTraversal.Run(terrainFinder);
+}
+
+
+template <const bool NEARLOCATION>
+class BestDepotFinder
+{
+	inline void operator()(CUnit *const dest) {
+		/* Only resource depots */
+		if (dest->Type->CanStore[resource]
+			&& dest->IsAliveOnMap()
+			&& dest->CurrentAction() != UnitActionBuilt) {
+			// Unit in range?
+
+			if (NEARLOCATION) {
+				int d = dest->MapDistanceTo(u_near.loc);
+
+				//
+				// Take this depot?
+				//
+				if (d <= range && d < best_dist) {
+					best_depot = dest;
+					best_dist = d;
+				}
+			} else {
+				int d;
+				const CUnit *worker = u_near.worker;
+				if (!worker->Container) {
+					d = worker->MapDistanceTo(*dest);
+				} else {
+					d = worker->Container->MapDistanceTo(*dest);
+				}
+
+				// Use Circle, not square :)
+				if (d > range) {
+					return;
+				}
+
+				// calck real travel distance
+				if (!worker->Container) {
+					d = UnitReachable(*worker, *dest, 1);
+				}
+				//
+				// Take this depot?
+				//
+				if (d && d < best_dist) {
+					best_depot = dest;
+					best_dist = d;
+				}
+			}
+		}
+	}
+
+public:
+	BestDepotFinder(const CUnit &w, int res, int ran) :
+		resource(res), range(ran),
+		best_dist(INT_MAX), best_depot(0) {
+		u_near.worker = &w;
+	}
+
+	BestDepotFinder(const Vec2i &pos, int res, int ran) :
+		resource(res), range(ran),
+		best_dist(INT_MAX), best_depot(0) {
+		u_near.loc = pos;
+	}
+
+	template <typename ITERATOR>
+	CUnit *Find(ITERATOR begin, ITERATOR end) {
+		for (ITERATOR it = begin; it != end; ++it) {
+			this->operator()(*it);
+		}
+		return best_depot;
+	}
+
+	CUnit *Find(CUnitCache &cache) {
+		cache.for_each(*this);
+		return best_depot;
+	}
+private:
+	struct {
+		const CUnit *worker;
+		Vec2i loc;
+	} u_near;
+	const int resource;
+	const int range;
+	int best_dist;
+public:
+	CUnit *best_depot;
+};
+
+CUnit *FindDepositNearLoc(CPlayer &p, const Vec2i &pos, int range, int resource)
+{
+	BestDepotFinder<true> finder(pos, resource, range);
+	CUnit *depot = finder.Find(p.UnitBegin(), p.UnitEnd());
+
+	if (!depot) {
+		for (int i = 0; i < PlayerMax; ++i) {
+			if (i != p.Index &&
+				Players[i].IsAllied(p) &&
+				p.IsAllied(Players[i])) {
+				finder.Find(Players[i].UnitBegin(), Players[i].UnitEnd());
+			}
+		}
+		depot = finder.best_depot;
+	}
+	return depot;
+}
+
+class CResourceFinder
+{
+public:
+	CResourceFinder(int r, bool on_top) : resource(r), mine_on_top(on_top) {}
+	bool operator()(const CUnit *const unit) const {
+		const CUnitType &type = *unit->Type;
+		return (type.GivesResource == resource
+				&& unit->ResourcesHeld != 0
+				&& (mine_on_top ? type.CanHarvest : !type.CanHarvest)
+				&& !unit->IsUnusable(true) //allow mines under construction
+			   );
+	}
+private:
+	const int resource;
+	const bool mine_on_top;
+};
+
+class ResourceUnitFinder
+{
+public:
+	ResourceUnitFinder(const CUnit &worker, const CUnit *deposit, int resource, int maxRange, bool check_usage, CUnit **resultMine) :
+		worker(worker),
+		resinfo(*worker.Type->ResInfo[resource]),
+		deposit(deposit),
+		movemask(worker.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
+		resource(resource),
+		maxRange(maxRange),
+		check_usage(check_usage),
+		res_finder(resource, 1),
+		resultMine(resultMine) {
+		bestCost.SetToMax();
+		*resultMine = NULL;
+	}
+	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
+private:
+	bool MineIsUsable(const CUnit &mine) const;
+
+	struct ResourceUnitFinder_Cost {
+	public:
+		void SetFrom(const CUnit &mine, const CUnit *deposit, bool check_usage);
+		bool operator < (const ResourceUnitFinder_Cost &rhs) const {
+			if (assigned != rhs.assigned) {
+				return assigned < rhs.assigned;
+			} else if (waiting != rhs.waiting) {
+				return waiting < rhs.waiting;
+			} else {
+				return distance < rhs.distance;
+			}
+		}
+		void SetToMax() { assigned = waiting = distance = UINT_MAX; }
+		bool IsMin() const { return assigned == 0 && waiting == 0 && distance == 0; }
+
+	public:
+		unsigned int assigned;
+		unsigned int waiting;
+		unsigned int distance;
+	};
+
+private:
+	const CUnit &worker;
+	const ResourceInfo &resinfo;
+	const CUnit *deposit;
+	unsigned int movemask;
+	int resource;
+	int maxRange;
+	bool check_usage;
+	CResourceFinder res_finder;
+	ResourceUnitFinder_Cost bestCost;
+	CUnit **resultMine;
+};
+
+bool ResourceUnitFinder::MineIsUsable(const CUnit &mine) const
+{
+	return mine.Type->CanHarvest && mine.ResourcesHeld
+		   && (resinfo.HarvestFromOutside
+			   || mine.Player->Index == PlayerMax - 1
+			   || mine.Player == worker.Player
+			   || (worker.IsAllied(mine) && mine.IsAllied(worker)));
+}
+
+void ResourceUnitFinder::ResourceUnitFinder_Cost::SetFrom(const CUnit &mine, const CUnit *deposit, bool check_usage)
+{
+	distance = deposit ? mine.MapDistanceTo(*deposit) : 0;
+	if (check_usage) {
+		assigned = mine.Resource.Assigned - mine.Type->MaxOnBoard;
+		waiting = GetNumWaitingWorkers(mine);
+	} else {
+		assigned = 0;
+		waiting = 0;
+	}
+}
+
+VisitResult ResourceUnitFinder::Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from)
+{
+	if (!worker.Player->AiEnabled && !Map.Field(pos)->playerInfo.IsExplored(*worker.Player)) {
+		return VisitResult_DeadEnd;
+	}
+
+	CUnit *mine = Map.Field(pos)->UnitCache.find(res_finder);
+
+	if (mine && mine != *resultMine && MineIsUsable(*mine)) {
+		ResourceUnitFinder::ResourceUnitFinder_Cost cost;
+
+		cost.SetFrom(*mine, deposit, check_usage);
+		if (cost < bestCost) {
+			*resultMine = mine;
+
+			if (cost.IsMin()) {
+				return VisitResult_Finished;
+			}
+			bestCost = cost;
+		}
+	}
+	if (CanMoveToMask(pos, movemask)) { // reachable
+		if (terrainTraversal.Get(pos) < maxRange) {
+			return VisitResult_Ok;
+		} else {
+			return VisitResult_DeadEnd;
+		}
+	} else { // unreachable
+		return VisitResult_DeadEnd;
+	}
+}
+
+/**
+**  Find Resource.
+**
+**  @param unit        The unit that wants to find a resource.
+**  @param startUnit   Find closest unit from this location
+**  @param range       Maximum distance to the resource.
+**  @param resource    The resource id.
+**
+**  @note This will return an usable resource building that doesn't
+**  belong to the player or one of his allies.
+**
+**  @return            NULL or resource unit
+*/
+CUnit *UnitFindResource(const CUnit &unit, const CUnit &startUnit, int range, int resource,
+						bool check_usage, const CUnit *deposit)
+{
+	if (!deposit) { // Find the nearest depot
+		deposit = FindDepositNearLoc(*unit.Player, startUnit.tilePos, range, resource);
+	}
+
+	TerrainTraversal terrainTraversal;
+
+	terrainTraversal.SetSize(Map.Info.MapWidth, Map.Info.MapHeight);
+	terrainTraversal.Init();
+
+	terrainTraversal.PushUnitPosAndNeighboor(startUnit);
+
+	CUnit *resultMine = NULL;
+
+	ResourceUnitFinder resourceUnitFinder(unit, deposit, resource, range, check_usage, &resultMine);
+
+	terrainTraversal.Run(resourceUnitFinder);
+	return resultMine;
+}
+
+/**
+**  Find deposit. This will find a deposit for a resource
+**
+**  @param unit        The unit that wants to find a resource.
+**  @param x           Closest to x
+**  @param y           Closest to y
+**  @param range       Maximum distance to the deposit.
+**  @param resource    Resource to find deposit from.
+**
+**  @note This will return a reachable allied depot.
+**
+**  @return            NULL or deposit unit
+*/
+CUnit *FindDeposit(const CUnit &unit, int range, int resource)
+{
+	BestDepotFinder<false> finder(unit, resource, range);
+	CUnit *depot = finder.Find(unit.Player->UnitBegin(), unit.Player->UnitEnd());
+	if (!depot) {
+		for (int i = 0; i < PlayerMax; ++i) {
+			if (i != unit.Player->Index &&
+				Players[i].IsAllied(*unit.Player) &&
+				unit.Player->IsAllied(Players[i])) {
+				finder.Find(Players[i].UnitBegin(), Players[i].UnitEnd());
+			}
+		}
+		depot = finder.best_depot;
+	}
+	return depot;
+}
+
+/**
+**  Find the next idle worker
+**
+**  @param player    Player's units to search through
+**  @param last      Previous idle worker selected
+**
+**  @return NULL or next idle worker
+*/
+CUnit *FindIdleWorker(const CPlayer &player, const CUnit *last)
+{
+	CUnit *FirstUnitFound = NULL;
+	int SelectNextUnit = (last == NULL) ? 1 : 0;
+	const int nunits = player.GetUnitCount();
+
+	for (int i = 0; i < nunits; ++i) {
+		CUnit &unit = player.GetUnit(i);
+		if (unit.Type->Harvester && unit.Type->ResInfo && !unit.Removed) {
+			if (unit.CurrentAction() == UnitActionStill) {
+				if (SelectNextUnit && !IsOnlySelected(unit)) {
+					return &unit;
+				}
+				if (FirstUnitFound == NULL) {
+					FirstUnitFound = &unit;
+				}
+			}
+		}
+		if (&unit == last) {
+			SelectNextUnit = 1;
+		}
+	}
+	if (FirstUnitFound != NULL && !IsOnlySelected(*FirstUnitFound)) {
+		return FirstUnitFound;
+	}
+	return NULL;
+}
 
 /**
 **  Find all units of type.
@@ -58,8 +517,8 @@
 */
 void FindUnitsByType(const CUnitType &type, std::vector<CUnit *> &units)
 {
-	for (int i = 0; i < NumUnits; ++i) {
-		CUnit &unit = *Units[i];
+	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+		CUnit &unit = **it;
 
 		if (unit.Type == &type && !unit.IsUnusable()) {
 			units.push_back(&unit);
@@ -109,7 +568,7 @@ void FindPlayerUnitsByType(const CPlayer &player, const CUnitType &type, std::ve
 */
 CUnit *UnitOnMapTile(const unsigned int index, unsigned int type)
 {
-	return CUnitTypeFinder((UnitTypeType)type).Find(Map.Field(index));
+	return Map.Field(index)->UnitCache.find(CUnitTypeFinder((UnitTypeType)type));
 }
 
 /**
@@ -125,45 +584,34 @@ CUnit *UnitOnMapTile(const Vec2i &pos, unsigned int type)
 	return UnitOnMapTile(Map.getIndex(pos), type);
 }
 
-
 /**
 **  Choose target on map area.
 **
 **  @param source  Unit which want to attack.
-**  @param x1      X position on map, tile-based.
-**  @param y1      Y position on map, tile-based.
-**  @param x2      X position on map, tile-based.
-**  @param y2      Y position on map, tile-based.
+**  @param pos1    position on map, tile-based.
+**  @param pos2    position on map, tile-based.
 **
 **  @return        Returns ideal target on map tile.
 */
-CUnit *TargetOnMap(const CUnit &source, int x1, int y1, int x2, int y2)
+CUnit *TargetOnMap(const CUnit &source, const Vec2i &pos1, const Vec2i &pos2)
 {
-	const Vec2i pos1 = {x1, y1};
-	const Vec2i pos2 = {x2, y2};
 	std::vector<CUnit *> table;
 
-	Map.Select(pos1, pos2, table);
+	Select(pos1, pos2, table);
 	CUnit *best = NULL;
 	for (size_t i = 0; i != table.size(); ++i) {
-		CUnit *unit = table[i];
-		if (!unit->IsVisibleAsGoal(*source.Player)) {
+		CUnit &unit = *table[i];
+
+		if (!unit.IsVisibleAsGoal(*source.Player)) {
 			continue;
 		}
-		const CUnitType *type = unit->Type;
-		if (x2 < unit->tilePos.x || x1 >= unit->tilePos.x + type->TileWidth
-			|| y2 < unit->tilePos.y || y1 >= unit->tilePos.y + type->TileHeight) {
-			continue;
-		}
-		if (!CanTarget(source.Type, unit->Type)) {
+		if (!CanTarget(*source.Type, *unit.Type)) {
 			continue;
 		}
 
-		//
 		// Choose the best target.
-		//
-		if (!best || best->Type->Priority < unit->Type->Priority) {
-			best = unit;
+		if (!best || best->Type->Priority < unit.Type->Priority) {
+			best = &unit;
 		}
 	}
 	return best;
@@ -180,12 +628,23 @@ CUnit *TargetOnMap(const CUnit &source, int x1, int y1, int x2, int y2)
 **  @param resource  resource type.
 **  @param mine_on_top  return mine or mining area.
 **
-**  @return          Returns the deposit if found, or NoUnitP.
+**  @return          Returns the deposit if found, or NULL.
 */
 CUnit *ResourceOnMap(const Vec2i &pos, int resource, bool mine_on_top)
 {
-	return CResourceFinder(resource, mine_on_top).Find(Map.Field(pos));
+	return Map.Field(pos)->UnitCache.find(CResourceFinder(resource, mine_on_top));
 }
+
+class IsADepositForResource
+{
+public:
+	explicit IsADepositForResource(const int r) : resource(r) {}
+	bool operator()(const CUnit *const unit) const {
+		return (unit->Type->CanStore[resource] && !unit->IsUnusable());
+	}
+private:
+	const int resource;
+};
 
 /**
 **  Resource deposit on map tile
@@ -193,11 +652,11 @@ CUnit *ResourceOnMap(const Vec2i &pos, int resource, bool mine_on_top)
 **  @param pos       position on map, tile-based.
 **  @param resource  resource type.
 **
-**  @return          Returns the deposit if found, or NoUnitP.
+**  @return          Returns the deposit if found, or NULL.
 */
 CUnit *ResourceDepositOnMap(const Vec2i &pos, int resource)
 {
-	return CResourceDepositFinder(resource).Find(Map.Field(pos));
+	return Map.Field(pos)->UnitCache.find(IsADepositForResource(resource));
 }
 
 /*----------------------------------------------------------------------------
@@ -244,7 +703,7 @@ private:
 
 		if (!player.IsEnemy(*dest) // a friend or neutral
 			|| !dest->IsVisibleAsGoal(player)
-			|| !CanTarget(&type, &dtype)) {
+			|| !CanTarget(type, dtype)) {
 			return INT_MAX;
 		}
 		// Unit in range ?
@@ -284,7 +743,7 @@ private:
 		}
 
 		// Unit can attack back.
-		if (CanTarget(&dtype, &type)) {
+		if (CanTarget(dtype, type)) {
 			cost -= CANATTACK_BONUS;
 		}
 		return cost;
@@ -351,7 +810,7 @@ public:
 			const CUnitType &type =  *attacker->Type;
 			const CUnitType &dtype = *dest->Type;
 			// won't be a target...
-			if (!CanTarget(&type, &dtype)) { // can't be attacked.
+			if (!CanTarget(type, dtype)) { // can't be attacked.
 				dest->CacheLock = 1;
 				return;
 			}
@@ -417,7 +876,7 @@ public:
 				cost += -effective_hp * HEALTH_FACTOR;
 
 				//  Unit can attack back.
-				if (CanTarget(&dtype, &type)) {
+				if (CanTarget(dtype, type)) {
 					cost += CANATTACK_BONUS;
 				}
 
@@ -561,7 +1020,6 @@ private:
 		}
 	}
 
-
 private:
 	const CUnit *attacker;
 	const int range;
@@ -578,7 +1036,7 @@ struct CompareUnitDistance {
 		int d1 = c1->MapDistanceTo(*referenceunit);
 		int d2 = c2->MapDistanceTo(*referenceunit);
 		if (d1 == d2) {
-			return c1->Slot < c2->Slot;
+			return UnitNumber(*c1) < UnitNumber(*c2);
 		} else {
 			return d1 < d2;
 		}
@@ -613,11 +1071,11 @@ CUnit *AttackUnitsInDistance(const CUnit &unit, int range, bool onlyBuildings)
 		const CUnit *firstContainer = unit.Container ? unit.Container : &unit;
 		std::vector<CUnit *> table;
 		if (onlyBuildings) {
-			Map.SelectAroundUnit(*firstContainer, missile_range, table,
-								 MakeAndPredicate(HasNotSamePlayerAs(Players[PlayerNumNeutral]), IsBuildingType()));
+			SelectAroundUnit(*firstContainer, missile_range, table,
+							 MakeAndPredicate(HasNotSamePlayerAs(Players[PlayerNumNeutral]), IsBuildingType()));
 		} else {
-			Map.SelectAroundUnit(*firstContainer, missile_range, table,
-								 MakeNotPredicate(HasSamePlayerAs(Players[PlayerNumNeutral])));
+			SelectAroundUnit(*firstContainer, missile_range, table,
+							 MakeNotPredicate(HasSamePlayerAs(Players[PlayerNumNeutral])));
 		}
 
 		if (table.empty() == false) {
@@ -628,11 +1086,11 @@ CUnit *AttackUnitsInDistance(const CUnit &unit, int range, bool onlyBuildings)
 		std::vector<CUnit *> table;
 
 		if (onlyBuildings) {
-			Map.SelectAroundUnit(unit, range, table,
-								 MakeAndPredicate(HasNotSamePlayerAs(Players[PlayerNumNeutral]), IsBuildingType()));
+			SelectAroundUnit(unit, range, table,
+							 MakeAndPredicate(HasNotSamePlayerAs(Players[PlayerNumNeutral]), IsBuildingType()));
 		} else {
-			Map.SelectAroundUnit(unit, range, table,
-								 MakeNotPredicate(HasSamePlayerAs(Players[PlayerNumNeutral])));
+			SelectAroundUnit(unit, range, table,
+							 MakeNotPredicate(HasSamePlayerAs(Players[PlayerNumNeutral])));
 		}
 
 		const int n = static_cast<int>(table.size());
@@ -668,7 +1126,8 @@ CUnit *AttackUnitsInRange(const CUnit &unit)
 CUnit *AttackUnitsInReactRange(const CUnit &unit)
 {
 	Assert(unit.Type->CanAttack);
-	return AttackUnitsInDistance(unit, unit.GetReactRange());
+	const int range = unit.Player->Type == PlayerPerson ? unit.Type->ReactRangePerson : unit.Type->ReactRangeComputer;
+	return AttackUnitsInDistance(unit, range);
 }
 
 //@}

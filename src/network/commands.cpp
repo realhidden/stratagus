@@ -394,14 +394,14 @@ void SendCommandCancelUpgradeTo(CUnit &unit)
 ** @param what     research-type of the research.
 ** @param flush    Flag flush all pending commands.
 */
-void SendCommandResearch(CUnit &unit, CUpgrade *what, int flush)
+void SendCommandResearch(CUnit &unit, CUpgrade &what, int flush)
 {
 	if (!IsNetworkGame()) {
-		CommandLog("research", &unit, flush, -1, -1, NoUnitP, what->Ident.c_str(), -1);
+		CommandLog("research", &unit, flush, -1, -1, NoUnitP, what.Ident.c_str(), -1);
 		CommandResearch(unit, what, flush);
 	} else {
 		NetworkSendCommand(MessageCommandResearch, unit,
-						   what->ID, 0, NoUnitP, NULL, flush);
+						   what.ID, 0, NoUnitP, NULL, flush);
 	}
 }
 
@@ -434,7 +434,7 @@ void SendCommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, int spelli
 {
 	if (!IsNetworkGame()) {
 		CommandLog("spell-cast", &unit, flush, pos.x, pos.y, dest, NULL, spellid);
-		CommandSpellCast(unit, pos, dest, SpellTypeTable[spellid], flush);
+		CommandSpellCast(unit, pos, dest, *SpellTypeTable[spellid], flush);
 	} else {
 		NetworkSendCommand(MessageCommandSpellCast + spellid,
 						   unit, pos.x, pos.y, dest, NULL, flush);
@@ -539,11 +539,8 @@ void SendCommandSharedVision(int player, bool state, int opponent)
 void ParseCommand(unsigned char msgnr, UnitRef unum,
 				  unsigned short x, unsigned short y, UnitRef dstnr)
 {
-	Assert(unum < UnitSlotFree);
-	Assert(UnitSlots[unum]);
-
-	CUnit &unit = *UnitSlots[unum];
-	const Vec2i pos = {x, y};
+	CUnit &unit = UnitManager.GetSlotUnit(unum);
+	const Vec2i pos(x, y);
 	const int arg1 = x;
 	const int arg2 = y;
 	//
@@ -575,12 +572,11 @@ void ParseCommand(unsigned char msgnr, UnitRef unum,
 			CommandStandGround(unit, status);
 			break;
 		case MessageCommandFollow: {
-			CUnit *dest = NoUnitP;
 			if (dstnr != (unsigned short)0xFFFF) {
-				dest = UnitSlots[dstnr];
-				Assert(dest && dest->Type);
-				CommandLog("follow", &unit, status, -1, -1, dest, NULL, -1);
-				CommandFollow(unit, *dest, status);
+				CUnit &dest = UnitManager.GetSlotUnit(dstnr);
+				Assert(dest.Type);
+				CommandLog("follow", &unit, status, -1, -1, &dest, NULL, -1);
+				CommandFollow(unit, dest, status);
 			}
 			break;
 		}
@@ -591,7 +587,7 @@ void ParseCommand(unsigned char msgnr, UnitRef unum,
 		case MessageCommandRepair: {
 			CUnit *dest = NoUnitP;
 			if (dstnr != (unsigned short)0xFFFF) {
-				dest = UnitSlots[dstnr];
+				dest = &UnitManager.GetSlotUnit(dstnr);
 				Assert(dest && dest->Type);
 			}
 			CommandLog("repair", &unit, status, pos.x, pos.y, dest, NULL, -1);
@@ -605,7 +601,7 @@ void ParseCommand(unsigned char msgnr, UnitRef unum,
 		case MessageCommandAttack: {
 			CUnit *dest = NoUnitP;
 			if (dstnr != (unsigned short)0xFFFF) {
-				dest = UnitSlots[dstnr];
+				dest = &UnitManager.GetSlotUnit(dstnr);
 				Assert(dest && dest->Type);
 			}
 			CommandLog("attack", &unit, status, pos.x, pos.y, dest, NULL, -1);
@@ -621,19 +617,18 @@ void ParseCommand(unsigned char msgnr, UnitRef unum,
 			CommandPatrolUnit(unit, pos, status);
 			break;
 		case MessageCommandBoard: {
-			CUnit *dest = NoUnitP;
 			if (dstnr != (unsigned short)0xFFFF) {
-				dest = UnitSlots[dstnr];
-				Assert(dest && dest->Type);
-				CommandLog("board", &unit, status, arg1, arg2, dest, NULL, -1);
-				CommandBoard(unit, *dest, status);
+				CUnit &dest = UnitManager.GetSlotUnit(dstnr);
+				Assert(dest.Type);
+				CommandLog("board", &unit, status, arg1, arg2, &dest, NULL, -1);
+				CommandBoard(unit, dest, status);
 			}
 			break;
 		}
 		case MessageCommandUnload: {
-			CUnit *dest = NoUnitP;
+			CUnit *dest = NULL;
 			if (dstnr != (unsigned short)0xFFFF) {
-				dest = UnitSlots[dstnr];
+				dest = &UnitManager.GetSlotUnit(dstnr);
 				Assert(dest && dest->Type);
 			}
 			CommandLog("unload", &unit, status, pos.x, pos.y, dest, NULL, -1);
@@ -653,28 +648,25 @@ void ParseCommand(unsigned char msgnr, UnitRef unum,
 			CommandResourceLoc(unit, pos, status);
 			break;
 		case MessageCommandResource: {
-			CUnit *dest = NoUnitP;
 			if (dstnr != (unsigned short)0xFFFF) {
-				dest = UnitSlots[dstnr];
-				Assert(dest && dest->Type);
-				CommandLog("resource", &unit, status, -1, -1, dest, NULL, -1);
-				CommandResource(unit, *dest, status);
+				CUnit &dest = UnitManager.GetSlotUnit(dstnr);
+				Assert(dest.Type);
+				CommandLog("resource", &unit, status, -1, -1, &dest, NULL, -1);
+				CommandResource(unit, dest, status);
 			}
 			break;
 		}
 		case MessageCommandReturn: {
-			CUnit *dest = NoUnitP;
 			if (dstnr != (unsigned short)0xFFFF) {
-				dest = UnitSlots[dstnr];
-				Assert(dest && dest->Type);
-				CommandLog("return", &unit, status, -1, -1, dest, NULL, -1);
-				CommandReturnGoods(unit, dest, status);
+				CUnit &dest = UnitManager.GetSlotUnit(dstnr);
+				Assert(dest.Type);
+				CommandLog("return", &unit, status, -1, -1, &dest, NULL, -1);
+				CommandReturnGoods(unit, &dest, status);
 			}
 			break;
 		}
 		case MessageCommandTrain:
-			CommandLog("train", &unit, status, -1, -1, NoUnitP,
-					   UnitTypes[dstnr]->Ident.c_str(), -1);
+			CommandLog("train", &unit, status, -1, -1, NoUnitP, UnitTypes[dstnr]->Ident.c_str(), -1);
 			CommandTrainUnit(unit, *UnitTypes[dstnr], status);
 			break;
 		case MessageCommandCancelTrain:
@@ -684,8 +676,7 @@ void ParseCommand(unsigned char msgnr, UnitRef unum,
 						   UnitTypes[dstnr]->Ident.c_str(), (short)x);
 				CommandCancelTraining(unit, (short)x, UnitTypes[dstnr]);
 			} else {
-				CommandLog("cancel-train", &unit, FlushCommands, -1, -1, NoUnitP,
-						   NULL, (short)x);
+				CommandLog("cancel-train", &unit, FlushCommands, -1, -1, NoUnitP, NULL, (short)x);
 				CommandCancelTraining(unit, (short)x, NULL);
 			}
 			break;
@@ -701,7 +692,7 @@ void ParseCommand(unsigned char msgnr, UnitRef unum,
 		case MessageCommandResearch:
 			CommandLog("research", &unit, status, -1, -1, NoUnitP,
 					   AllUpgrades[arg1]->Ident.c_str(), -1);
-			CommandResearch(unit, AllUpgrades[arg1], status);
+			CommandResearch(unit, *AllUpgrades[arg1], status);
 			break;
 		case MessageCommandCancelResearch:
 			CommandLog("cancel-research", &unit, FlushCommands, -1, -1, NoUnitP, NULL, -1);
@@ -710,13 +701,13 @@ void ParseCommand(unsigned char msgnr, UnitRef unum,
 		default: {
 			int id = (msgnr & 0x7f) - MessageCommandSpellCast;
 			if (arg2 != (unsigned short)0xFFFF) {
-				CUnit *dest = NoUnitP;
+				CUnit *dest = NULL;
 				if (dstnr != (unsigned short)0xFFFF) {
-					dest = UnitSlots[dstnr];
+					dest = &UnitManager.GetSlotUnit(dstnr);
 					Assert(dest && dest->Type);
 				}
 				CommandLog("spell-cast", &unit, status, pos.x, pos.y, dest, NULL, id);
-				CommandSpellCast(unit, pos, dest, SpellTypeTable[id], status);
+				CommandSpellCast(unit, pos, dest, *SpellTypeTable[id], status);
 			} else {
 				CommandLog("auto-spell-cast", &unit, status, arg1, -1, NoUnitP, NULL, id);
 				CommandAutoSpellCast(unit, id, arg1);

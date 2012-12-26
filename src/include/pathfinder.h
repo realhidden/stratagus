@@ -51,10 +51,11 @@
 ----------------------------------------------------------------------------*/
 
 #include <queue>
-#include "Vec2i.h"
+#include "vec2i.h"
 
 class CUnit;
 class CFile;
+struct lua_State;
 
 /**
 **  Result codes of the pathfinder.
@@ -131,8 +132,7 @@ public:
 //  Terrain traversal stuff.
 //
 
-enum VisitResult
-{
+enum VisitResult {
 	VisitResult_Finished,
 	VisitResult_DeadEnd,
 	VisitResult_Ok,
@@ -142,31 +142,36 @@ enum VisitResult
 class TerrainTraversal
 {
 public:
+	typedef short unsigned int dataType;
+public:
 	void SetSize(unsigned int width, unsigned int height);
-	void Init(unsigned char borderValue);
+	void Init();
 
 	void PushPos(const Vec2i &pos);
 	void PushNeighboor(const Vec2i &pos);
+	void PushUnitPosAndNeighboor(const CUnit &unit);
 
 	template <typename T>
 	bool Run(T &context);
 
 	bool IsVisited(const Vec2i &pos) const;
+	bool IsReached(const Vec2i &pos) const;
+	bool IsInvalid(const Vec2i &pos) const;
 
 	// Accept pos to be at one inside the real map
-	unsigned char Get(const Vec2i &pos) const;
-	unsigned char& Get(const Vec2i &pos);
+	dataType Get(const Vec2i &pos) const;
 
 private:
-	struct PosNode
-	{
+	void Set(const Vec2i &pos, dataType value);
+
+	struct PosNode {
 		PosNode(const Vec2i &pos, const Vec2i &from) : pos(pos), from(from) {}
 		Vec2i pos;
 		Vec2i from;
 	};
 
 private:
-	std::vector<unsigned char> m_values;
+	std::vector<dataType> m_values;
 	std::queue<PosNode> m_queue;
 	unsigned int m_extented_width;
 	unsigned int m_height;
@@ -175,13 +180,12 @@ private:
 template <typename T>
 bool TerrainTraversal::Run(T &context)
 {
-	for (; m_queue.empty() == false; m_queue.pop())
-	{
-		const PosNode& posNode = m_queue.front();
+	for (; m_queue.empty() == false; m_queue.pop()) {
+		const PosNode &posNode = m_queue.front();
 
 		switch (context.Visit(*this, posNode.pos, posNode.from)) {
 			case VisitResult_Finished: return true;
-			case VisitResult_DeadEnd: break;
+			case VisitResult_DeadEnd: Set(posNode.pos, -1); break;
 			case VisitResult_Ok: PushNeighboor(posNode.pos); break;
 			case VisitResult_Cancel: return false;
 		}
@@ -219,11 +223,6 @@ extern const int XY2Heading[3][3];
 extern void InitPathfinder();
 /// Free the pathfinder
 extern void FreePathfinder();
-
-/// Create a matrix for the old pathfinder
-extern unsigned char *CreateMatrix();
-/// Allocate a new matrix and initialize
-extern unsigned char *MakeMatrix();
 
 /// Returns the next element of the path
 extern int NextPathElement(CUnit &unit, short int *xdp, short int *ydp);

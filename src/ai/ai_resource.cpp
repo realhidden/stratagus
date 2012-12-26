@@ -33,10 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "ai_local.h"
@@ -44,11 +40,13 @@
 #include "action/action_build.h"
 #include "action/action_repair.h"
 #include "action/action_resource.h"
+#include "commands.h"
 #include "depend.h"
 #include "map.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "unit.h"
+#include "unit_find.h"
 #include "unittype.h"
 #include "upgrade.h"
 
@@ -187,7 +185,7 @@ public:
 	bool operator()(const CUnit *unit) const {
 		return unit->IsVisibleAsGoal(*player)
 			   && unit->IsEnemy(*player)
-			   && CanTarget(unit->Type, type);
+			   && CanTarget(*unit->Type, *type);
 	}
 private:
 	const CPlayer *player;
@@ -207,17 +205,17 @@ private:
 int AiEnemyUnitsInDistance(const CPlayer &player,
 						   const CUnitType *type, const Vec2i &pos, unsigned range)
 {
-	const Vec2i offset = {range, range};
+	const Vec2i offset(range, range);
 	std::vector<CUnit *> units;
 
 	if (type == NULL) {
-		Map.Select(pos - offset, pos + offset, units, IsAEnemyUnitOf(player));
+		Select(pos - offset, pos + offset, units, IsAEnemyUnitOf(player));
 		return static_cast<int>(units.size());
 	} else {
-		const Vec2i typeSize = {type->TileWidth - 1, type->TileHeight - 1};
+		const Vec2i typeSize(type->TileWidth - 1, type->TileHeight - 1);
 		const IsAEnemyUnitWhichCanCounterAttackOf pred(player, *type);
 
-		Map.Select(pos - offset, pos + typeSize + offset, units, pred);
+		Select(pos - offset, pos + typeSize + offset, units, pred);
 		return static_cast<int>(units.size());
 	}
 }
@@ -415,7 +413,7 @@ void AiNewDepotRequest(CUnit &worker)
 		worker.Player->Ai->UnitTypeBuilt.push_back(queue);
 
 		DebugPrint("%d: Worker %d report: Requesting new depot near [%d,%d].\n"
-				   _C_ worker.Player->Index _C_ worker.Slot
+				   _C_ worker.Player->Index _C_ UnitNumber(worker)
 				   _C_ queue.Pos.x _C_ queue.Pos.y);
 		/*
 		} else {
@@ -423,6 +421,84 @@ void AiNewDepotRequest(CUnit &worker)
 		}
 		*/
 	}
+}
+
+class IsAResourceDepositForWorker
+{
+public:
+	explicit IsAResourceDepositForWorker(const int r, const CUnit &worker) : resource(r), worker(worker) {}
+	bool operator()(const CUnit *const unit) const {
+		return (unit->Type->CanStore[resource]
+				&& (unit->Player == worker.Player || unit->IsAllied(worker)) && !unit->IsUnusable());
+	}
+private:
+	const int resource;
+	const CUnit &worker;
+};
+
+class IsAWorker
+{
+public:
+	explicit IsAWorker() {}
+	bool operator()(const CUnit *const unit) const {
+		return (unit->Type->Harvester && unit->Type->ResInfo && !unit->Removed);
+	}
+};
+
+class CompareDepotsByDistance
+{
+public:
+	explicit CompareDepotsByDistance(const CUnit &worker) : worker(worker) {}
+	bool operator()(const CUnit *lhs, const CUnit *rhs) const {
+		return lhs->MapDistanceTo(worker) > rhs->MapDistanceTo(worker);
+	}
+private:
+	const CUnit &worker;
+};
+
+/**
+**  Request a depot change for better resource harvesting.
+**
+**  @param worker    Worker itself.
+**
+**  @return          true if changed, false otherwise.
+*/
+bool AiRequestChangeDepot(CUnit &worker)
+{
+	Assert(worker.CurrentAction() == UnitActionResource);
+	COrder_Resource &order = *static_cast<COrder_Resource *>(worker.CurrentOrder());
+	const int resource = order.GetCurrentResource();
+	std::vector<CUnit *> depots;
+	const Vec2i offset(MaxMapWidth, MaxMapHeight);
+
+	Select(worker.tilePos - offset, worker.tilePos + offset, depots, IsAResourceDepositForWorker(resource, worker));
+	// If there aren't any alternatives, exit
+	if (depots.size() < 2) {
+		return false;
+	}
+	std::sort(depots.begin(), depots.end(), CompareDepotsByDistance(worker));
+
+	for (std::vector<CUnit *>::iterator it = depots.begin(); it != depots.end(); ++it) {
+		CUnit &unit = **it;
+
+		if (order.GetGoal() == &unit) {
+			continue;
+		}
+		const int range = 15;
+		const Vec2i workOff(range, range);
+		const size_t maxWorkers = 10;
+		std::vector<CUnit *> workers;
+		Select(unit.tilePos - workOff, unit.tilePos + workOff, workers, IsAWorker());
+		if (workers.size() <= maxWorkers && !AiEnemyUnitsInDistance(unit, range)) {
+			CommandReturnGoods(worker, &unit, FlushCommands);
+			CUnit *res = UnitFindResource(worker, unit, range, resource, unit.Player->AiEnabled);
+			if (res) {
+				CommandResource(worker, *res, FlushCommands);
+			}
+			return true;
+		}
+	}
+	return false;
 }
 
 /**
@@ -486,7 +562,7 @@ static bool AiRequestSupply()
 	if (j) {
 		if (!cache[0].needmask) {
 			CUnitType &type = *cache[0].type;
-			Vec2i invalidPos = { -1, -1};
+			Vec2i invalidPos(-1, -1);
 			if (AiMakeUnit(type, invalidPos)) {
 				AiBuildQueue newqueue;
 				newqueue.Type = &type;
@@ -596,7 +672,7 @@ static int AiMakeUnit(CUnitType &typeToMake, const Vec2i &nearPos)
 			continue;
 		}
 		std::vector<CUnitType *> &table = (*tablep)[type.Slot];
-		if (!table.size()) { // Oops not known.
+		if (table.empty()) { // Oops not known.
 			DebugPrint("%d: AiMakeUnit II: Nothing known about `%s'\n"
 					   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 			continue;
@@ -642,7 +718,7 @@ static bool AiResearchUpgrade(const CUnitType &type, CUpgrade &what)
 		CUnit &unit = *table[i];
 
 		if (unit.IsIdle()) {
-			CommandResearch(unit, &what, FlushCommands);
+			CommandResearch(unit, what, FlushCommands);
 			return true;
 		}
 	}
@@ -675,7 +751,7 @@ void AiAddResearchRequest(CUpgrade *upgrade)
 		return;
 	}
 	std::vector<CUnitType *> &table = tablep[upgrade->ID];
-	if (!table.size()) { // Oops not known.
+	if (table.empty()) { // Oops not known.
 		DebugPrint("%d: AiAddResearchRequest II: Nothing known about `%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ upgrade->Ident.c_str());
 		return;
@@ -743,7 +819,7 @@ void AiAddUpgradeToRequest(CUnitType &type)
 		return;
 	}
 	std::vector<CUnitType *> &table = tablep[type.Slot];
-	if (!table.size()) { // Oops not known.
+	if (table.empty()) { // Oops not known.
 		DebugPrint("%d: AiAddUpgradeToRequest II: Nothing known about `%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 		return;
@@ -859,7 +935,7 @@ static int AiAssignHarvesterFromUnit(CUnit &unit, int resource)
 	// Try to find the nearest depot first.
 	CUnit *depot = FindDeposit(unit, 1000, resource);
 	// Find a resource to harvest from.
-	CUnit *mine = UnitFindResource(unit, depot ? depot->tilePos : unit.tilePos, 1000, resource, true);
+	CUnit *mine = UnitFindResource(unit, depot ? *depot : unit, 1000, resource, true);
 
 	if (mine) {
 		CommandResource(unit, *mine, FlushCommands);
@@ -956,7 +1032,7 @@ static void AiCollectResources()
 		// See if it's assigned already
 		if (unit.Orders.size() == 1 &&
 			unit.CurrentAction() == UnitActionResource) {
-			const COrder_Resource& order = *static_cast<COrder_Resource*>(unit.CurrentOrder());
+			const COrder_Resource &order = *static_cast<COrder_Resource *>(unit.CurrentOrder());
 			const int c = order.GetCurrentResource();
 			units_assigned[c].push_back(&unit);
 			num_units_assigned[c]++;
@@ -1037,7 +1113,7 @@ static void AiCollectResources()
 				}
 			}
 		}
-		unit = NoUnitP;
+		unit = NULL;
 
 		// Try to complete each ressource in the priority order
 		for (int i = 0; i < MaxCosts; ++i) {
@@ -1101,7 +1177,7 @@ static void AiCollectResources()
 
 						// unit can't harvest : next one
 						if (!unit->Type->ResInfo[c] || !AiAssignHarvester(*unit, c)) {
-							unit = NoUnitP;
+							unit = NULL;
 							continue;
 						}
 
@@ -1133,6 +1209,20 @@ static void AiCollectResources()
 --  WORKERS/REPAIR
 ----------------------------------------------------------------------------*/
 
+static bool IsReadyToRepair(const CUnit &unit)
+{
+	if (unit.IsIdle()) {
+		return true;
+	} else if (unit.Orders.size() == 1 && unit.CurrentAction() == UnitActionResource) {
+		COrder_Resource &order = *static_cast<COrder_Resource *>(unit.CurrentOrder());
+
+		if (order.IsGatheringStarted() == false) {
+			return true;
+		}
+	}
+	return false;
+}
+
 /**
 **  Check if we can repair the building.
 **
@@ -1141,8 +1231,12 @@ static void AiCollectResources()
 **
 **  @return          True if can repair, false if can't repair..
 */
-static int AiRepairBuilding(const CUnitType &type, CUnit &building)
+static bool AiRepairBuilding(const CPlayer &player, const CUnitType &type, CUnit &building)
 {
+	if (type.RepairRange == 0) {
+		return false;
+	}
+
 	// Remove all workers not mining. on the way building something
 	// FIXME: It is not clever to use workers with gold
 	// Idea: Antonis: Put the rest of the workers in a table in case
@@ -1158,68 +1252,33 @@ static int AiRepairBuilding(const CUnitType &type, CUnit &building)
 	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 
-		if (unit.Type->RepairRange && unit.Orders.size() == 1) {
-			if (unit.CurrentAction() == UnitActionStill) {
-				table[num++] = &unit;
-			} else if (unit.CurrentAction() == UnitActionResource) {
-				COrder_Resource &order = *static_cast<COrder_Resource *>(unit.CurrentOrder());
-
-				if (order.IsGatheringStarted() == false) {
-					table[num++] = &unit;
-				}
-			}
+		if (IsReadyToRepair(unit)) {
+			table[num++] = &unit;
 		}
 	}
 	table.resize(num);
-	// Sort by distance loops -Antonis-
-	std::vector<int> distance;
-	distance.resize(num);
-	for (int i = 0; i < num; ++i) {
-		CUnit &unit = *table[i];
-		int rX = unit.tilePos.x - building.tilePos.x;
-		int rY = unit.tilePos.y - building.tilePos.y;
 
-		// FIXME: Probably calculated from top left corner of building
-		rX = std::max<int>(rX, -rX);
-		rY = std::max<int>(rY, -rY);
-		distance[i] = std::min<int>(rX, rY);
+	if (table.empty()) {
+		return false;
 	}
-	for (int i = 0; i < num; ++i) {
-		int r_temp = distance[i];
-		int index_temp = i;
-		for (int j = i; j < num; ++j) {
-			if (distance[j] < r_temp) {
-				r_temp = distance[j];
-				index_temp = j;
-			}
-		}
-		if (index_temp > i) {
-			std::swap(distance[i], distance[index_temp]);
-			std::swap(table[i], table[index_temp]);
-		}
+	TerrainTraversal terrainTraversal;
+
+	terrainTraversal.SetSize(Map.Info.MapWidth, Map.Info.MapHeight);
+	terrainTraversal.Init();
+
+	terrainTraversal.PushUnitPosAndNeighboor(building);
+
+	const int maxRange = 100;
+	const int movemask = type.MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit);
+	CUnit *unit = NULL;
+	UnitFinder unitFinder(player, table, maxRange, movemask, &unit);
+
+	if (terrainTraversal.Run(unitFinder) && unit != NULL) {
+		const Vec2i invalidPos(-1, -1);
+		CommandRepair(*unit, invalidPos, &building, FlushCommands);
+		return true;
 	}
-
-	// Check if building is reachable and try next trio of workers
-
-	int nbworker = AiPlayer->TriedRepairWorkers[UnitNumber(building)];
-	if (nbworker > num) {
-		nbworker = AiPlayer->TriedRepairWorkers[UnitNumber(building)] = 0;
-	}
-
-	int k = nbworker;
-	for (int i = nbworker; i < num && i < nbworker + 3; ++i) {
-
-		CUnit &unit = *table[i];
-
-		if (UnitReachable(unit, building, unit.Type->RepairRange)) {
-			const Vec2i invalidPos = { -1, -1};
-			CommandRepair(unit, invalidPos, &building, FlushCommands);
-			return 1;
-		}
-		k = i;
-	}
-	AiPlayer->TriedRepairWorkers[UnitNumber(building)] = k + 1;
-	return 0;
+	return false;
 }
 
 /**
@@ -1240,7 +1299,7 @@ static int AiRepairUnit(CUnit &unit)
 		return 0;
 	}
 	std::vector<CUnitType *> &table = tablep[type.Slot];
-	if (!table.size()) { // Oops not known.
+	if (table.empty()) { // Oops not known.
 		DebugPrint("%d: AiRepairUnit II: Nothing known about `%s'\n"
 				   _C_ AiPlayer->Player->Index _C_ type.Ident.c_str());
 		return 0;
@@ -1252,7 +1311,7 @@ static int AiRepairUnit(CUnit &unit)
 		// The type is available
 		//
 		if (unit_count[table[i]->Slot]) {
-			if (AiRepairBuilding(*table[i], unit)) {
+			if (AiRepairBuilding(*AiPlayer->Player, *table[i], unit)) {
 				return 1;
 			}
 		}

@@ -47,48 +47,28 @@
 
 #define WIN32_LEAN_AND_MEAN
 #define NOUSER
-
 #define NOMINMAX // do not use min, max as macro
-
-#define inline __inline
-#define alloca _alloca
 
 #pragma warning(disable:4244)               /// Conversion from double to uchar
 #pragma warning(disable:4761)               /// Integral size mismatch
 #pragma warning(disable:4786)               /// Truncated to 255 chars
-#include <stdlib.h>
-#include <crtdbg.h>
-#define abort() _ASSERT(0)
-#include <stdio.h>
-#define snprintf _snprintf
-#define vsnprintf _vsnprintf
-#define unlink _unlink
-#include <string.h>
-#define strdup _strdup
-#define strcasecmp _stricmp
-#define strncasecmp _strnicmp
-#include <io.h>
-#define access _access
-#define write _write
-#include <direct.h>
-#define makedir(dir, permissions) _mkdir(dir)
 
+#define inline __inline
 #ifndef __func__
 #define __func__ __FUNCTION__
 #endif
 
+#define snprintf _snprintf
+#if !(_MSC_VER >= 1500 && _MSC_VER < 1600)
+#define vsnprintf _vsnprintf
+#endif
+#define unlink _unlink
+#define strdup _strdup
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+
 #endif  // } _MSC_VER
 
-#ifdef __GNUC__
-#ifdef USE_WIN32
-#define makedir(dir, permissions) mkdir(dir)
-#else
-#define makedir(dir, permissions) mkdir(dir, permissions)
-#endif
-#endif
-
-#include <stdlib.h>
-#include <stdio.h>
 
 /*============================================================================
 ==  Macro
@@ -107,8 +87,6 @@
 #define PRINTF_VAARG_ATTRIBUTE(a, b)
 #endif
 
-
-
 /*============================================================================
 ==  Debug definitions
 ============================================================================*/
@@ -120,25 +98,27 @@
 */
 #define _C_  ,    /// Debug , to simulate vararg macros
 
-/// Print function in debug macros
-#define PrintFunction() \
-	do { fprintf(stdout, "%s:%d: %s: ", __FILE__, __LINE__, __func__); } while (0)
+extern void PrintLocation(const char *file, int line, const char *funcName);
 
+/// Print function in debug macros
+#define PrintFunction() PrintLocation(__FILE__, __LINE__, __func__);
 
 #ifdef DEBUG  // {
+
+extern void AbortAt(const char *file, int line, const char *funcName, const char *conditionStr);
+extern void PrintOnStdOut(const char *format, ...);
 
 /**
 **  Assert a condition. If cond is not true abort with file,line.
 */
-#define Assert(cond)  do { if (!(cond)) { \
-			fprintf(stderr, "Assertion failed at %s:%d: %s: %s\n", __FILE__, __LINE__, __func__, #cond); \
-			abort(); }} while (0)
+#define Assert(cond) \
+	do { if (!(cond)) { AbortAt(__FILE__, __LINE__, __func__, #cond); }} while (0)
 
 /**
 **  Print debug information with function name.
 */
 #define DebugPrint(args) \
-	do { PrintFunction(); fprintf(stdout, args); } while (0)
+	do { PrintFunction(); PrintOnStdOut(args); } while (0)
 
 #else  // }{ DEBUG
 
@@ -152,10 +132,8 @@
 /**
 **  Assert a condition for references
 */
-#define RefsAssert(cond)  do { if (!(cond)) { \
-			fprintf(stderr, "Assertion failed at %s:%d: %s\n", __FILE__, __LINE__, __func__); \
-			abort(); } } while (0)
-
+#define RefsAssert(cond) \
+	do { if (!(cond)) { AbortAt(__FILE__, __LINE__, __func__, #cond); } } while (0)
 #else  // }{ REFS_DEBUG
 
 #define RefsAssert(cond)      /* disabled */
@@ -181,19 +159,8 @@ inline char *new_strdup(const char *str)
 }
 
 /*----------------------------------------------------------------------------
---  Translate
-----------------------------------------------------------------------------*/
-
-#include "translate.h"
-
-#define _(str) Translate(str)
-#define N_(str) str
-
-/*----------------------------------------------------------------------------
 --  General
 ----------------------------------------------------------------------------*/
-
-#include "version.h"
 
 /// Text string: Name, Version, Copyright
 extern const char NameLine[];
@@ -205,20 +172,7 @@ extern const char NameLine[];
 #define PlayerMax    16                 /// How many players are supported
 #define UnitTypeMax  2048                /// How many unit types supported
 #define UpgradeMax   2048                /// How many upgrades supported
-#define UnitMax      65536               /// How many units supported
-
-/*----------------------------------------------------------------------------
---  Screen
-----------------------------------------------------------------------------*/
-
-/// Scrolling area (<= 15 y)
-#define SCROLL_UP     15
-/// Scrolling area (>= VideoHeight - 16 y)
-#define SCROLL_DOWN   (Video.Height - 16)
-/// Scrolling area (<= 15 y)
-#define SCROLL_LEFT   15
-/// Scrolling area (>= VideoWidth - 16 x)
-#define SCROLL_RIGHT  (Video.Width - 16)
+#define MAX_RACES 8
 
 /// Frames per second to display (original 30-40)
 #define FRAMES_PER_SECOND  30  // 1/30s
@@ -250,47 +204,18 @@ public:
 	static Parameters Instance;
 };
 
-
-
 extern std::string StratagusLibPath;        /// Location of stratagus data
-extern std::string GameName;                /// Name of the game
-extern std::string FullGameName;            /// Full Name of the game
-extern std::string ClickMissile;            /// Missile to show when you click
-extern std::string DamageMissile;           /// Missile to show damage caused
 extern std::string MenuRace;
 
-extern int SpeedBuild;                      /// Speed factor for building
-extern int SpeedTrain;                      /// Speed factor for training
-extern int SpeedUpgrade;                    /// Speed factor for upgrading
-extern int SpeedResearch;                   /// Speed factor for researching
-
-extern bool UseHPForXp;                     /// true if gain XP by dealing damage, false if by killing.
-
 extern unsigned long GameCycle;             /// Game simulation cycle counter
-extern unsigned long ResultGameCycle;       /// Used in game result
 extern unsigned long FastForwardCycle;      /// Game Replay Fast Forward Counter
-
-extern void LoadGame(const std::string &filename); /// Load saved game
-extern int SaveGame(const std::string &filename); /// Save game
-extern void DeleteSaveGame(const std::string &filename); /// Delete save game
-extern bool SaveGameLoading;                 /// Save game is in progress of loading
-struct lua_State;
-extern std::string SaveGlobal(lua_State *l, bool is_root); /// For saving lua state
 
 extern void Exit(int err);                  /// Exit
 extern void ExitFatal(int err);             /// Exit with fatal error
 
 extern void UpdateDisplay();            /// Game display update
-extern void InitModules();              /// Initialize all modules
-extern void LoadModules();              /// Load all modules
-extern void CleanModules();             /// Cleanup all modules
 extern void DrawMapArea();              /// Draw the map area
 extern void GameMainLoop();             /// Game main loop
-
-/// Show load progress
-extern void ShowLoadProgress(const char *fmt, ...) PRINTF_VAARG_ATTRIBUTE(1, 2);
-
-extern bool CanAccessFile(const char *filename);
 
 //@}
 

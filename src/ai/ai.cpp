@@ -137,25 +137,23 @@
 -- Includes
 ----------------------------------------------------------------------------*/
 
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "ai.h"
 #include "ai_local.h"
 
-#include "action/action_attack.h"
-#include "player.h"
-#include "unit.h"
-#include "unittype.h"
-#include "upgrade.h"
-#include "script.h"
 #include "actions.h"
+#include "action/action_attack.h"
+#include "commands.h"
+#include "iolib.h"
 #include "map.h"
 #include "pathfinder.h"
-#include "iolib.h"
+#include "player.h"
+#include "script.h"
+#include "unit.h"
+#include "unit_manager.h"
+#include "unittype.h"
+#include "upgrade.h"
 
 /*----------------------------------------------------------------------------
 -- Variables
@@ -408,15 +406,9 @@ static void SaveAiPlayer(CFile &file, int plynr, const PlayerAi &ai)
 	}
 	file.printf("},\n");
 
-	file.printf("  \"repair-building\", %u,\n", ai.LastRepairBuilding);
+	file.printf("  \"repair-building\", %u\n", ai.LastRepairBuilding);
 
-	file.printf("  \"repair-workers\", {");
-	for (int i = 0; i != UnitMax; ++i) {
-		if (ai.TriedRepairWorkers[i]) {
-			file.printf("%d, %d, ", i, ai.TriedRepairWorkers[i]);
-		}
-	}
-	file.printf("})\n\n");
+	file.printf(")\n\n");
 }
 
 /**
@@ -601,7 +593,7 @@ static void AiRemoveFromBuilt(PlayerAi *pai, const CUnitType &type)
 		DebugPrint("My guess is that you built something under ai me. naughty boy!\n");
 		return;
 	}
-	Assert(0);
+	fprintf(stderr, "Can't reduce %s from build list.\n", type.Ident.c_str());
 }
 
 /**
@@ -648,7 +640,7 @@ void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type)
 		DebugPrint("My guess is that you built something under ai me. naughty boy!\n");
 		return;
 	}
-	Assert(0);
+	fprintf(stderr, "Can't reduce %s from build list.\n", type.Ident.c_str());
 }
 
 /*----------------------------------------------------------------------------
@@ -697,17 +689,16 @@ void AiHelpMe(const CUnit *attacker, CUnit &defender)
 			// if brother is idle or attack no-agressive target and
 			// can attack our attacker then ask for help
 			// FIXME ad support for help from Coward type units
-			if (aiunit.IsAgressive() && CanTarget(aiunit.Type, attacker->Type)
+			if (aiunit.IsAgressive() && CanTarget(*aiunit.Type, *attacker->Type)
 				&& aiunit.CurrentOrder()->GetGoal() != attacker) {
-				bool shouldAttack = aiunit.IsIdle();
+				bool shouldAttack = aiunit.IsIdle() && aiunit.Threshold == 0;
 
 				if (aiunit.CurrentAction() == UnitActionAttack) {
 					const COrder_Attack &orderAttack = *static_cast<COrder_Attack *>(aiunit.CurrentOrder());
 					const CUnit *oldGoal = orderAttack.GetGoal();
 
-					if (oldGoal == NULL || oldGoal->IsAgressive() == false
-						|| (ThreatCalculate(defender, *attacker) < ThreatCalculate(defender, *oldGoal)
-							&& aiunit.MapDistanceTo(defender) <= aiunit.Stats->Variables[ATTACKRANGE_INDEX].Max)) {
+					if (oldGoal == NULL || (ThreatCalculate(defender, *attacker) < ThreatCalculate(defender, *oldGoal)
+											&& aiunit.MapDistanceTo(defender) <= aiunit.Stats->Variables[ATTACKRANGE_INDEX].Max)) {
 						shouldAttack = true;
 					}
 				}
@@ -716,9 +707,11 @@ void AiHelpMe(const CUnit *attacker, CUnit &defender)
 					CommandAttack(aiunit, attacker->tilePos, const_cast<CUnit *>(attacker), FlushCommands);
 					COrder *savedOrder = COrder::NewActionAttack(aiunit, attacker->tilePos);
 
-					if (aiunit.StoreOrder(savedOrder) == false) {
+					if (aiunit.CanStoreOrder(savedOrder) == false) {
 						delete savedOrder;
 						savedOrder = NULL;
+					} else {
+						aiunit.SavedOrder = savedOrder;
 					}
 				}
 			}
@@ -832,7 +825,7 @@ void AiCanNotReach(CUnit &unit, const CUnitType &what)
 */
 static void AiMoveUnitInTheWay(CUnit &unit)
 {
-	static Vec2i dirs[8] = {{ -1, -1}, { -1, 0}, { -1, 1}, {0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}};
+	static Vec2i dirs[8] = {Vec2i(-1, -1), Vec2i(-1, 0), Vec2i(-1, 1), Vec2i(0, 1), Vec2i(1, 1), Vec2i(1, 0), Vec2i(1, -1), Vec2i(0, -1)};
 	CUnit *movableunits[16];
 	Vec2i movablepos[16];
 	int movablenb;
@@ -846,13 +839,13 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 
 	const CUnitType &unittype = *unit.Type;
 	const Vec2i u0 = unit.tilePos;
-	const Vec2i u1 = {u0.x + unittype.TileWidth - 1, u0.y + unittype.TileHeight - 1};
+	const Vec2i u1(u0.x + unittype.TileWidth - 1, u0.y + unittype.TileHeight - 1);
 
 	movablenb = 0;
 
 	// Try to make some unit moves around it
-	for (int it = 0; it < NumUnits; ++it) {
-		CUnit &blocker = *Units[it];
+	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+		CUnit &blocker = **it;
 
 		if (blocker.IsUnusable()) {
 			continue;
@@ -873,7 +866,7 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 		}
 
 		const Vec2i b0 = blocker.tilePos;
-		const Vec2i b1 = {b0.x + blockertype.TileWidth - 1, b0.y + blockertype.TileHeight - 1};
+		const Vec2i b1(b0.x + blockertype.TileWidth - 1, b0.y + blockertype.TileHeight - 1);
 
 		// Check for collision
 		if (!((u0.x == b1.x + 1 || u1.x == b0.x - 1)
@@ -888,13 +881,13 @@ static void AiMoveUnitInTheWay(CUnit &unit)
 		}
 
 		// Move blocker in a rand dir
-		int i = SyncRand() & 7;
+		int r = SyncRand() & 7;
 		int trycount = 8;
 		while (trycount > 0) {
-			i = (i + 1) & 7;
+			r = (r + 1) & 7;
 			--trycount;
 
-			const Vec2i pos = blocker.tilePos + dirs[i];
+			const Vec2i pos = blocker.tilePos + dirs[r];
 
 			// Out of the map => no !
 			if (!Map.Info.IsPointOnMap(pos)) {

@@ -68,38 +68,56 @@ void TerrainTraversal::SetSize(unsigned int width, unsigned int height)
 	m_height = height;
 }
 
-void TerrainTraversal::Init(unsigned char borderValue)
+void TerrainTraversal::Init()
 {
-	const unsigned int insideValue = 0;
 	const unsigned int height = m_height;
 	const unsigned int width = m_extented_width - 2;
 	const unsigned int width_ext = m_extented_width;
 
-	memset(&m_values[0], borderValue, width_ext);
+	memset(&m_values[0], '\xFF', width_ext * sizeof(dataType));
 	for (unsigned i = 1; i < 1 + height; ++i) {
-		m_values[i * width_ext] = borderValue;
-		memset(&m_values[i * width_ext + 1], insideValue, width);
-		m_values[i * width_ext + width + 1] = borderValue;
+		m_values[i * width_ext] = -1;
+		memset(&m_values[i * width_ext + 1], '\0', width * sizeof(dataType));
+		m_values[i * width_ext + width + 1] = -1;
 	}
-	memset(&m_values[(height + 1) * width_ext], borderValue, width_ext);
+	memset(&m_values[(height + 1) * width_ext], '\xFF', width_ext * sizeof(dataType));
 }
 
 void TerrainTraversal::PushPos(const Vec2i &pos)
 {
 	if (IsVisited(pos) == false) {
 		m_queue.push(PosNode(pos, pos));
+		Set(pos, 1);
 	}
 }
 
 void TerrainTraversal::PushNeighboor(const Vec2i &pos)
 {
-	const Vec2i offsets[] = {{0, -1}, { -1, 0}, {1, 0}, {0, 1}, { -1, -1}, {1, -1}, { -1, 1}, {1, 1}};
+	const Vec2i offsets[] = {Vec2i(0, -1), Vec2i(-1, 0), Vec2i(1, 0), Vec2i(0, 1),
+							 Vec2i(-1, -1), Vec2i(1, -1), Vec2i(-1, 1), Vec2i(1, 1)
+							};
 
 	for (int i = 0; i != 8; ++i) {
 		const Vec2i newPos = pos + offsets[i];
 
 		if (IsVisited(newPos) == false) {
 			m_queue.push(PosNode(newPos, pos));
+			Set(newPos, Get(pos) + 1);
+		}
+	}
+}
+
+void TerrainTraversal::PushUnitPosAndNeighboor(const CUnit &unit)
+{
+	const CUnit *startUnit = GetFirstContainer(unit);
+	const Vec2i offset(1, 1);
+	const Vec2i extraTileSize(startUnit->Type->TileWidth - 1, startUnit->Type->TileHeight - 1);
+	const Vec2i start = startUnit->tilePos - offset;
+	const Vec2i end = startUnit->tilePos + extraTileSize + offset;
+
+	for (Vec2i it = start; it.y != end.y; ++it.y) {
+		for (it.x = start.x; it.x != end.x; ++it.x) {
+			PushPos(it);
 		}
 	}
 }
@@ -109,26 +127,25 @@ bool TerrainTraversal::IsVisited(const Vec2i &pos) const
 	return Get(pos) != 0;
 }
 
-unsigned char TerrainTraversal::Get(const Vec2i& pos) const
+bool TerrainTraversal::IsReached(const Vec2i &pos) const
+{
+	return Get(pos) != 0 && Get(pos) != -1;
+}
+
+bool TerrainTraversal::IsInvalid(const Vec2i &pos) const
+{
+	return Get(pos) != -1;
+}
+
+TerrainTraversal::dataType TerrainTraversal::Get(const Vec2i &pos) const
 {
 	return m_values[m_extented_width + 1 + pos.y * m_extented_width + pos.x];
 }
 
-unsigned char& TerrainTraversal::Get(const Vec2i& pos)
+void TerrainTraversal::Set(const Vec2i &pos, TerrainTraversal::dataType value)
 {
-	return m_values[m_extented_width + 1 + pos.y * m_extented_width + pos.x];
+	m_values[m_extented_width + 1 + pos.y * m_extented_width + pos.x] = value;
 }
-
-/**
-**  The matrix is used to generated the paths.
-**
-**  0:      Nothing must check if usable.
-**  1-8:    Field on the path 1->2->3->4->5...
-**  88:     Marks the possible goal fields.
-**  98:     Marks map border, for faster limits checks.
-*/
-static unsigned char Matrix[(MaxMapWidth + 2) * (MaxMapHeight + 3) + 2];  /// Path matrix
-
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -148,54 +165,6 @@ void InitPathfinder()
 void FreePathfinder()
 {
 	FreeAStar();
-}
-
-/**
-**  Initialize a matrix
-**
-**  @note  Double border for ships/flyers.
-**
-**    98 98 98 98 98
-**    98 98 98 98 98
-**    98          98
-**    98          98
-**    98 98 98 98 98
-*/
-static void InitMatrix(unsigned char *matrix)
-{
-	const char border = 98;
-	const char valid = 0;
-	const unsigned int w = Map.Info.MapWidth;
-	const unsigned int h = Map.Info.MapHeight;
-	const unsigned int offset = 2 * (w + 2);
-	memset(matrix, border, offset);
-
-	for (unsigned i = 0; i < h; ++i) {   // mark left and right border
-		matrix[offset + i * (w + 2)] = border;
-		memset(matrix + offset + i * (w + 2) + 1, valid, w);
-		matrix[offset + i * (w + 2) + w + 1] = border;
-	}
-	memset(matrix + offset + h * (w + 2), border, w + 2);
-}
-
-/**
-**  Create empty movement matrix.
-*/
-unsigned char *CreateMatrix()
-{
-	InitMatrix(Matrix);
-	return Matrix;
-}
-
-/**
-**  Allocate a new matrix and initialize
-*/
-unsigned char *MakeMatrix()
-{
-	unsigned char *matrix = new unsigned char[(Map.Info.MapWidth + 2) * (Map.Info.MapHeight + 3) + 2];
-	InitMatrix(matrix);
-
-	return matrix;
 }
 
 /*----------------------------------------------------------------------------
@@ -283,7 +252,7 @@ PathFinderInput::PathFinderInput() : unit(NULL), minRange(0), maxRange(0),
 const Vec2i &PathFinderInput::GetUnitPos() const { return unit->tilePos; }
 Vec2i PathFinderInput::GetUnitSize() const
 {
-	const Vec2i tileSize = {unit->Type->TileWidth, unit->Type->TileHeight};
+	const Vec2i tileSize(unit->Type->TileWidth, unit->Type->TileHeight);
 	return tileSize;
 }
 
@@ -417,7 +386,7 @@ int NextPathElement(CUnit &unit, short int *pxd, short int *pyd)
 
 	*pxd = Heading2X[(int)output.Path[(int)output.Length - 1]];
 	*pyd = Heading2Y[(int)output.Path[(int)output.Length - 1]];
-	const Vec2i dir = {*pxd, *pyd};
+	const Vec2i dir(*pxd, *pyd);
 	int result = output.Length;
 	output.Length--;
 	if (!UnitCanBeAt(unit, unit.tilePos + dir)) {

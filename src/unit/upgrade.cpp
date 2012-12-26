@@ -33,9 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -45,6 +42,7 @@
 #include "upgrade.h"
 
 #include "action/action_train.h"
+#include "commands.h"
 #include "depend.h"
 #include "interface.h"
 #include "iolib.h"
@@ -52,6 +50,7 @@
 #include "player.h"
 #include "script.h"
 #include "unit.h"
+#include "unit_find.h"
 #include "unittype.h"
 #include "util.h"
 
@@ -182,7 +181,7 @@ void InitUpgrades()
 void CleanUpgrades()
 {
 	//  Free the upgrades.
-	while (AllUpgrades.size()) {
+	while (AllUpgrades.empty() == false) {
 		CUpgrade *upgrade = AllUpgrades.back();
 		AllUpgrades.pop_back();
 		delete upgrade;
@@ -246,28 +245,24 @@ void SaveUpgrades(CFile &file)
 */
 static int CclDefineModifier(lua_State *l)
 {
-	const char *key;
-	const char *value;
-	CUpgradeModifier *um;
-	int args;
-	int j;
+	const int args = lua_gettop(l);
 
-	args = lua_gettop(l);
-
-	um = new CUpgradeModifier;
+	CUpgradeModifier *um = new CUpgradeModifier;
 
 	memset(um->ChangeUpgrades, '?', sizeof(um->ChangeUpgrades));
 	memset(um->ApplyTo, '?', sizeof(um->ApplyTo));
 	um->Modifier.Variables = new CVariable[UnitTypeVar.GetNumberVariable()];
+	um->ModifyPercent = new int[UnitTypeVar.GetNumberVariable()];
+	memset(um->ModifyPercent, 0, UnitTypeVar.GetNumberVariable() * sizeof(int));
 
 	um->UpgradeId = UpgradeIdByIdent(LuaToString(l, 1));
 
-	for (j = 1; j < args; ++j) {
+	for (int j = 1; j < args; ++j) {
 		if (!lua_istable(l, j + 1)) {
 			LuaError(l, "incorrect argument");
 		}
 		lua_rawgeti(l, j + 1, 1);
-		key = LuaToString(l, -1);
+		const char *key = LuaToString(l, -1);
 		lua_pop(l, 1);
 #if 0 // To be removed. must modify lua file.
 		if (!strcmp(key, "attack-range")) {
@@ -293,7 +288,7 @@ static int CclDefineModifier(lua_State *l)
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
-			value = LuaToString(l, -1);
+			const char *value = LuaToString(l, -1);
 			lua_pop(l, 1);
 			const int resId = GetResourceIdByName(l, value);
 			lua_rawgeti(l, j + 1, 2);
@@ -304,7 +299,7 @@ static int CclDefineModifier(lua_State *l)
 				LuaError(l, "incorrect argument");
 			}
 			lua_rawgeti(l, j + 1, 1);
-			value = LuaToString(l, -1);
+			const char *value = LuaToString(l, -1);
 			lua_pop(l, 1);
 			const int resId = GetResourceIdByName(l, value);
 			lua_rawgeti(l, j + 1, 2);
@@ -312,7 +307,7 @@ static int CclDefineModifier(lua_State *l)
 			lua_pop(l, 1);
 		} else if (!strcmp(key, "allow-unit")) {
 			lua_rawgeti(l, j + 1, 2);
-			value = LuaToString(l, -1);
+			const char *value = LuaToString(l, -1);
 			lua_pop(l, 1);
 			if (!strncmp(value, "unit-", 5)) {
 				lua_rawgeti(l, j + 1, 3);
@@ -323,7 +318,7 @@ static int CclDefineModifier(lua_State *l)
 			}
 		} else if (!strcmp(key, "allow")) {
 			lua_rawgeti(l, j + 1, 2);
-			value = LuaToString(l, -1);
+			const char *value = LuaToString(l, -1);
 			lua_pop(l, 1);
 			if (!strncmp(value, "upgrade-", 8)) {
 				lua_rawgeti(l, j + 1, 3);
@@ -334,28 +329,39 @@ static int CclDefineModifier(lua_State *l)
 			}
 		} else if (!strcmp(key, "apply-to")) {
 			lua_rawgeti(l, j + 1, 2);
-			value = LuaToString(l, -1);
+			const char *value = LuaToString(l, -1);
 			lua_pop(l, 1);
 			um->ApplyTo[UnitTypeIdByIdent(value)] = 'X';
 		} else if (!strcmp(key, "convert-to")) {
 			lua_rawgeti(l, j + 1, 2);
-			value = LuaToString(l, -1);
+			const char *value = LuaToString(l, -1);
 			lua_pop(l, 1);
 			um->ConvertTo = UnitTypeByIdent(value);
 		} else {
 			int index = UnitTypeVar.VariableNameLookup[key]; // variable index;
 			if (index != -1) {
-				lua_rawgeti(l, j + 1, 2);
-				if (lua_istable(l, -1)) {
-					DefineVariableField(l, um->Modifier.Variables + index, -1);
-				} else if (lua_isnumber(l, -1)) {
-					um->Modifier.Variables[index].Enable = 1;
-					um->Modifier.Variables[index].Value = LuaToNumber(l, -1);
-					um->Modifier.Variables[index].Max = LuaToNumber(l, -1);
+				if (lua_rawlen(l, j + 1) == 3) {
+					lua_rawgeti(l, j + 1, 3);
+					const char *value = LuaToString(l, -1);
+					lua_pop(l, 1);
+					if (!strcmp(value, "Percent")) {
+						lua_rawgeti(l, j + 1, 2);
+						um->ModifyPercent[index] = LuaToNumber(l, -1);
+						lua_pop(l, 1);
+					}
 				} else {
-					LuaError(l, "bad argument type for '%s'\n" _C_ key);
+					lua_rawgeti(l, j + 1, 2);
+					if (lua_istable(l, -1)) {
+						DefineVariableField(l, um->Modifier.Variables + index, -1);
+					} else if (lua_isnumber(l, -1)) {
+						um->Modifier.Variables[index].Enable = 1;
+						um->Modifier.Variables[index].Value = LuaToNumber(l, -1);
+						um->Modifier.Variables[index].Max = LuaToNumber(l, -1);
+					} else {
+						LuaError(l, "bad argument type for '%s'\n" _C_ key);
+					}
+					lua_pop(l, 1);
 				}
-				lua_pop(l, 1);
 			} else {
 				LuaError(l, "wrong tag: %s" _C_ key);
 			}
@@ -372,29 +378,21 @@ static int CclDefineModifier(lua_State *l)
 */
 static int CclDefineUnitAllow(lua_State *l)
 {
-	const char *ident;
-	int i;
-	int args;
-	int j;
-	int id;
+	const int args = lua_gettop(l);
 
-	args = lua_gettop(l);
-	j = 0;
-	ident = LuaToString(l, j + 1);
-	++j;
+	const char *ident = LuaToString(l, 0 + 1);
 
 	if (strncmp(ident, "unit-", 5)) {
 		DebugPrint(" wrong ident %s\n" _C_ ident);
 		return 0;
 	}
-	id = UnitTypeIdByIdent(ident);
+	int id = UnitTypeIdByIdent(ident);
 
-	i = 0;
-	for (; j < args && i < PlayerMax; ++j) {
+	int i = 0;
+	for (int j = 1; j < args && i < PlayerMax; ++j) {
 		AllowUnitId(Players[i], id, LuaToNumber(l, j + 1));
 		++i;
 	}
-
 	return 0;
 }
 
@@ -403,29 +401,23 @@ static int CclDefineUnitAllow(lua_State *l)
 */
 static int CclDefineAllow(lua_State *l)
 {
-	const char *ident;
-	const char *ids;
-	int i;
-	int n;
-	int args;
-	int j;
-	int id;
+	const int UnitMax = 65536; /// How many units supported
+	const int args = lua_gettop(l);
 
-	args = lua_gettop(l);
-	for (j = 0; j < args; ++j) {
-		ident = LuaToString(l, j + 1);
+	for (int j = 0; j < args; ++j) {
+		const char *ident = LuaToString(l, j + 1);
 		++j;
-		ids = LuaToString(l, j + 1);
+		const char *ids = LuaToString(l, j + 1);
 
-		n = strlen(ids);
+		int n = strlen(ids);
 		if (n > PlayerMax) {
 			fprintf(stderr, "%s: Allow string too long %d\n", ident, n);
 			n = PlayerMax;
 		}
 
 		if (!strncmp(ident, "unit-", 5)) {
-			id = UnitTypeIdByIdent(ident);
-			for (i = 0; i < n; ++i) {
+			int id = UnitTypeIdByIdent(ident);
+			for (int i = 0; i < n; ++i) {
 				if (ids[i] == 'A') {
 					AllowUnitId(Players[i], id, UnitMax);
 				} else if (ids[i] == 'F') {
@@ -433,15 +425,14 @@ static int CclDefineAllow(lua_State *l)
 				}
 			}
 		} else if (!strncmp(ident, "upgrade-", 8)) {
-			id = UpgradeIdByIdent(ident);
-			for (i = 0; i < n; ++i) {
+			int id = UpgradeIdByIdent(ident);
+			for (int i = 0; i < n; ++i) {
 				AllowUpgradeId(Players[i], id, ids[i]);
 			}
 		} else {
 			DebugPrint(" wrong ident %s\n" _C_ ident);
 		}
 	}
-
 	return 0;
 }
 
@@ -470,9 +461,9 @@ void UpgradesCclRegister()
 */
 int UnitTypeIdByIdent(const std::string &ident)
 {
-	const CUnitType *type;
+	const CUnitType *type = UnitTypeByIdent(ident);
 
-	if ((type = UnitTypeByIdent(ident))) {
+	if (type) {
 		return type->Slot;
 	}
 	DebugPrint(" fix this %s\n" _C_ ident.c_str());
@@ -488,9 +479,9 @@ int UnitTypeIdByIdent(const std::string &ident)
 */
 int UpgradeIdByIdent(const std::string &ident)
 {
-	const CUpgrade *upgrade;
+	const CUpgrade *upgrade = CUpgrade::Get(ident);
 
-	if ((upgrade = CUpgrade::Get(ident))) {
+	if (upgrade) {
 		return upgrade->ID;
 	}
 	DebugPrint(" fix this %s\n" _C_ ident.c_str());
@@ -566,7 +557,8 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 		}
 	}
 
-	for (int z = 0; z < UnitTypeMax; ++z) {
+	for (size_t z = 0; z < UnitTypes.size(); ++z) {
+		CUnitStats &stat = UnitTypes[z]->Stats[pn];
 		// add/remove allowed units
 
 		// FIXME: check if modify is allowed
@@ -588,7 +580,7 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 					CUnit &unit = *unitupgrade[j];
 					if (unit.Player->Index == pn && !unit.Removed) {
 						MapUnmarkUnitSight(unit);
-						unit.CurrentSightRange = UnitTypes[z]->Stats[pn].Variables[SIGHTRANGE_INDEX].Max +
+						unit.CurrentSightRange = stat.Variables[SIGHTRANGE_INDEX].Max +
 												 um->Modifier.Variables[SIGHTRANGE_INDEX].Value;
 						MapMarkUnitSight(unit);
 					}
@@ -596,27 +588,36 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 			}
 			// upgrade costs :)
 			for (unsigned int j = 0; j < MaxCosts; ++j) {
-				UnitTypes[z]->Stats[pn].Costs[j] += um->Modifier.Costs[j];
-				UnitTypes[z]->Stats[pn].Storing[j] += um->Modifier.Storing[j];
+				stat.Costs[j] += um->Modifier.Costs[j];
+				stat.Storing[j] += um->Modifier.Storing[j];
 			}
 
 			int varModified = 0;
 			for (unsigned int j = 0; j < UnitTypeVar.GetNumberVariable(); j++) {
 				varModified |= um->Modifier.Variables[j].Value
 							   | um->Modifier.Variables[j].Max
-							   | um->Modifier.Variables[j].Increase;
-				UnitTypes[z]->Stats[pn].Variables[j].Value += um->Modifier.Variables[j].Value;
-				if (UnitTypes[z]->Stats[pn].Variables[j].Value < 0) {
-					UnitTypes[z]->Stats[pn].Variables[j].Value = 0;
+							   | um->Modifier.Variables[j].Increase
+							   | um->Modifier.Variables[j].Enable
+							   | um->ModifyPercent[j];
+				stat.Variables[j].Enable |= um->Modifier.Variables[j].Enable;
+				if (um->ModifyPercent[j]) {
+					stat.Variables[j].Value += stat.Variables[j].Value * um->ModifyPercent[j] / 100;
+					stat.Variables[j].Max += stat.Variables[j].Max * um->ModifyPercent[j] / 100;
+				} else {
+					stat.Variables[j].Value += um->Modifier.Variables[j].Value;
+					stat.Variables[j].Max += um->Modifier.Variables[j].Max;
+					stat.Variables[j].Increase += um->Modifier.Variables[j].Increase;
 				}
-				UnitTypes[z]->Stats[pn].Variables[j].Max += um->Modifier.Variables[j].Max;
-				if (UnitTypes[z]->Stats[pn].Variables[j].Max < 0) {
-					UnitTypes[z]->Stats[pn].Variables[j].Max = 0;
+
+				if (stat.Variables[j].Value < 0) {
+					stat.Variables[j].Value = 0;
 				}
-				if (UnitTypes[z]->Stats[pn].Variables[j].Value > UnitTypes[z]->Stats[pn].Variables[j].Max) {
-					UnitTypes[z]->Stats[pn].Variables[j].Value = UnitTypes[z]->Stats[pn].Variables[j].Max;
+				if (stat.Variables[j].Max < 0) {
+					stat.Variables[j].Max = 0;
 				}
-				UnitTypes[z]->Stats[pn].Variables[j].Increase += um->Modifier.Variables[j].Increase;
+				if (stat.Variables[j].Value > stat.Variables[j].Max) {
+					stat.Variables[j].Value = stat.Variables[j].Max;
+				}
 			}
 
 			// And now modify ingame units
@@ -631,7 +632,15 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 						continue;
 					}
 					for (unsigned int j = 0; j < UnitTypeVar.GetNumberVariable(); j++) {
-						unit.Variable[j].Value += um->Modifier.Variables[j].Value;
+						unit.Variable[j].Enable |= um->Modifier.Variables[j].Enable;
+						if (um->ModifyPercent[j]) {
+							unit.Variable[j].Value += unit.Variable[j].Value * um->ModifyPercent[j] / 100;
+							unit.Variable[j].Max += unit.Variable[j].Max * um->ModifyPercent[j] / 100;
+						} else {
+							unit.Variable[j].Value += um->Modifier.Variables[j].Value;
+							unit.Variable[j].Increase += um->Modifier.Variables[j].Increase;
+						}
+
 						if (unit.Variable[j].Value < 0) {
 							unit.Variable[j].Value = 0;
 						}
@@ -642,7 +651,6 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 						if (unit.Variable[j].Value > unit.Variable[j].Max) {
 							unit.Variable[j].Value = unit.Variable[j].Max;
 						}
-						unit.Variable[j].Increase += um->Modifier.Variables[j].Increase;
 					}
 				}
 			}
@@ -661,14 +669,11 @@ static void ApplyUpgradeModifier(CPlayer &player, const CUpgradeModifier *um)
 */
 void UpgradeAcquire(CPlayer &player, const CUpgrade *upgrade)
 {
-	int z;
-	int id;
-
-	id = upgrade->ID;
+	int id = upgrade->ID;
 	player.UpgradeTimers.Upgrades[id] = upgrade->Costs[TimeCost];
 	AllowUpgradeId(player, id, 'R');  // research done
 
-	for (z = 0; z < NumUpgradeModifiers; ++z) {
+	for (int z = 0; z < NumUpgradeModifiers; ++z) {
 		if (UpgradeModifiers[z]->UpgradeId == id) {
 			ApplyUpgradeModifier(player, UpgradeModifiers[z]);
 		}
@@ -768,9 +773,9 @@ char UpgradeIdAllowed(const CPlayer &player, int id)
 */
 char UpgradeIdentAllowed(const CPlayer &player, const std::string &ident)
 {
-	int id;
+	int id = UpgradeIdByIdent(ident);
 
-	if ((id = UpgradeIdByIdent(ident)) != -1) {
+	if (id != -1) {
 		return UpgradeIdAllowed(player, id);
 	}
 	DebugPrint("Fix your code, wrong identifier `%s'\n" _C_ ident.c_str());

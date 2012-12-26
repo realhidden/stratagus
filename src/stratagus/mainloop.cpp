@@ -33,39 +33,22 @@
 //  Includes
 //----------------------------------------------------------------------------
 
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
-#include "video.h"
-#include "tileset.h"
-#include "map.h"
-#include "font.h"
-#include "sound.h"
-#include "sound_server.h"
-#include "unitsound.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
-#include "cursor.h"
-#include "minimap.h"
+
 #include "actions.h"
+#include "editor.h"
+#include "game.h"
+#include "map.h"
 #include "missile.h"
-#include "interface.h"
-#include "menus.h"
 #include "network.h"
+#include "particle.h"
+#include "replay.h"
+#include "results.h"
+#include "sound.h"
+#include "trigger.h"
 #include "ui.h"
 #include "unit.h"
-#include "trigger.h"
-#include "results.h"
-#include "settings.h"
-#include "commands.h"
-#include "pathfinder.h"
-#include "editor.h"
-#include "sound.h"
-#include "replay.h"
-#include "particle.h"
+#include "video.h"
 
 #include <guichan.h>
 void DrawGuichanWidgets();
@@ -147,12 +130,12 @@ void DoScrollArea(int state, bool fast)
 	if (state & ScrollLeft) {
 		stepx = -stepx;
 	}
-	const PixelDiff offset = {stepx, stepy};
+	const PixelDiff offset(stepx, stepy);
 
 	vp->Set(vp->MapPos, vp->Offset + offset);
 
 	// This recalulates some values
-	HandleMouseMove(CursorX, CursorY);
+	HandleMouseMove(CursorScreenPos);
 }
 
 /**
@@ -165,7 +148,7 @@ void DrawMapArea()
 		// Center viewport on tracked unit
 		if (vp->Unit) {
 			if (vp->Unit->Destroyed || vp->Unit->CurrentAction() == UnitActionDie) {
-				vp->Unit = NoUnitP;
+				vp->Unit = NULL;
 			} else {
 				vp->Center(vp->Unit->GetMapPixelPosCenter());
 			}
@@ -244,8 +227,6 @@ static void InitGameCallbacks()
 
 static void GameLogicLoop()
 {
-	int player;
-
 	// Can't find a better place.
 	// FIXME: We need find better place!
 	SaveGameLoading = false;
@@ -276,7 +257,7 @@ static void GameLogicLoop()
 		switch (GameCycle % CYCLES_PER_SECOND) {
 			case 0: // At cycle 0, start all ai players...
 				if (GameCycle == 0) {
-					for (player = 0; player < NumPlayers; ++player) {
+					for (int player = 0; player < NumPlayers; ++player) {
 						PlayersEachSecond(player);
 					}
 				}
@@ -296,13 +277,14 @@ static void GameLogicLoop()
 			case 6: // overtaking units
 				RescueUnits();
 				break;
-			default:
+			default: {
 				// FIXME: assume that NumPlayers < (CYCLES_PER_SECOND - 7)
-				player = (GameCycle % CYCLES_PER_SECOND) - 7;
+				int player = (GameCycle % CYCLES_PER_SECOND) - 7;
 				Assert(player >= 0);
 				if (player < NumPlayers) {
 					PlayersEachSecond(player);
 				}
+			}
 		}
 	}
 

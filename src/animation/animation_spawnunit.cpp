@@ -109,14 +109,15 @@ found:
 	const int range = ParseAnimInt(&unit, this->rangeStr.c_str());
 	const int playerId = ParseAnimInt(&unit, this->playerStr.c_str());
 	CPlayer &player = Players[playerId];
-	const Vec2i pos = { unit.tilePos.x + offX, unit.tilePos.y + offY};
+	const Vec2i pos(unit.tilePos.x + offX, unit.tilePos.y + offY);
 	CUnitType *type = UnitTypeByIdent(this->unitTypeStr.c_str());
+	Assert(type);
 	Vec2i resPos;
 	DebugPrint("Creating a %s\n" _C_ type->Name.c_str());
 	FindNearestDrop(*type, pos, resPos, LookingW);
-	if (MapDistance(pos, resPos) <= range) {
+	if (SquareDistance(pos, resPos) <= square(range)) {
 		CUnit *target = MakeUnit(*type, &player);
-		if (target != NoUnitP) {
+		if (target != NULL) {
 			target->tilePos = resPos;
 			target->Place(resPos);
 			//DropOutOnSide(*target, LookingW, NULL);

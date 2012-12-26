@@ -34,10 +34,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "ai.h"
@@ -240,11 +236,11 @@ static void InitAiHelper(AiHelper &aiHelper)
 		}
 
 		for (std::vector<CUnitType *>::const_iterator d = UnitTypes.begin(); d != UnitTypes.end(); ++d) {
-			CUnitType *type = *d;
+			CUnitType &type = **d;
 
-			if (type->CanStore[i] > 0) {
+			if (type.CanStore[i] > 0) {
 				/* HACK : we can't store TIME then use 0 as 1 */
-				AiHelperInsert(aiHelper.Depots, i - 1, **d);
+				AiHelperInsert(aiHelper.Depots, i - 1, type);
 			}
 		}
 	}
@@ -374,7 +370,7 @@ static int CclDefineAiHelper(lua_State *l)
 				LuaError(l, "unknown unittype: %s" _C_ value);
 			}
 			AiHelperInsert(AiHelpers.Equiv, base->Slot, *type);
-			AiNewUnitTypeEquiv(base, type);
+			AiNewUnitTypeEquiv(*base, *type);
 		}
 	}
 	return 0;
@@ -715,15 +711,26 @@ static int CclAiWait(lua_State *l)
 */
 static int CclAiForce(lua_State *l)
 {
-	LuaCheckArgs(l, 2);
+	bool resetForce = false;
+	const int arg = lua_gettop(l);
+	Assert(0 < arg && arg <= 3);
 	if (!lua_istable(l, 2)) {
 		LuaError(l, "incorrect argument");
+	}
+	if (arg == 3) {
+		resetForce = LuaToBoolean(l, 3);
 	}
 	int force = LuaToNumber(l, 1);
 	if (force < 0 || force >= AI_MAX_FORCES) {
 		LuaError(l, "Force out of range: %d" _C_ force);
 	}
 	AiForce &aiforce = AiPlayer->Force[AiPlayer->Force.getScriptForce(force)];
+	if (resetForce) {
+		AiForceRole role = aiforce.Role;
+		aiforce.Reset(true);
+		aiforce.State = AiForceAttackingState_Waiting;
+		aiforce.Role = role;
+	}
 
 	int args = lua_rawlen(l, 2);
 	for (int j = 0; j < args; ++j) {
@@ -742,26 +749,35 @@ static int CclAiForce(lua_State *l)
 		// Use the equivalent unittype.
 		type = UnitTypes[UnitTypeEquivs[type->Slot]];
 
-		// Look if already in force.
-		size_t i;
-		for (i = 0; i < aiforce.UnitTypes.size(); ++i) {
-			AiUnitType *aiut = &aiforce.UnitTypes[i];
-			if (aiut->Type->Slot == type->Slot) { // found
-				if (count) {
-					aiut->Want = count;
-				} else {
-					aiforce.UnitTypes.erase(aiforce.UnitTypes.begin() + i);
-				}
-				break;
-			}
-		}
-		// New type append it.
-		if (i == aiforce.UnitTypes.size()) {
+		if (resetForce) {
+			// Append it.
 			AiUnitType newaiut;
 			newaiut.Want = count;
 			newaiut.Type = type;
 			aiforce.UnitTypes.push_back(newaiut);
+		} else {
+			// Look if already in force.
+			size_t i;
+			for (i = 0; i < aiforce.UnitTypes.size(); ++i) {
+				AiUnitType *aiut = &aiforce.UnitTypes[i];
+				if (aiut->Type->Slot == type->Slot) { // found
+					if (count) {
+						aiut->Want = count;
+					} else {
+						aiforce.UnitTypes.erase(aiforce.UnitTypes.begin() + i);
+					}
+					break;
+				}
+			}
+			// New type append it.
+			if (i == aiforce.UnitTypes.size()) {
+				AiUnitType newaiut;
+				newaiut.Want = count;
+				newaiut.Type = type;
+				aiforce.UnitTypes.push_back(newaiut);
+			}
 		}
+
 	}
 	AiAssignFreeUnitsToForce();
 	lua_pushboolean(l, 0);
@@ -1040,58 +1056,66 @@ static int CclAiSetCollect(lua_State *l)
 static int CclAiDump(lua_State *l)
 {
 	LuaCheckArgs(l, 0);
-	//
-	// Script
-	//
-	printf("------\n");
-	for (int i = 0; i < MaxCosts; ++i) {
-		printf("%s(%4d) ", DefaultResourceNames[i].c_str(), AiPlayer->Player->Resources[i]);
-	}
-	printf("\n");
-	printf("%d:", AiPlayer->Player->Index);
+	for (int p = 0; p < PlayerMax - 1; ++p) {
+		CPlayer &aip = Players[p];
+		if (aip.AiEnabled) {
+			//
+			// Script
+			//
+
+			printf("------\n");
+			for (int i = 0; i < MaxCosts; ++i) {
+				printf("%s(%4d, %4d/%4d) ", DefaultResourceNames[i].c_str(),
+					   aip.Resources[i], aip.StoredResources[i], aip.MaxResources[i]);
+			}
+			printf("\n");
+			printf("Player %d:", aip.Index);
 #if 0
-	gh_display(gh_car(AiPlayer->Script));
+			gh_display(gh_car(AiPlayer->Script));
 #endif
-	//
-	// Requests
-	//
-	size_t n = AiPlayer->UnitTypeRequests.size();
-	printf("UnitTypeRequests(%u):\n", static_cast<unsigned int>(n));
-	for (size_t i = 0; i < n; ++i) {
-		printf("%s ", AiPlayer->UnitTypeRequests[i].Type->Ident.c_str());
-	}
-	printf("\n");
-	n = AiPlayer->UpgradeToRequests.size();
-	printf("UpgradeToRequests(%u):\n", static_cast<unsigned int>(n));
-	for (size_t i = 0; i < n; ++i) {
-		printf("%s ", AiPlayer->UpgradeToRequests[i]->Ident.c_str());
-	}
-	printf("\n");
-	n = AiPlayer->ResearchRequests.size();
-	printf("ResearchRequests(%u):\n", static_cast<unsigned int>(n));
-	for (size_t i = 0; i < n; ++i) {
-		printf("%s ", AiPlayer->ResearchRequests[i]->Ident.c_str());
-	}
-	printf("\n");
+			//
+			// Requests
+			//
+			size_t n = aip.Ai->UnitTypeRequests.size();
+			printf("UnitTypeRequests(%u):\n", static_cast<unsigned int>(n));
+			for (size_t i = 0; i < n; ++i) {
+				printf("%s ", aip.Ai->UnitTypeRequests[i].Type->Ident.c_str());
+			}
+			printf("\n");
+			n = aip.Ai->UpgradeToRequests.size();
+			printf("UpgradeToRequests(%u):\n", static_cast<unsigned int>(n));
+			for (size_t i = 0; i < n; ++i) {
+				printf("%s ", aip.Ai->UpgradeToRequests[i]->Ident.c_str());
+			}
+			printf("\n");
+			n = aip.Ai->ResearchRequests.size();
+			printf("ResearchRequests(%u):\n", static_cast<unsigned int>(n));
+			for (size_t i = 0; i < n; ++i) {
+				printf("%s ", aip.Ai->ResearchRequests[i]->Ident.c_str());
+			}
+			printf("\n");
 
-	// Building queue
-	printf("Building queue:\n");
-	for (size_t i = 0; i < AiPlayer->UnitTypeBuilt.size(); ++i) {
-		const AiBuildQueue &queue = AiPlayer->UnitTypeBuilt[i];
-		printf("%s(%d/%d) ", queue.Type->Ident.c_str(), queue.Made, queue.Want);
-	}
-	printf("\n");
+			// Building queue
+			printf("Building queue:\n");
+			for (size_t i = 0; i < aip.Ai->UnitTypeBuilt.size(); ++i) {
+				const AiBuildQueue &queue = aip.Ai->UnitTypeBuilt[i];
+				printf("%s(%d/%d) ", queue.Type->Ident.c_str(), queue.Made, queue.Want);
+			}
+			printf("\n");
 
-	// PrintForce
-	for (size_t i = 0; i < AiPlayer->Force.Size(); ++i) {
-		printf("Force(%u%s%s):\n", static_cast<unsigned int>(i),
-			   AiPlayer->Force[i].Completed ? ",complete" : ",recruit",
-			   AiPlayer->Force[i].Attacking ? ",attack" : "");
-		for (size_t j = 0; j < AiPlayer->Force[i].UnitTypes.size(); ++j) {
-			const AiUnitType &aut = AiPlayer->Force[i].UnitTypes[j];
-			printf("%s(%d) ", aut.Type->Ident.c_str(), aut.Want);
+			// PrintForce
+			for (size_t i = 0; i < aip.Ai->Force.Size(); ++i) {
+				printf("Force(%u%s%s):\n", static_cast<unsigned int>(i),
+					   aip.Ai->Force[i].Completed ? ",complete" : ",recruit",
+					   aip.Ai->Force[i].Attacking ? ",attack" : "");
+				for (size_t j = 0; j < aip.Ai->Force[i].UnitTypes.size(); ++j) {
+					const AiUnitType &aut = aip.Ai->Force[i].UnitTypes[j];
+					printf("%s(%d) ", aut.Type->Ident.c_str(), aut.Want);
+				}
+				printf("\n");
+			}
+			printf("\n");
 		}
-		printf("\n");
 	}
 	lua_pushboolean(l, 0);
 	return 1;
@@ -1109,7 +1133,7 @@ static void CclParseBuildQueue(lua_State *l, PlayerAi *ai, int offset)
 		LuaError(l, "incorrect argument");
 	}
 
-	Vec2i pos = { -1, -1};
+	Vec2i pos(-1, -1);
 
 	const int args = lua_rawlen(l, offset);
 	for (int k = 0; k < args; ++k) {
@@ -1180,7 +1204,7 @@ static int CclDefineAiPlayer(lua_State *l)
 			const char *aiName = LuaToString(l, j + 1);
 			CAiType *ait = GetAiTypesByName(aiName);
 			if (ait == NULL) {
-				lua_pushfstring(l, "ai-type not found: %s", aiName);
+				LuaError(l, "ai-type not found: %s" _C_ aiName);
 			}
 			ai->AiType = ait;
 			ai->Script = ait->Script;
@@ -1267,7 +1291,7 @@ static int CclDefineAiPlayer(lua_State *l)
 						UNUSED(ident);
 						lua_pop(l, 1);
 #endif
-						ai->Force[forceIdx].Units.Insert(UnitSlots[num]);
+						ai->Force[forceIdx].Units.Insert(&UnitManager.GetSlotUnit(num));
 					}
 					lua_pop(l, 1);
 				} else if (!strcmp(value, "state")) {
@@ -1443,21 +1467,6 @@ static int CclDefineAiPlayer(lua_State *l)
 			CclParseBuildQueue(l, ai, j + 1);
 		} else if (!strcmp(value, "repair-building")) {
 			ai->LastRepairBuilding = LuaToNumber(l, j + 1);
-		} else if (!strcmp(value, "repair-workers")) {
-			if (!lua_istable(l, j + 1)) {
-				LuaError(l, "incorrect argument");
-			}
-			const int subargs = lua_rawlen(l, j + 1);
-			for (int k = 0; k < subargs; ++k) {
-				lua_rawgeti(l, j + 1, k + 1);
-				const int num = LuaToNumber(l, -1);
-				lua_pop(l, 1);
-				++k;
-				lua_rawgeti(l, j + 1, k + 1);
-				const int workers = LuaToNumber(l, -1);
-				lua_pop(l, 1);
-				ai->TriedRepairWorkers[num] = workers;
-			}
 		} else {
 			LuaError(l, "Unsupported tag: %s" _C_ value);
 		}

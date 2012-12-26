@@ -33,9 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "action/action_upgradeto.h"
@@ -47,6 +44,7 @@
 #include "player.h"
 #include "script.h"
 #include "spells.h"
+#include "translate.h"
 #include "unit.h"
 #include "unittype.h"
 
@@ -116,7 +114,7 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	for (int i = 0; i < MaxCosts; ++i) {
 		if (player.MaxResources[i] != -1) {
 			player.MaxResources[i] += newtype.Stats[player.Index].Storing[i] - oldtype.Stats[player.Index].Storing[i];
-			player.SetResource(i, player.StoredResources[i], true);
+			player.SetResource(i, player.StoredResources[i], STORE_BUILDING);
 		}
 	}
 
@@ -124,7 +122,7 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 	const CUnitStats &newstats = newtype.Stats[player.Index];
 
 	for (unsigned int i = 0; i < UnitTypeVar.GetNumberVariable(); ++i) {
-		if (unit.Variable[i].Max) {
+		if (unit.Variable[i].Max && unit.Variable[i].Value) {
 			unit.Variable[i].Value = newstats.Variables[i].Max *
 									 unit.Variable[i].Value / unit.Variable[i].Max;
 		} else {
@@ -268,7 +266,7 @@ static void AnimateActionUpgradeTo(CUnit &unit)
 	const CUnitType &newtype = *this->Type;
 	const CUnitStats &newstats = newtype.Stats[player.Index];
 
-	this->Ticks += SpeedUpgrade;
+	this->Ticks += player.SpeedUpgrade / SPEEDUP_FACTOR;
 	if (this->Ticks < newstats.Costs[TimeCost]) {
 		unit.Wait = CYCLES_PER_SECOND / 6;
 		return ;
@@ -280,7 +278,7 @@ static void AnimateActionUpgradeTo(CUnit &unit)
 	}
 
 	if (TransformUnitIntoType(unit, newtype) == 0) {
-		player.Notify(NotifyGreen, unit.tilePos, _("Upgrade to %s canceled"), newtype.Name.c_str());
+		player.Notify(NotifyYellow, unit.tilePos, _("Upgrade to %s canceled"), newtype.Name.c_str());
 		this->Finished = true;
 		return ;
 	}

@@ -41,6 +41,7 @@
 #include "map.h"
 #include "player.h"
 #include "unit.h"
+#include "unit_find.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -55,11 +56,11 @@
 **
 **  @return        the BuildingRestrictionDetails
 */
-CBuildRestrictionOnTop *OnTopDetails(const std::vector<CBuildRestriction *> &restr,
-									 const CUnit &unit, const CUnitType *parent)
+CBuildRestrictionOnTop *OnTopDetails(const CUnit &unit, const CUnitType *parent)
 {
 
-	for (std::vector<CBuildRestriction *>::const_iterator i = restr.begin(); i != restr.end(); ++i) {
+	for (std::vector<CBuildRestriction *>::const_iterator i = unit.Type->BuildingRules.begin();
+		 i != unit.Type->BuildingRules.end(); ++i) {
 		CBuildRestrictionOnTop *ontopb = dynamic_cast<CBuildRestrictionOnTop *>(*i);
 
 		if (ontopb) {
@@ -76,7 +77,7 @@ CBuildRestrictionOnTop *OnTopDetails(const std::vector<CBuildRestriction *> &res
 
 		if (andb) {
 			for (std::vector<CBuildRestriction *>::iterator j = andb->_or_list.begin(); j != andb->_or_list.end(); ++j) {
-				CBuildRestrictionOnTop *ontopb = dynamic_cast<CBuildRestrictionOnTop *>(*i);
+				CBuildRestrictionOnTop *ontopb = dynamic_cast<CBuildRestrictionOnTop *>(*j);
 				if (ontopb) {
 					if (!parent) {
 						// Guess this is right
@@ -110,8 +111,8 @@ bool CBuildRestrictionAnd::Check(const CUnit *builder, const CUnitType &type, co
 */
 bool CBuildRestrictionDistance::Check(const CUnit *builder, const CUnitType &type, const Vec2i &pos, CUnit *&) const
 {
-	Vec2i pos1 = {0, 0};
-	Vec2i pos2 = {0, 0};
+	Vec2i pos1(0, 0);
+	Vec2i pos2(0, 0);
 	int distance = 0;
 
 	if (this->DistanceType == LessThanEqual
@@ -131,7 +132,7 @@ bool CBuildRestrictionDistance::Check(const CUnit *builder, const CUnitType &typ
 		distance = this->Distance - 1;
 	}
 	std::vector<CUnit *> table;
-	Map.Select(pos1, pos2, table);
+	Select(pos1, pos2, table);
 
 	switch (this->DistanceType) {
 		case GreaterThan :
@@ -285,13 +286,36 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 		}
 	}
 
+	// Check special rules for AI players
+	if (unit && unit->Player->AiEnabled) {
+		bool aiChecked = true;
+		size_t count = type.AiBuildingRules.size();
+		if (count > 0) {
+			CUnit *ontoptarget = NULL;
+			for (unsigned int i = 0; i < count; ++i) {
+				CBuildRestriction *rule = type.AiBuildingRules[i];
+				// All checks processed, did we really have success
+				if (rule->Check(unit, type, pos, ontoptarget)) {
+					// We passed a full ruleset
+					aiChecked = true;
+					break;
+				} else {
+					aiChecked = false;
+				}
+			}
+		}
+		if (aiChecked == false) {
+			return NULL;
+		}
+	}
+
 	size_t count = type.BuildingRules.size();
 	if (count > 0) {
 		for (unsigned int i = 0; i < count; ++i) {
 			CBuildRestriction *rule = type.BuildingRules[i];
 			CUnit *ontoptarget = NULL;
 			// All checks processed, did we really have success
-			if (rule->Check(unit, type, pos, ontoptarget)) {
+			if (rule->Check(NoUnitP, type, pos, ontoptarget)) {
 				// We passed a full ruleset return
 				if (unit == NULL) {
 					return ontoptarget ? ontoptarget : (CUnit *)1;
@@ -303,26 +327,6 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 		return NULL;
 	}
 
-	// Check special rules for AI players
-	if (unit && unit->Player->AiEnabled) {
-		size_t count = type.AiBuildingRules.size();
-		if (count > 0) {
-			CUnit *ontoptarget = NULL;
-			for (unsigned int i = 0; i < count; ++i) {
-				CBuildRestriction *rule = type.AiBuildingRules[i];
-				// All checks processed, did we really have success
-				if (rule->Check(unit, type, pos, ontoptarget)) {
-					// We passed a full ruleset return
-					if (unit == NULL) {
-						return ontoptarget ? ontoptarget : (CUnit *)1;
-					} else {
-						return ontoptarget ? ontoptarget : const_cast<CUnit *>(unit);
-					}
-				}
-			}
-			return NULL;
-		}
-	}
 	return (unit == NULL) ? (CUnit *)1 : const_cast<CUnit *>(unit);
 }
 
@@ -336,7 +340,7 @@ CUnit *CanBuildHere(const CUnit *unit, const CUnitType &type, const Vec2i &pos)
 */
 bool CanBuildOn(const Vec2i &pos, int mask)
 {
-	return (Map.Info.IsPointOnMap(pos) && !Map.CheckMask(pos, mask));
+	return (Map.Info.IsPointOnMap(pos) && !Map.Field(pos)->CheckMask(mask));
 }
 
 /**
@@ -389,12 +393,13 @@ CUnit *CanBuildUnitType(const CUnit *unit, const CUnitType &type, const Vec2i &p
 				testmask = type.MovementMask;
 			}
 			/*secound part of if (!CanBuildOn(x + w, y + h, testmask)) */
-			if (Map.CheckMask(index + pos.x + w, testmask)) {
+			const CMapField &mf = *Map.Field(index + pos.x + w);
+			if (mf.CheckMask(testmask)) {
 				h = type.TileHeight;
 				ontop = NULL;
 				break;
 			}
-			if (player && !Map.IsFieldExplored(*player, index + pos.x + w)) {
+			if (player && !mf.playerInfo.IsExplored(*player)) {
 				h = type.TileHeight;
 				ontop = NULL;
 				break;

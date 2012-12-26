@@ -33,15 +33,12 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
+
 #include "tileset.h"
-#include "script.h"
+
 #include "map.h"
-#include "iolib.h"
+#include "ui.h"
 #include "video.h"
 
 /*----------------------------------------------------------------------------
@@ -51,7 +48,7 @@
 /**
 ** Size of a tile in pixel
 */
-PixelSize PixelTileSize = {32, 32};
+PixelSize PixelTileSize(32, 32);
 
 
 /*----------------------------------------------------------------------------

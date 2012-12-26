@@ -9,7 +9,7 @@
 #         Stratagus - A free fantasy real time strategy game engine
 #
 #    CMakeLists.txt
-#    Copyright (C) 2011  Pali Rohár <pali.rohar@gmail.com>
+#    Copyright (C) 2011-2012  Pali Rohár <pali.rohar@gmail.com>
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@
 
 project(stratagus)
 cmake_minimum_required(VERSION 2.6)
-set(STRATAGUS_VERSION 2.2.6)
+set(STRATAGUS_VERSION 2.2.7)
 
 # Stratagus sources
 
@@ -180,6 +180,7 @@ source_group(map FILES ${map_SRCS})
 set(missile_SRCS
 	src/missile/missile.cpp
 	src/missile/missile_cliptotarget.cpp
+	src/missile/missile_continuous.cpp
 	src/missile/missile_cycleonce.cpp
 	src/missile/missile_deathcoil.cpp
 	src/missile/missile_fire.cpp
@@ -202,7 +203,7 @@ source_group(missile FILES ${missile_SRCS})
 
 set(network_SRCS
 	src/network/commands.cpp
-	src/network/lowlevel.cpp
+	src/network/net_lowlevel.cpp
 	src/network/master.cpp
 	src/network/netconnect.cpp
 	src/network/network.cpp
@@ -213,6 +214,7 @@ set(particle_SRCS
 	src/particle/graphicanimation.cpp
 	src/particle/chunkparticle.cpp
 	src/particle/particlemanager.cpp
+	src/particle/radialparticle.cpp
 	src/particle/smokeparticle.cpp
 	src/particle/staticparticle.cpp
 )
@@ -238,6 +240,22 @@ set(sound_SRCS
 )
 source_group(sound FILES ${sound_SRCS})
 
+set(spell_SRCS
+	src/spell/script_spell.cpp
+	src/spell/spell_adjustvariable.cpp
+	src/spell/spell_adjustvital.cpp
+	src/spell/spell_areaadjustvital.cpp
+	src/spell/spell_areabombardment.cpp
+	src/spell/spell_capture.cpp
+	src/spell/spell_demolish.cpp
+	src/spell/spell_polymorph.cpp
+	src/spell/spell_spawnmissile.cpp
+	src/spell/spell_spawnportal.cpp
+	src/spell/spell_summon.cpp
+	src/spell/spells.cpp
+)
+source_group(spell FILES ${spell_SRCS})
+
 set(stratagusmain_SRCS
 	src/stratagus/construct.cpp
 	src/stratagus/groups.cpp
@@ -247,9 +265,7 @@ set(stratagusmain_SRCS
 	src/stratagus/player.cpp
 	src/stratagus/script.cpp
 	src/stratagus/script_player.cpp
-	src/stratagus/script_spell.cpp
 	src/stratagus/selection.cpp
-	src/stratagus/spells.cpp
 	src/stratagus/stratagus.cpp
 	src/stratagus/title.cpp
 	src/stratagus/translate.cpp
@@ -289,6 +305,7 @@ set(unit_SRCS
 source_group(unit FILES ${unit_SRCS})
 
 set(video_SRCS
+	src/video/color.cpp
 	src/video/cursor.cpp
 	src/video/font.cpp
 	src/video/graphic.cpp
@@ -321,6 +338,7 @@ set(tolua_FILES
 	src/tolua/player.pkg
 	src/tolua/sound.pkg
 	src/tolua/stratagus.pkg
+	src/tolua/translate.pkg
 	src/tolua/trigger.pkg
 	src/tolua/ui.pkg
 	src/tolua/unit.pkg
@@ -344,6 +362,7 @@ set(stratagus_SRCS
 	${particle_SRCS}
 	${pathfinder_SRCS}
 	${sound_SRCS}
+	${spell_SRCS}
 	${stratagusmain_SRCS}
 	${ui_SRCS}
 	${unit_SRCS}
@@ -440,6 +459,19 @@ set(stratagus_animation_HDRS
 	src/include/animation/animation_wait.h
 )
 
+set(stratagus_spell_HDRS
+	src/include/spell/spell_adjustvariable.h
+	src/include/spell/spell_adjustvital.h
+	src/include/spell/spell_areaadjustvital.h
+	src/include/spell/spell_areabombardment.h
+	src/include/spell/spell_capture.h
+	src/include/spell/spell_demolish.h
+	src/include/spell/spell_polymorph.h
+	src/include/spell/spell_spawnmissile.h
+	src/include/spell/spell_spawnportal.h
+	src/include/spell/spell_summon.h
+)
+
 set(stratagus_generic_HDRS
 	src/ai/ai_local.h
 	src/video/intern_video.h
@@ -447,12 +479,14 @@ set(stratagus_generic_HDRS
 	src/include/actions.h
 	src/include/ai.h
 	src/include/animation.h
+	src/include/color.h
 	src/include/commands.h
 	src/include/construct.h
 	src/include/cursor.h
 	src/include/depend.h
 	src/include/editor.h
 	src/include/font.h
+	src/include/game.h
 	src/include/icons.h
 	src/include/interface.h
 	src/include/iocompat.h
@@ -490,6 +524,7 @@ set(stratagus_generic_HDRS
 	src/include/ui.h
 	src/include/unit.h
 	src/include/unit_cache.h
+	src/include/unit_find.h
 	src/include/unit_manager.h
 	src/include/unitptr.h
 	src/include/unitsound.h
@@ -510,8 +545,10 @@ source_group(include FILES ${stratagus_generic_HDRS})
 source_group(include\\action FILES ${stratagus_action_HDRS})
 source_group(include\\animation FILES ${stratagus_animation_HDRS})
 source_group(include\\guichan FILES ${stratagus_guichan_HDRS})
+source_group(include\\spell FILES ${stratagus_spell_HDRS})
 
-set (stratagus_HDRS ${stratagus_generic_HDRS} ${stratagus_action_HDRS} ${stratagus_animation_HDRS} ${stratagus_guichan_HDRS})
+
+set (stratagus_HDRS ${stratagus_generic_HDRS} ${stratagus_action_HDRS} ${stratagus_animation_HDRS} ${stratagus_guichan_HDRS} ${stratagus_spell_HDRS})
 
 # Additional platform checks
 
@@ -615,21 +652,25 @@ if(NOT WITH_RENDERER)
 endif()
 
 # Install paths
-set(BINDIR "bin" CACHE PATH "Where to install binaries")
-set(SBINDIR "sbin" CACHE PATH "Where to install metaserver binary")
+set(BINDIR "bin" CACHE PATH "Where to install user binaries")
+set(SBINDIR "sbin" CACHE PATH "Where to install system binaries")
+set(GAMEDIR "games" CACHE PATH "Where to install games binaries")
 set(DOCDIR "share/doc/stratagus" CACHE PATH "Sets the doc directory to a non-default location.")
 set(MANDIR "share/man/man6" CACHE PATH "Sets the man directory to a non-default location.")
+set(PIXMAPSDIR "share/pixmaps" CACHE PATH "Sets the pixmaps directory to a non-default location.")
 set(STRATAGUS_HEADERS "include" CACHE PATH "Where to install stratagus headers.")
+
+if(NOT IS_ABSOLUTE "${PIXMAPSDIR}")
+	set(PIXMAPSDIRABS "${CMAKE_INSTALL_PREFIX}/${PIXMAPSDIR}")
+else()
+	set(PIXMAPSDIRABS "${PIXMAPSDIR}")
+endif()
 
 # Stratagus definitions
 
-add_definitions(${PNG_DEFINITIONS} -DUSE_ZLIB)
+add_definitions(${PNG_DEFINITIONS} -DUSE_ZLIB -DPIXMAPS=\"${PIXMAPSDIRABS}\")
 include_directories(${LUA_INCLUDE_DIR} ${PNG_INCLUDE_DIR} ${SDL_INCLUDE_DIR} ${TOLUA++_INCLUDE_DIR} ${ZLIB_INCLUDE_DIRS})
 set(stratagus_LIBS ${stratagus_LIBS} ${LUA_LIBRARIES} ${PNG_LIBRARIES} ${SDL_LIBRARY} ${TOLUA++_LIBRARY} ${ZLIB_LIBRARIES})
-
-if (APPLE)
-	set(stratagus_LIBS ${stratagus_LIBS}  SDLmain)
-endif()
 
 if(WIN32 AND NOT ENABLE_STDIO_REDIRECT)
 	add_definitions(-DNO_STDIO_REDIRECT)
@@ -876,35 +917,35 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 if(WIN32 AND MINGW AND ENABLE_STATIC)
-	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -Wl,--stack,10485760")
+	set_target_properties(stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++ -Wl,--stack,10485760")
 endif()
 
 ########### next target ###############
 
-#set(metaserver_SRCS
-#	metaserver/cmd.cpp
-#	metaserver/db.cpp
-#	metaserver/games.cpp
-#	metaserver/main.cpp
-#	metaserver/netdriver.cpp
-#	src/network/lowlevel.cpp
-#)
+set(metaserver_SRCS
+	metaserver/cmd.cpp
+	metaserver/db.cpp
+	metaserver/games.cpp
+	metaserver/main.cpp
+	metaserver/netdriver.cpp
+	src/network/net_lowlevel.cpp
+)
 
-#set(metaserver_HDRS
-#	metaserver/cmd.h
-#	metaserver/db.h
-#	metaserver/games.h
-#	metaserver/netdriver.h
-#)
+set(metaserver_HDRS
+	metaserver/cmd.h
+	metaserver/db.h
+	metaserver/games.h
+	metaserver/netdriver.h
+)
 
-#source_group(metaserver FILES ${metaserver_SRCS} ${metaserver_HDRS})
+source_group(metaserver FILES ${metaserver_SRCS} ${metaserver_HDRS})
 
 if(SQLITE_FOUND)
 	#add_executable(metaserver ${metaserver_SRCS} ${metaserver_HDRS})
 	#target_link_libraries(metaserver ${SDL_LIBRARY} ${SQLITE_LIBRARIES})
 
 	if(WIN32 AND MINGW AND ENABLE_STATIC)
-		set_target_properties(metaserver PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc")
+		#set_target_properties(metaserver PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++")
 	endif()
 endif()
 
@@ -919,7 +960,7 @@ add_executable(png2stratagus ${png2stratagus_SRCS})
 target_link_libraries(png2stratagus ${PNG_LIBRARY} ${ZLIB_LIBRARIES})
 
 if(WIN32 AND MINGW AND ENABLE_STATIC)
-	set_target_properties(png2stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc")
+	set_target_properties(png2stratagus PROPERTIES LINK_FLAGS "${LINK_FLAGS} -static-libgcc -static-libstdc++")
 endif()
 
 
@@ -975,7 +1016,7 @@ if(ENABLE_UPX AND SELF_PACKER_FOR_EXECUTABLE)
 	self_packer(stratagus)
 	self_packer(png2stratagus)
 	if(SQLITE_FOUND)
-		self_packer(metaserver)
+		#self_packer(metaserver)
 	endif()
 endif()
 
@@ -994,7 +1035,7 @@ endif()
 
 ########### install files ###############
 
-install(TARGETS stratagus DESTINATION ${BINDIR})
+install(TARGETS stratagus DESTINATION ${GAMEDIR})
 install(TARGETS png2stratagus DESTINATION ${BINDIR})
 
 if(SQLITE_FOUND)

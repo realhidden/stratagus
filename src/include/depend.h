@@ -97,6 +97,7 @@
 class CPlayer;
 class CUnitType;
 class CUpgrade;
+class ButtonAction;
 
 enum {
 	DependRuleUnitType,  /// Kind is an unit-type
@@ -111,8 +112,8 @@ public:
 	unsigned char Count;      /// how many required
 	char Type;                /// an unit-type or upgrade
 	union {
-		CUnitType *UnitType;  /// unit-type pointer
-		CUpgrade  *Upgrade;   /// upgrade pointer
+		const CUnitType *UnitType;  /// unit-type pointer
+		const CUpgrade  *Upgrade;   /// upgrade pointer
 	} Kind;                   /// required object
 	DependRule *Rule;         /// requirements, and rule
 };
@@ -128,6 +129,8 @@ extern void InitDependencies();
 /// Cleanup dependencies module
 extern void CleanDependencies();
 
+/// Print all unit dependencies into string
+extern std::string PrintDependencies(const CPlayer &player, const ButtonAction &button);
 /// Check a dependency by identifier
 extern bool CheckDependByIdent(const CPlayer &player, const std::string &target);
 /// Check a dependency by unit type

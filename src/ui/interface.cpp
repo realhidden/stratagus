@@ -33,34 +33,28 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
-#include "video.h"
+
+#include "interface.h"
+
+#include "ai.h"
+#include "commands.h"
+#include "cursor.h"
+#include "font.h"
+#include "iolib.h"
+#include "network.h"
+#include "player.h"
+#include "replay.h"
 #include "sound.h"
 #include "sound_server.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
-#include "interface.h"
-#include "cursor.h"
-#include "ui.h"
-#include "menus.h"
-#include "script.h"
 #include "tileset.h"
-#include "minimap.h"
-#include "network.h"
-#include "font.h"
-#include "results.h"
+#include "translate.h"
+#include "ui.h"
+#include "unit.h"
+#include "unit_find.h"
+#include "unittype.h"
 #include "video.h"
-#include "iolib.h"
-#include "commands.h"
-#include "ai.h"
 #include "widgets.h"
-#include "replay.h"
-#include "actions.h"
 
 /*----------------------------------------------------------------------------
 --  Defines
@@ -79,13 +73,12 @@
 --  Variables
 ----------------------------------------------------------------------------*/
 
-static int SavedMapPositionX[3];     /// Saved map position X
-static int SavedMapPositionY[3];     /// Saved map position Y
+static Vec2i SavedMapPosition[3];    /// Saved map position
 static char Input[80];               /// line input for messages/long commands
 static int InputIndex;               /// current index into input
 static char InputStatusLine[99];     /// Last input status line
 const char DefaultGroupKeys[] = "0123456789`";/// Default group keys
-const char *UiGroupKeys = DefaultGroupKeys;/// Up to 11 keys, last unselect. Default for qwerty
+std::string UiGroupKeys = DefaultGroupKeys;/// Up to 11 keys, last unselect. Default for qwerty
 bool GameRunning;                    /// Current running state
 bool GamePaused;                     /// Current pause state
 bool GameObserve;                    /// Observe mode
@@ -158,7 +151,7 @@ static void UiCenterOnGroup(unsigned group, GroupSelectionMode mode = SELECTABLE
 
 	if (n--) {
 		CUnit **units = GetUnitsOfGroup(group);
-		PixelPos pos = { -1, -1};
+		PixelPos pos(-1, -1);
 
 		// FIXME: what should we do with the removed units? ignore?
 		if (units[n]->Type && units[n]->Type->CanSelect(mode)) {
@@ -230,7 +223,7 @@ static void UiAddGroupToSelection(unsigned group)
 static void UiDefineGroup(unsigned group)
 {
 	for (int i = 0; i < NumSelected; ++i) {
-		if (Selected[i]->GroupId) {
+		if (Selected[i]->Player == ThisPlayer && Selected[i]->GroupId) {
 			RemoveUnitFromGroups(*Selected[i]);
 		}
 	}
@@ -416,8 +409,7 @@ static void UiCenterOnSelected()
 */
 static void UiSaveMapPosition(unsigned position)
 {
-	SavedMapPositionX[position] = UI.SelectedViewport->MapPos.x;
-	SavedMapPositionY[position] = UI.SelectedViewport->MapPos.y;
+	SavedMapPosition[position] = UI.SelectedViewport->MapPos;
 }
 
 /**
@@ -427,9 +419,7 @@ static void UiSaveMapPosition(unsigned position)
 */
 static void UiRecallMapPosition(unsigned position)
 {
-	const Vec2i savedTilePos = {SavedMapPositionX[position], SavedMapPositionY[position]};
-
-	UI.SelectedViewport->Set(savedTilePos, PixelTileSize / 2);
+	UI.SelectedViewport->Set(SavedMapPosition[position], PixelTileSize / 2);
 }
 
 /**
@@ -450,13 +440,12 @@ static void UiToggleTerrain()
 */
 static void UiFindIdleWorker()
 {
-	// FIXME: static variable, is not needed.
-	static CUnit *LastIdleWorker = NoUnitP;
+	if (ThisPlayer->FreeWorkers.empty()) {
+		return;
+	}
+	CUnit *unit = ThisPlayer->FreeWorkers[0];
 
-	CUnit *unit = FindIdleWorker(*ThisPlayer, LastIdleWorker);
-
-	if (unit != NoUnitP) {
-		LastIdleWorker = unit;
+	if (unit != NULL) {
 		SelectSingleUnit(*unit);
 		UI.StatusLine.Clear();
 		ClearCosts();
@@ -526,6 +515,48 @@ bool HandleCommandKey(int key)
 extern void ToggleShowBuilListMessages();
 #endif
 
+static void CommandKey_Group(int group)
+{
+	if (KeyModifiers & ModifierShift) {
+		if (KeyModifiers & (ModifierAlt | ModifierDoublePress)) {
+			if (KeyModifiers & ModifierDoublePress) {
+				UiCenterOnGroup(group, SELECT_ALL);
+			} else {
+				UiSelectGroup(group, SELECT_ALL);
+			}
+		} else if (KeyModifiers & ModifierControl) {
+			UiAddToGroup(group);
+		} else {
+			UiAddGroupToSelection(group);
+		}
+	} else {
+		if (KeyModifiers & (ModifierAlt | ModifierDoublePress)) {
+			if (KeyModifiers & ModifierAlt) {
+				if (KeyModifiers & ModifierDoublePress) {
+					UiCenterOnGroup(group, NON_SELECTABLE_BY_RECTANGLE_ONLY);
+				} else {
+					UiSelectGroup(group, NON_SELECTABLE_BY_RECTANGLE_ONLY);
+				}
+			} else {
+				UiCenterOnGroup(group);
+			}
+		} else if (KeyModifiers & ModifierControl) {
+			UiDefineGroup(group);
+		} else {
+			UiSelectGroup(group);
+		}
+	}
+}
+
+static void CommandKey_MapPosition(int index)
+{
+	if (KeyModifiers & ModifierShift) {
+		UiSaveMapPosition(index);
+	} else {
+		UiRecallMapPosition(index);
+	}
+}
+
 /**
 **  Handle keys in command mode.
 **
@@ -535,11 +566,11 @@ extern void ToggleShowBuilListMessages();
 */
 static bool CommandKey(int key)
 {
-	const char *ptr;
+	const char *ptr = strchr(UiGroupKeys.c_str(), key);
 
 	// FIXME: don't handle unicode well. Should work on all latin keyboard.
-	if ((ptr = strchr(UiGroupKeys, key))) {
-		key = '0' + ptr - UiGroupKeys;
+	if (ptr) {
+		key = '0' + ptr - UiGroupKeys.c_str();
 		if (key > '9') {
 			key = SDLK_BACKQUOTE;
 		}
@@ -563,45 +594,13 @@ static bool CommandKey(int key)
 		case '3': case '4': case '5':
 		case '6': case '7': case '8':
 		case '9':
-			if (KeyModifiers & ModifierShift) {
-				if (KeyModifiers & (ModifierAlt | ModifierDoublePress)) {
-					if (KeyModifiers & ModifierDoublePress) {
-						UiCenterOnGroup(key - '0', SELECT_ALL);
-					} else {
-						UiSelectGroup(key - '0', SELECT_ALL);
-					}
-				} else if (KeyModifiers & ModifierControl) {
-					UiAddToGroup(key - '0');
-				} else {
-					UiAddGroupToSelection(key - '0');
-				}
-			} else {
-				if (KeyModifiers & (ModifierAlt | ModifierDoublePress)) {
-					if (KeyModifiers & ModifierAlt) {
-						if (KeyModifiers & ModifierDoublePress) {
-							UiCenterOnGroup(key - '0', NON_SELECTABLE_BY_RECTANGLE_ONLY);
-						} else {
-							UiSelectGroup(key - '0', NON_SELECTABLE_BY_RECTANGLE_ONLY);
-						}
-					} else {
-						UiCenterOnGroup(key - '0');
-					}
-				} else if (KeyModifiers & ModifierControl) {
-					UiDefineGroup(key - '0');
-				} else {
-					UiSelectGroup(key - '0');
-				}
-			}
+			CommandKey_Group(key - '0');
 			break;
 
 		case SDLK_F2:
 		case SDLK_F3:
 		case SDLK_F4: // Set/Goto place
-			if (KeyModifiers & ModifierShift) {
-				UiSaveMapPosition(key - SDLK_F2);
-			} else {
-				UiRecallMapPosition(key - SDLK_F2);
-			}
+			CommandKey_MapPosition(key - SDLK_F2);
 			break;
 
 		case SDLK_SPACE: // center on last action
@@ -1147,16 +1146,16 @@ void HandleKeyRepeat(unsigned, unsigned keychar)
 **  @param x  Screen X position.
 **  @param y  Screen Y position.
 **
-**  @return   1 if the mouse is in the scroll area, 0 otherwise
+**  @return   true if the mouse is in the scroll area, false otherwise
 */
-int HandleMouseScrollArea(int x, int y)
+bool HandleMouseScrollArea(const PixelPos &mousePos)
 {
-	if (x < SCROLL_LEFT) {
-		if (y < SCROLL_UP) {
+	if (mousePos.x < SCROLL_LEFT) {
+		if (mousePos.y < SCROLL_UP) {
 			CursorOn = CursorOnScrollLeftUp;
 			MouseScrollState = ScrollLeftUp;
 			GameCursor = UI.ArrowNW.Cursor;
-		} else if (y > SCROLL_DOWN) {
+		} else if (mousePos.y > SCROLL_DOWN) {
 			CursorOn = CursorOnScrollLeftDown;
 			MouseScrollState = ScrollLeftDown;
 			GameCursor = UI.ArrowSW.Cursor;
@@ -1165,12 +1164,12 @@ int HandleMouseScrollArea(int x, int y)
 			MouseScrollState = ScrollLeft;
 			GameCursor = UI.ArrowW.Cursor;
 		}
-	} else if (x > SCROLL_RIGHT) {
-		if (y < SCROLL_UP) {
+	} else if (mousePos.x > SCROLL_RIGHT) {
+		if (mousePos.y < SCROLL_UP) {
 			CursorOn = CursorOnScrollRightUp;
 			MouseScrollState = ScrollRightUp;
 			GameCursor = UI.ArrowNE.Cursor;
-		} else if (y > SCROLL_DOWN) {
+		} else if (mousePos.y > SCROLL_DOWN) {
 			CursorOn = CursorOnScrollRightDown;
 			MouseScrollState = ScrollRightDown;
 			GameCursor = UI.ArrowSE.Cursor;
@@ -1179,18 +1178,20 @@ int HandleMouseScrollArea(int x, int y)
 			MouseScrollState = ScrollRight;
 			GameCursor = UI.ArrowE.Cursor;
 		}
-	} else if (y < SCROLL_UP) {
-		CursorOn = CursorOnScrollUp;
-		MouseScrollState = ScrollUp;
-		GameCursor = UI.ArrowN.Cursor;
-	} else if (y > SCROLL_DOWN) {
-		CursorOn = CursorOnScrollDown;
-		MouseScrollState = ScrollDown;
-		GameCursor = UI.ArrowS.Cursor;
 	} else {
-		return 0;
+		if (mousePos.y < SCROLL_UP) {
+			CursorOn = CursorOnScrollUp;
+			MouseScrollState = ScrollUp;
+			GameCursor = UI.ArrowN.Cursor;
+		} else if (mousePos.y > SCROLL_DOWN) {
+			CursorOn = CursorOnScrollDown;
+			MouseScrollState = ScrollDown;
+			GameCursor = UI.ArrowS.Cursor;
+		} else {
+			return false;
+		}
 	}
-	return 1;
+	return true;
 }
 
 /**
@@ -1204,8 +1205,8 @@ void HandleCursorMove(int *x, int *y)
 	//  Reduce coordinates to window-size.
 	clamp(x, 0, Video.Width - 1);
 	clamp(y, 0, Video.Height - 1);
-	CursorX = *x;
-	CursorY = *y;
+	CursorScreenPos.x = *x;
+	CursorScreenPos.y = *y;
 }
 
 /**
@@ -1214,10 +1215,11 @@ void HandleCursorMove(int *x, int *y)
 **  @param x  screen pixel X position.
 **  @param y  screen pixel Y position.
 */
-void HandleMouseMove(int x, int y)
+void HandleMouseMove(const PixelPos &screenPos)
 {
-	HandleCursorMove(&x, &y);
-	UIHandleMouseMove(x, y);
+	PixelPos pos(screenPos);
+	HandleCursorMove(&pos.x, &pos.y);
+	UIHandleMouseMove(pos);
 }
 
 /**
@@ -1277,17 +1279,13 @@ static unsigned LastMouseTicks;          /// Ticks of last mouse event
 **  @param ticks      Denotes time-stamp of video-system
 **  @param button     Mouse button pressed.
 */
-void InputMouseButtonPress(const EventCallback *callbacks,
+void InputMouseButtonPress(const EventCallback &callbacks,
 						   unsigned ticks, unsigned button)
 {
-	//
 	//  Button new pressed.
-	//
 	if (!(MouseButtons & (1 << button))) {
 		MouseButtons |= (1 << button);
-		//
 		//  Detect double click
-		//
 		if (MouseState == ClickedMouseState && button == LastMouseButton
 			&& ticks < StartMouseTicks + DoubleClickDelay) {
 			MouseButtons |= (1 << button) << MouseDoubleShift;
@@ -1300,7 +1298,7 @@ void InputMouseButtonPress(const EventCallback *callbacks,
 	}
 	LastMouseTicks = ticks;
 
-	callbacks->ButtonPressed(button);
+	callbacks.ButtonPressed(button);
 }
 
 /**
@@ -1310,14 +1308,10 @@ void InputMouseButtonPress(const EventCallback *callbacks,
 **  @param ticks      Denotes time-stamp of video-system
 **  @param button     Mouse button released.
 */
-void InputMouseButtonRelease(const EventCallback *callbacks,
+void InputMouseButtonRelease(const EventCallback &callbacks,
 							 unsigned ticks, unsigned button)
 {
-	unsigned mask;
-
-	//
 	//  Same button before pressed.
-	//
 	if (button == LastMouseButton && MouseState == InitialMouseState) {
 		MouseState = ClickedMouseState;
 	} else {
@@ -1326,7 +1320,7 @@ void InputMouseButtonRelease(const EventCallback *callbacks,
 	}
 	LastMouseTicks = ticks;
 
-	mask = 0;
+	unsigned mask = 0;
 	if (MouseButtons & ((1 << button) << MouseDoubleShift)) {
 		mask |= button << MouseDoubleShift;
 	}
@@ -1338,7 +1332,7 @@ void InputMouseButtonRelease(const EventCallback *callbacks,
 	}
 	MouseButtons &= ~(0x01010101 << button);
 
-	callbacks->ButtonReleased(button | mask);
+	callbacks.ButtonReleased(button | mask);
 }
 
 /**
@@ -1349,12 +1343,12 @@ void InputMouseButtonRelease(const EventCallback *callbacks,
 **  @param x          X movement
 **  @param y          Y movement
 */
-void InputMouseMove(const EventCallback *callbacks,
+void InputMouseMove(const EventCallback &callbacks,
 					unsigned ticks, int x, int y)
 {
 	// Don't reset the mouse state unless we really moved
 #ifdef USE_TOUCHSCREEN
-#define buff 32
+	const int buff = 32;
 	if (((x - buff) <= MouseX && MouseX <= (x + buff)) == 0
 		|| ((y - buff) <= MouseY && MouseY <= (y + buff)) == 0) {
 		MouseState = InitialMouseState;
@@ -1364,7 +1358,6 @@ void InputMouseMove(const EventCallback *callbacks,
 		MouseX = x;
 		MouseY = y;
 	}
-#undef buff
 #else
 	if (MouseX != x || MouseY != y) {
 		MouseState = InitialMouseState;
@@ -1373,7 +1366,8 @@ void InputMouseMove(const EventCallback *callbacks,
 		MouseY = y;
 	}
 #endif
-	callbacks->MouseMoved(x, y);
+	const PixelPos pos(x, y);
+	callbacks.MouseMoved(pos);
 }
 
 /**
@@ -1383,11 +1377,11 @@ void InputMouseMove(const EventCallback *callbacks,
 **  @param ticks      Denotes time-stamp of video-system
 **
 */
-void InputMouseExit(const EventCallback *callbacks, unsigned)
+void InputMouseExit(const EventCallback &callbacks, unsigned /* ticks */)
 {
 	// FIXME: should we do anything here with ticks? don't know, but conform others
 	// JOHNS: called by callback HandleMouseExit();
-	callbacks->MouseExit();
+	callbacks.MouseExit();
 }
 
 /**
@@ -1396,7 +1390,7 @@ void InputMouseExit(const EventCallback *callbacks, unsigned)
 **  @param callbacks  Callback structure for events.
 **  @param ticks      Denotes time-stamp of video-system
 */
-void InputMouseTimeout(const EventCallback *callbacks, unsigned ticks)
+void InputMouseTimeout(const EventCallback &callbacks, unsigned ticks)
 {
 	if (MouseButtons & (1 << LastMouseButton)) {
 		if (ticks > StartMouseTicks + DoubleClickDelay) {
@@ -1405,14 +1399,14 @@ void InputMouseTimeout(const EventCallback *callbacks, unsigned ticks)
 		if (ticks > LastMouseTicks + HoldClickDelay) {
 			LastMouseTicks = ticks;
 			MouseButtons |= (1 << LastMouseButton) << MouseHoldShift;
-			callbacks->ButtonPressed(LastMouseButton | (LastMouseButton << MouseHoldShift));
+			callbacks.ButtonPressed(LastMouseButton | (LastMouseButton << MouseHoldShift));
 		}
 	}
 }
 
 
-static int HoldKeyDelay = 250;               /// Time to detect hold key
-static int HoldKeyAdditionalDelay = 50;      /// Time to detect additional hold key
+static const int HoldKeyDelay = 250;          /// Time to detect hold key
+static const int HoldKeyAdditionalDelay = 50; /// Time to detect additional hold key
 
 static unsigned LastIKey;                    /// last key handled
 static unsigned LastIKeyChar;                /// last keychar handled
@@ -1427,7 +1421,7 @@ static unsigned DoubleKey;                   /// last key pressed
 **  @param ikey       Key scancode.
 **  @param ikeychar   Character code.
 */
-void InputKeyButtonPress(const EventCallback *callbacks,
+void InputKeyButtonPress(const EventCallback &callbacks,
 						 unsigned ticks, unsigned ikey, unsigned ikeychar)
 {
 	if (!LastIKey && DoubleKey == ikey && ticks < LastKeyTicks + DoubleClickDelay) {
@@ -1437,7 +1431,7 @@ void InputKeyButtonPress(const EventCallback *callbacks,
 	LastIKey = ikey;
 	LastIKeyChar = ikeychar;
 	LastKeyTicks = ticks;
-	callbacks->KeyPressed(ikey, ikeychar);
+	callbacks.KeyPressed(ikey, ikeychar);
 	KeyModifiers &= ~ModifierDoublePress;
 }
 
@@ -1449,14 +1443,14 @@ void InputKeyButtonPress(const EventCallback *callbacks,
 **  @param ikey       Key scancode.
 **  @param ikeychar   Character code.
 */
-void InputKeyButtonRelease(const EventCallback *callbacks,
+void InputKeyButtonRelease(const EventCallback &callbacks,
 						   unsigned ticks, unsigned ikey, unsigned ikeychar)
 {
 	if (ikey == LastIKey) {
 		LastIKey = 0;
 	}
 	LastKeyTicks = ticks;
-	callbacks->KeyReleased(ikey, ikeychar);
+	callbacks.KeyReleased(ikey, ikeychar);
 }
 
 /**
@@ -1465,11 +1459,11 @@ void InputKeyButtonRelease(const EventCallback *callbacks,
 **  @param callbacks  Callback structure for events.
 **  @param ticks      Denotes time-stamp of video-system
 */
-void InputKeyTimeout(const EventCallback *callbacks, unsigned ticks)
+void InputKeyTimeout(const EventCallback &callbacks, unsigned ticks)
 {
 	if (LastIKey && ticks > LastKeyTicks + HoldKeyDelay) {
 		LastKeyTicks = ticks - (HoldKeyDelay - HoldKeyAdditionalDelay);
-		callbacks->KeyRepeated(LastIKey, LastIKeyChar);
+		callbacks.KeyRepeated(LastIKey, LastIKeyChar);
 	}
 }
 

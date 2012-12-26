@@ -34,9 +34,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "action/action_build.h"
@@ -50,9 +47,11 @@
 #include "player.h"
 #include "script.h"
 #include "tileset.h"
+#include "translate.h"
 #include "ui.h"
 #include "unit.h"
 #include "unittype.h"
+#include "video.h"
 
 extern void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type);
 
@@ -168,7 +167,7 @@ enum {
 	input.SetMinRange(this->Type->BuilderOutside ? 1 : 0);
 	input.SetMaxRange(this->Range);
 
-	const Vec2i tileSize = {this->Type->TileWidth, this->Type->TileHeight};
+	const Vec2i tileSize(this->Type->TileWidth, this->Type->TileHeight);
 	input.SetGoal(this->goalPos, tileSize);
 }
 
@@ -322,7 +321,7 @@ bool COrder_Build::StartBuilding(CUnit &unit, CUnit &ontop)
 	CUnit *build = MakeUnit(const_cast<CUnitType &>(type), unit.Player);
 
 	// If unable to make unit, stop, and report message
-	if (build == NoUnitP) {
+	if (build == NULL) {
 		// FIXME: Should we retry this?
 		unit.Player->Notify(NotifyYellow, unit.tilePos,
 							_("Unable to create building %s"), type.Name.c_str());
@@ -338,7 +337,7 @@ bool COrder_Build::StartBuilding(CUnit &unit, CUnit &ontop)
 	if (&ontop != &unit) {
 		CBuildRestrictionOnTop *b;
 
-		b = static_cast<CBuildRestrictionOnTop *>(OnTopDetails(unit.Type->BuildingRules, *build, ontop.Type));
+		b = static_cast<CBuildRestrictionOnTop *>(OnTopDetails(*build, ontop.Type));
 		Assert(b);
 		if (b->ReplaceOnBuild) {
 			build->ResourcesHeld = ontop.ResourcesHeld; // We capture the value of what is beneath.

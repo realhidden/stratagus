@@ -59,7 +59,7 @@
 **    "mythical", ...). If NULL, this cursor could be used by any
 **    race.
 **
-**  CCursor::HotX CCursor::HotY
+**  CCursor::HotPos
 **
 **    Hot spot of the cursor in pixels. Relative to the sprite origin
 **    (0,0). The hot spot of a cursor is the point to which Stratagus
@@ -106,7 +106,8 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <vector>
+
+#include <vec2i.h>
 
 /*----------------------------------------------------------------------------
 --  Declarations
@@ -123,14 +124,13 @@ class CUnitType;
 class CCursor
 {
 public:
-	CCursor() : HotX(0), HotY(0),
+	CCursor() : HotPos(0, 0),
 		SpriteFrame(0), FrameRate(0), G(NULL) {}
 
 	std::string Ident;  /// Identifier to reference it
 	std::string Race;   /// Race name
 
-	int HotX;     /// Hot point x
-	int HotY;     /// Hot point y
+	PixelPos HotPos;     /// Hot point
 
 	int SpriteFrame;  /// Current displayed cursor frame
 	int FrameRate;    /// Rate of changing the frames
@@ -164,21 +164,16 @@ enum CursorStates {
 --  Variables
 ----------------------------------------------------------------------------*/
 
-extern std::vector<CCursor *> AllCursors; /// cursor-types description
-
 extern CursorStates CursorState;  /// current cursor state (point,...)
 extern int CursorAction;          /// action for selection
 extern int CursorValue;           /// value for action (spell type f.e.)
 extern CUnitType *CursorBuilding; /// building cursor
-extern std::string CustomCursor;             /// custom cursor for button
+extern std::string CustomCursor;  /// custom cursor for button
 
 extern CCursor *GameCursor;     /// cursor-type
-extern int CursorX;             /// cursor position on screen X
-extern int CursorY;             /// cursor position on screen Y
-extern int CursorStartX;        /// rectangle started on screen X
-extern int CursorStartY;        /// rectangle started on screen Y
-extern int CursorStartScrMapX;  /// the same in screen map coordinate system
-extern int CursorStartScrMapY;  /// the same in screen map coordinate system
+extern PixelPos CursorScreenPos; /// cursor position on screen
+extern PixelPos CursorStartScreenPos; /// rectangle started on screen
+extern PixelPos CursorStartMapPos; /// the same in screen map coordinate system
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -201,6 +196,8 @@ extern void CursorAnimate(unsigned ticks);
 extern void InitVideoCursors();
 /// Cleanup the cursor module
 extern void CleanCursors();
+
+extern void CursorCclRegister();
 
 //@}
 

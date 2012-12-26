@@ -34,23 +34,20 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
-#include "video.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
-#include "cursor.h"
-#include "tileset.h"
-#include "map.h"
-#include "interface.h"
-#include "ui.h"
-#include "editor.h"
 
+#include "cursor.h"
 #include "intern_video.h"
+
+#include "editor.h"
+#include "interface.h"
+#include "map.h"
+#include "ui.h"
+#include "unit.h"
+#include "unittype.h"
+#include "video.h"
+
+#include <vector>
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -61,24 +58,17 @@
 **
 **  @todo FIXME: Should this be move to ui part?
 */
-std::vector<CCursor *> AllCursors;
+static std::vector<CCursor *> AllCursors;
 
 CursorStates CursorState;    /// current cursor state (point,...)
 int CursorAction;            /// action for selection
 int CursorValue;             /// value for CursorAction (spell type f.e.)
-std::string CustomCursor;             /// custom cursor for button
+std::string CustomCursor;    /// custom cursor for button
 
 // Event changed mouse position, can alter at any moment
-int CursorX;                 /// cursor position on screen X
-int CursorY;                 /// cursor position on screen Y
-
-int CursorStartX;            /// rectangle started on screen X
-int CursorStartY;            /// rectangle started on screen Y
-
-/// X position of starting point of selection rectangle, in screen pixels.
-int CursorStartScrMapX;
-/// Y position of starting point of selection rectangle, in screen pixels.
-int CursorStartScrMapY;
+PixelPos CursorScreenPos;    /// cursor position on screen
+PixelPos CursorStartScreenPos;  /// rectangle started on screen
+PixelPos CursorStartMapPos;/// position of starting point of selection rectangle, in Map pixels.
 
 
 /*--- DRAW BUILDING  CURSOR ------------------------------------------------*/
@@ -144,39 +134,27 @@ CCursor *CursorByIdent(const std::string &ident)
 /**
 **  Draw rectangle cursor when visible
 **
-**  @param x   Screen x start position of rectangle
-**  @param y   Screen y start position of rectangle
-**  @param x1  Screen x end position of rectangle
-**  @param y1  Screen y end position of rectangle
+**  @param corner1   Screen start position of rectangle
+**  @param corner2   Screen end position of rectangle
 */
-static void DrawVisibleRectangleCursor(int x, int y, int x1, int y1)
+static void DrawVisibleRectangleCursor(PixelPos corner1, PixelPos corner2)
 {
-	int w;
-	int h;
 	const CViewport &vp = *UI.SelectedViewport;
 
-	//
 	//  Clip to map window.
 	//  FIXME: should re-use CLIP_RECTANGLE in some way from linedraw.c ?
-	//
-	vp.Restrict(x1, y1);
+	vp.Restrict(corner2.x, corner2.y);
 
-	if (x > x1) {
-		w = x - x1 + 1;
-		x = x1;
-	} else {
-		w = x1 - x + 1;
+	if (corner1.x > corner2.x) {
+		std::swap(corner1.x, corner2.x);
 	}
-	if (y > y1) {
-		h = y - y1 + 1;
-		y = y1;
-	} else {
-		h = y1 - y + 1;
+	if (corner1.y > corner2.y) {
+		std::swap(corner1.y, corner2.y);
 	}
+	const int w = corner2.x - corner1.x + 1;
+	const int h = corner2.y - corner1.y + 1;
 
-	if (w && h) {
-		Video.DrawRectangleClip(ColorGreen, x, y, w, h);
-	}
+	Video.DrawRectangleClip(ColorGreen, corner1.x, corner1.y, w, h);
 }
 
 /**
@@ -186,8 +164,7 @@ static void DrawBuildingCursor()
 {
 	// Align to grid
 	const CViewport &vp = *UI.MouseViewport;
-	const PixelPos cursorScreenPos = {CursorX, CursorY};
-	const Vec2i mpos = vp.ScreenToTilePos(cursorScreenPos);
+	const Vec2i mpos = vp.ScreenToTilePos(CursorScreenPos);
 	const PixelPos screenPos = vp.TilePosToScreen_TopLeft(mpos);
 
 	CUnit *ontop = NULL;
@@ -202,14 +179,13 @@ static void DrawBuildingCursor()
 #endif
 	PushClipping();
 	vp.SetClipping();
-	DrawShadow(*CursorBuilding, CursorBuilding->StillFrame, screenPos.x, screenPos.y);
+	DrawShadow(*CursorBuilding, CursorBuilding->StillFrame, screenPos);
 	DrawUnitType(*CursorBuilding, CursorBuilding->Sprite, ThisPlayer->Index,
-				 CursorBuilding->StillFrame, screenPos.x, screenPos.y);
+				 CursorBuilding->StillFrame, screenPos);
 	if (CursorBuilding->CanAttack && CursorBuilding->Stats->Variables[ATTACKRANGE_INDEX].Value > 0) {
-		Video.DrawCircleClip(ColorRed,
-							 screenPos.x + CursorBuilding->TileWidth * PixelTileSize.x / 2,
-							 screenPos.y + CursorBuilding->TileHeight * PixelTileSize.y / 2,
-							 (CursorBuilding->Stats->Variables[ATTACKRANGE_INDEX].Max + (CursorBuilding->TileWidth - 1)) * PixelTileSize.x + 1);
+		const PixelPos center(screenPos + CursorBuilding->GetPixelSize() / 2);
+		const int radius = (CursorBuilding->Stats->Variables[ATTACKRANGE_INDEX].Max + (CursorBuilding->TileWidth - 1)) * PixelTileSize.x + 1;
+		Video.DrawCircleClip(ColorRed, center.x, center.y, radius);
 	}
 
 	//
@@ -225,7 +201,7 @@ static void DrawBuildingCursor()
 		}
 	} else {
 		f = ((ontop = CanBuildHere(NoUnitP, *CursorBuilding, mpos)) != NULL);
-		if (!Editor.Running || (Editor.Running && ontop == (CUnit *)1)) {
+		if (!Editor.Running || ontop == (CUnit *)1) {
 			ontop = NULL;
 		}
 	}
@@ -240,14 +216,14 @@ static void DrawBuildingCursor()
 	while (h--) {
 		int w = w0;
 		while (w--) {
-			const Vec2i posIt = {mpos.x + w, mpos.y + h};
+			const Vec2i posIt(mpos.x + w, mpos.y + h);
 			Uint32 color;
 
 			if (f && (ontop ||
 					  CanBuildOn(posIt, MapFogFilterFlags(*ThisPlayer, posIt,
 														  mask & ((NumSelected && Selected[0]->tilePos == posIt) ?
 																  ~(MapFieldLandUnit | MapFieldSeaUnit) : -1))))
-				&& Map.IsFieldExplored(*ThisPlayer, posIt)) {
+				&& Map.Field(posIt)->playerInfo.IsExplored(*ThisPlayer)) {
 				color = ColorGreen;
 			} else {
 				color = ColorRed;
@@ -266,17 +242,23 @@ static void DrawBuildingCursor()
 void DrawCursor()
 {
 	// Selecting rectangle
-	if (CursorState == CursorStateRectangle && (CursorStartX != CursorX || CursorStartY != CursorY)) {
-		const PixelPos cursorStartMapPos = {CursorStartScrMapX, CursorStartScrMapY};
-		const PixelPos cursorStartScreenPos = UI.MouseViewport->MapToScreenPixelPos(cursorStartMapPos);
+	if (CursorState == CursorStateRectangle && CursorStartScreenPos != CursorScreenPos) {
+		const PixelPos cursorStartScreenPos = UI.MouseViewport->MapToScreenPixelPos(CursorStartMapPos);
 
-		DrawVisibleRectangleCursor(cursorStartScreenPos.x, cursorStartScreenPos.y, CursorX, CursorY);
+		DrawVisibleRectangleCursor(cursorStartScreenPos, CursorScreenPos);
 	} else if (CursorBuilding && CursorOn == CursorOnMap) {
 		// Selecting position for building
 		DrawBuildingCursor();
 	}
 
-	if (!UseOpenGL && !GameRunning && !Editor.Running && GameCursor) {
+	//  Cursor may not exist if we are loading a game or something.
+	//  Only draw it if it exists
+	if (GameCursor == NULL) {
+		return;
+	}
+	const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
+
+	if (!UseOpenGL && !GameRunning && !Editor.Running) {
 		if (!HiddenSurface
 			|| HiddenSurface->w != GameCursor->G->getWidth()
 			|| HiddenSurface->h != GameCursor->G->getHeight()) {
@@ -295,27 +277,15 @@ void DrawCursor()
 												 TheScreen->format->Amask);
 		}
 
-		SDL_Rect srcRect = {
-			CursorX - GameCursor->HotX,
-			CursorY - GameCursor->HotY,
-			GameCursor->G->getWidth(),
-			GameCursor->G->getHeight()
-		};
+		SDL_Rect srcRect = { pos.x, pos.y, GameCursor->G->getWidth(), GameCursor->G->getHeight()};
 		SDL_BlitSurface(TheScreen, &srcRect, HiddenSurface, NULL);
 	}
 
-	//
 	//  Last, Normal cursor.
-	//  Cursor may not exist if we are loading a game or something. Only
-	//  draw it if it exists
-	//
-	if (GameCursor) {
-		if (!GameCursor->G->IsLoaded()) {
-			GameCursor->G->Load();
-		}
-		GameCursor->G->DrawFrameClip(GameCursor->SpriteFrame,
-									 CursorX - GameCursor->HotX, CursorY - GameCursor->HotY);
+	if (!GameCursor->G->IsLoaded()) {
+		GameCursor->G->Load();
 	}
+	GameCursor->G->DrawFrameClip(GameCursor->SpriteFrame, pos.x, pos.y);
 }
 
 /**
@@ -324,10 +294,8 @@ void DrawCursor()
 void HideCursor()
 {
 	if (!UseOpenGL && !GameRunning && !Editor.Running && GameCursor) {
-		SDL_Rect dstRect = {
-			CursorX - GameCursor->HotX, CursorY - GameCursor->HotY,
-			0, 0
-		};
+		const PixelPos pos = CursorScreenPos - GameCursor->HotPos;
+		SDL_Rect dstRect = {pos.x, pos.y, 0, 0 };
 		SDL_BlitSurface(HiddenSurface, NULL, TheScreen, &dstRect);
 	}
 }
@@ -373,7 +341,103 @@ void CleanCursors()
 
 	CursorBuilding = NULL;
 	GameCursor = NULL;
-	UnitUnderCursor = NoUnitP;
+	UnitUnderCursor = NULL;
 }
+
+/**
+**  Define a cursor.
+**
+**  @param l  Lua state.
+*/
+static int CclDefineCursor(lua_State *l)
+{
+	std::string name;
+	std::string race;
+	std::string file;
+	PixelPos hotpos(0, 0);
+	int w = 0;
+	int h = 0;
+	int rate = 0;
+
+	LuaCheckArgs(l, 1);
+	if (!lua_istable(l, 1)) {
+		LuaError(l, "incorrect argument");
+	}
+	lua_pushnil(l);
+	while (lua_next(l, 1)) {
+		const char *value = LuaToString(l, -2);
+		if (!strcmp(value, "Name")) {
+			name = LuaToString(l, -1);
+		} else if (!strcmp(value, "Race")) {
+			race = LuaToString(l, -1);
+		} else if (!strcmp(value, "File")) {
+			file = LuaToString(l, -1);
+		} else if (!strcmp(value, "HotSpot")) {
+			CclGetPos(l, &hotpos.x, &hotpos.y);
+		} else if (!strcmp(value, "Size")) {
+			CclGetPos(l, &w, &h);
+		} else if (!strcmp(value, "Rate")) {
+			rate = LuaToNumber(l, -1);
+		} else {
+			LuaError(l, "Unsupported tag: %s" _C_ value);
+		}
+		lua_pop(l, 1);
+	}
+
+	Assert(!name.empty() && !file.empty() && w && h);
+
+	if (race == "any") {
+		race.clear();
+	}
+
+	//
+	//  Look if this kind of cursor already exists.
+	//
+	CCursor *ct = NULL;
+	for (size_t i = 0; i < AllCursors.size(); ++i) {
+		//  Race not same, not found.
+		if (AllCursors[i]->Race != race) {
+			continue;
+		}
+		if (AllCursors[i]->Ident == name) {
+			ct = AllCursors[i];
+			break;
+		}
+	}
+
+	//
+	//  Not found, make a new slot.
+	//
+	if (!ct) {
+		ct = new CCursor();
+		AllCursors.push_back(ct);
+		ct->Ident = name;
+		ct->Race = race;
+	}
+	ct->G = CGraphic::New(file, w, h);
+	ct->HotPos = hotpos;
+	ct->FrameRate = rate;
+
+	return 0;
+}
+
+/**
+**  Set the current game cursor.
+**
+**  @param l  Lua state.
+*/
+static int CclSetGameCursor(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	GameCursor = CursorByIdent(LuaToString(l, 1));
+	return 0;
+}
+
+void CursorCclRegister()
+{
+	lua_register(Lua, "DefineCursor", CclDefineCursor);
+	lua_register(Lua, "SetGameCursor", CclSetGameCursor);
+}
+
 
 //@}

@@ -33,19 +33,18 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
-#include "unittype.h"
-#include "upgrade.h"
+
+#include "actions.h"
 #include "depend.h"
 #include "interface.h"
 #include "network.h"
 #include "player.h"
-#include "actions.h"
+#include "unit.h"
+#include "unittype.h"
+#include "upgrade.h"
 
+#include <stdio.h>
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
@@ -59,7 +58,7 @@
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckTrue(const CUnit &, const ButtonAction *)
+bool ButtonCheckTrue(const CUnit &, const ButtonAction &)
 {
 	return true;
 }
@@ -73,7 +72,7 @@ bool ButtonCheckTrue(const CUnit &, const ButtonAction *)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckFalse(const CUnit &, const ButtonAction *)
+bool ButtonCheckFalse(const CUnit &, const ButtonAction &)
 {
 	return false;
 }
@@ -86,9 +85,75 @@ bool ButtonCheckFalse(const CUnit &, const ButtonAction *)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckUpgrade(const CUnit &unit, const ButtonAction *button)
+bool ButtonCheckUpgrade(const CUnit &unit, const ButtonAction &button)
 {
-	return UpgradeIdentAllowed(*unit.Player, button->AllowStr) == 'R';
+	return UpgradeIdentAllowed(*unit.Player, button.AllowStr) == 'R';
+}
+
+/**
+**  Check for button enabled, if unit's variables pass the condition check.
+**
+**  @param unit    Pointer to unit for button.
+**  @param button  Pointer to button to check/enable.
+**
+**  @return        True if enabled.
+*/
+bool ButtonCheckUnitVariable(const CUnit &unit, const ButtonAction &button)
+{
+	char *buf = new_strdup(button.AllowStr.c_str());
+
+	for (const char *var = strtok(buf, ","); var; var = strtok(NULL, ",")) {
+		const char *type = strtok(NULL, ",");
+		const char *binop = strtok(NULL, ",");
+		const char *value = strtok(NULL, ",");
+		const int index = UnitTypeVar.VariableNameLookup[var];// User variables
+		if (index == -1) {
+			fprintf(stderr, "Bad variable name '%s'\n", var);
+			Exit(1);
+			return false;
+		}
+		int varValue;
+		if (!strcmp(type, "Value")) {
+			varValue = unit.Variable[index].Value;
+		} else if (!strcmp(type, "Max")) {
+			varValue = unit.Variable[index].Max;
+		} else if (!strcmp(type, "Increase")) {
+			varValue = unit.Variable[index].Increase;
+		} else if (!strcmp(type, "Enable")) {
+			varValue = unit.Variable[index].Enable;
+		} else if (!strcmp(type, "Percent")) {
+			varValue = unit.Variable[index].Value * 100 / unit.Variable[index].Max;
+		} else {
+			fprintf(stderr, "Bad variable type '%s'\n", type);
+			Exit(1);
+			return false;
+		}
+		const int cmpValue = atoi(value);
+		bool cmpResult = false;
+		if (!strcmp(binop, ">")) {
+			cmpResult = varValue > cmpValue;
+		} else if (!strcmp(binop, ">=")) {
+			cmpResult = varValue >= cmpValue;
+		} else if (!strcmp(binop, "<")) {
+			cmpResult = varValue < cmpValue;
+		} else if (!strcmp(binop, "<=")) {
+			cmpResult = varValue <= cmpValue;
+		} else if (!strcmp(binop, "==")) {
+			cmpResult = varValue == cmpValue;
+		} else if (!strcmp(binop, "!=")) {
+			cmpResult = varValue != cmpValue;
+		} else {
+			fprintf(stderr, "Bad compare type '%s'\n", binop);
+			Exit(1);
+			return false;
+		}
+		if (cmpResult == false) {
+			delete[] buf;
+			return false;
+		}
+	}
+	delete[] buf;
+	return true;
 }
 
 /**
@@ -99,10 +164,10 @@ bool ButtonCheckUpgrade(const CUnit &unit, const ButtonAction *button)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckUnitsOr(const CUnit &unit, const ButtonAction *button)
+bool ButtonCheckUnitsOr(const CUnit &unit, const ButtonAction &button)
 {
 	CPlayer *player = unit.Player;
-	char *buf = new_strdup(button->AllowStr.c_str());
+	char *buf = new_strdup(button.AllowStr.c_str());
 
 	for (const char *s = strtok(buf, ","); s; s = strtok(NULL, ",")) {
 		if (player->HaveUnitTypeByIdent(s)) {
@@ -122,10 +187,10 @@ bool ButtonCheckUnitsOr(const CUnit &unit, const ButtonAction *button)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckUnitsAnd(const CUnit &unit, const ButtonAction *button)
+bool ButtonCheckUnitsAnd(const CUnit &unit, const ButtonAction &button)
 {
 	CPlayer *player = unit.Player;
-	char *buf = new_strdup(button->AllowStr.c_str());
+	char *buf = new_strdup(button.AllowStr.c_str());
 
 	for (const char *s = strtok(buf, ","); s; s = strtok(NULL, ",")) {
 		if (!player->HaveUnitTypeByIdent(s)) {
@@ -147,7 +212,7 @@ bool ButtonCheckUnitsAnd(const CUnit &unit, const ButtonAction *button)
 **
 **  @note: this check could also be moved into intialisation.
 */
-bool ButtonCheckNetwork(const CUnit &, const ButtonAction *)
+bool ButtonCheckNetwork(const CUnit &, const ButtonAction &)
 {
 	return IsNetworkGame();
 }
@@ -162,7 +227,7 @@ bool ButtonCheckNetwork(const CUnit &, const ButtonAction *)
 **
 **  @note: this check could also be moved into intialisation.
 */
-bool ButtonCheckNoNetwork(const CUnit &, const ButtonAction *)
+bool ButtonCheckNoNetwork(const CUnit &, const ButtonAction &)
 {
 	return !IsNetworkGame();
 }
@@ -176,7 +241,7 @@ bool ButtonCheckNoNetwork(const CUnit &, const ButtonAction *)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckNoWork(const CUnit &unit, const ButtonAction *)
+bool ButtonCheckNoWork(const CUnit &unit, const ButtonAction &)
 {
 	int action = unit.CurrentAction();
 	return action != UnitActionTrain
@@ -192,7 +257,7 @@ bool ButtonCheckNoWork(const CUnit &unit, const ButtonAction *)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckNoResearch(const CUnit &unit, const ButtonAction *)
+bool ButtonCheckNoResearch(const CUnit &unit, const ButtonAction &)
 {
 	int action = unit.CurrentAction();
 	return action != UnitActionUpgradeTo && action != UnitActionResearch;
@@ -207,12 +272,12 @@ bool ButtonCheckNoResearch(const CUnit &unit, const ButtonAction *)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckUpgradeTo(const CUnit &unit, const ButtonAction *button)
+bool ButtonCheckUpgradeTo(const CUnit &unit, const ButtonAction &button)
 {
 	if (unit.CurrentAction() != UnitActionStill) {
 		return false;
 	}
-	return CheckDependByIdent(*unit.Player, button->ValueStr);
+	return CheckDependByIdent(*unit.Player, button.ValueStr);
 }
 
 /**
@@ -223,7 +288,7 @@ bool ButtonCheckUpgradeTo(const CUnit &unit, const ButtonAction *button)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckAttack(const CUnit &unit, const ButtonAction *)
+bool ButtonCheckAttack(const CUnit &unit, const ButtonAction &)
 {
 	return unit.Type->CanAttack;
 }
@@ -236,7 +301,7 @@ bool ButtonCheckAttack(const CUnit &unit, const ButtonAction *)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckResearch(const CUnit &unit, const ButtonAction *button)
+bool ButtonCheckResearch(const CUnit &unit, const ButtonAction &button)
 {
 	// don't show any if working
 	if (!ButtonCheckNoWork(unit, button)) {
@@ -244,11 +309,11 @@ bool ButtonCheckResearch(const CUnit &unit, const ButtonAction *button)
 	}
 
 	// check if allowed
-	if (!CheckDependByIdent(*unit.Player, button->ValueStr)) {
+	if (!CheckDependByIdent(*unit.Player, button.ValueStr)) {
 		return false;
 	}
-	if (!strncmp(button->ValueStr.c_str(), "upgrade-", 8)
-		&& UpgradeIdentAllowed(*unit.Player, button->ValueStr) != 'A') {
+	if (!strncmp(button.ValueStr.c_str(), "upgrade-", 8)
+		&& UpgradeIdentAllowed(*unit.Player, button.ValueStr) != 'A') {
 		return false;
 	}
 	return true;
@@ -263,10 +328,10 @@ bool ButtonCheckResearch(const CUnit &unit, const ButtonAction *button)
 **
 **  @return        True if enabled.
 */
-bool ButtonCheckSingleResearch(const CUnit &unit, const ButtonAction *button)
+bool ButtonCheckSingleResearch(const CUnit &unit, const ButtonAction &button)
 {
 	if (ButtonCheckResearch(unit, button)
-		&& !unit.Player->UpgradeTimers.Upgrades[UpgradeIdByIdent(button->ValueStr)]) {
+		&& !unit.Player->UpgradeTimers.Upgrades[UpgradeIdByIdent(button.ValueStr)]) {
 		return true;
 	}
 	return false;

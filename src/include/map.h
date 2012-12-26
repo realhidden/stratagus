@@ -61,7 +61,7 @@
 **    Tileset data for the map. See ::CTileset. This contains all
 **    information about the tile.
 **
-**  CMap::TileModelsFileName[]
+**  CMap::TileModelsFileName
 **
 **    Lua filename that loads all tilemodels
 **
@@ -83,31 +83,16 @@
 ----------------------------------------------------------------------------*/
 
 #include <string>
-#include <vector>
-#include <algorithm>
-
-#ifndef __UNIT_CACHE_H__
-#include "unit_cache.h"
-#endif
-
-#include "iocompat.h"
 
 #ifndef __TILESET_H__
 #include "tileset.h"
-#endif
-
-#ifndef __PLAYER_H__
-#include "player.h"
 #endif
 
 #ifndef __MAP_TILE_H__
 #include "tile.h"
 #endif
 
-#ifndef __UNIT_H__
-#include "unit.h"
-#endif
-
+#include "color.h"
 #include "vec2i.h"
 
 /*----------------------------------------------------------------------------
@@ -127,24 +112,6 @@ class CUnitType;
 #define MaxMapWidth  256  /// max map width supported
 #define MaxMapHeight 256  /// max map height supported
 
-// Not used until now:
-#define MapFieldSpeedMask 0x0007  /// Move faster on this tile
-
-#define MapFieldHuman 0x0008  /// Human is owner of the field (walls)
-
-#define MapFieldLandAllowed  0x0010  /// Land units allowed
-#define MapFieldCoastAllowed 0x0020  /// Coast (transporter) units allowed
-#define MapFieldWaterAllowed 0x0040  /// Water units allowed
-#define MapFieldNoBuilding   0x0080  /// No buildings allowed
-
-#define MapFieldUnpassable 0x0100  /// Field is movement blocked
-//#define MapFieldWall       0x0200  /// defined in tileset.h
-
-#define MapFieldLandUnit 0x1000  /// Land unit on field
-#define MapFieldAirUnit  0x2000  /// Air unit on field
-#define MapFieldSeaUnit  0x4000  /// Water unit on field
-#define MapFieldBuilding 0x8000  /// Building on field
-
 /*----------------------------------------------------------------------------
 --  Map info structure
 ----------------------------------------------------------------------------*/
@@ -155,15 +122,7 @@ class CUnitType;
 class CMapInfo
 {
 public:
-	std::string Description;     /// Map description
-	std::string Filename;        /// Map filename
-	int MapWidth;          /// Map width
-	int MapHeight;         /// Map height
-	int PlayerType[PlayerMax];  /// Same player->Type
-	int PlayerSide[PlayerMax];  /// Same player->Side
-	unsigned int MapUID;   /// Unique Map ID (hash)
-
-	inline bool IsPointOnMap(int x, int y) const {
+	bool IsPointOnMap(int x, int y) const {
 		return (x >= 0 && y >= 0 && x < MapWidth && y < MapHeight);
 	}
 
@@ -173,120 +132,15 @@ public:
 
 	void Clear();
 
-};
-
-//
-//  Some predicates
-//
-
-class HasSameTypeAs
-{
 public:
-	explicit HasSameTypeAs(const CUnitType &_type) : type(&_type) {}
-	bool operator()(const CUnit *unit) const { return unit->Type == type; }
-private:
-	const CUnitType *type;
+	std::string Description;    /// Map description
+	std::string Filename;       /// Map filename
+	int MapWidth;               /// Map width
+	int MapHeight;              /// Map height
+	int PlayerType[PlayerMax];  /// Same player->Type
+	int PlayerSide[PlayerMax];  /// Same player->Side
+	unsigned int MapUID;        /// Unique Map ID (hash)
 };
-
-class HasSamePlayerAs
-{
-public:
-	explicit HasSamePlayerAs(const CPlayer &_player) : player(&_player) {}
-	bool operator()(const CUnit *unit) const { return unit->Player == player; }
-private:
-	const CPlayer *player;
-};
-
-class HasNotSamePlayerAs
-{
-public:
-	explicit HasNotSamePlayerAs(const CPlayer &_player) : player(&_player) {}
-	bool operator()(const CUnit *unit) const { return unit->Player != player; }
-private:
-	const CPlayer *player;
-};
-
-class IsAlliedWith
-{
-public:
-	explicit IsAlliedWith(const CPlayer &_player) : player(&_player) {}
-	bool operator()(const CUnit *unit) const { return unit->IsAllied(*player); }
-private:
-	const CPlayer *player;
-};
-
-class IsEnemyWith
-{
-public:
-	explicit IsEnemyWith(const CPlayer &_player) : player(&_player) {}
-	bool operator()(const CUnit *unit) const { return unit->IsEnemy(*player); }
-private:
-	const CPlayer *player;
-};
-
-class HasSamePlayerAndTypeAs
-{
-public:
-	explicit HasSamePlayerAndTypeAs(const CUnit &unit) :
-		player(unit.Player), type(unit.Type)
-	{}
-	HasSamePlayerAndTypeAs(const CPlayer &_player, const CUnitType &_type) :
-		player(&_player), type(&_type)
-	{}
-
-	bool operator()(const CUnit *unit) const {
-		return (unit->Player == player && unit->Type == type);
-	}
-
-private:
-	const CPlayer *player;
-	const CUnitType *type;
-};
-
-class IsNotTheSameUnitAs
-{
-public:
-	explicit IsNotTheSameUnitAs(const CUnit &unit) : forbidden(&unit) {}
-	bool operator()(const CUnit *unit) const { return unit != forbidden; }
-private:
-	const CUnit *forbidden;
-};
-
-class IsBuildingType
-{
-public:
-	bool operator()(const CUnit *unit) const { return unit->Type->Building; }
-};
-
-
-template <typename Pred>
-class NotPredicate
-{
-public:
-	explicit NotPredicate(Pred _pred) : pred(_pred) {}
-	bool operator()(const CUnit *unit) const { return pred(unit) == false; }
-private:
-	Pred pred;
-};
-
-template <typename Pred>
-NotPredicate<Pred> MakeNotPredicate(Pred pred) { return NotPredicate<Pred>(pred); }
-
-template <typename Pred1, typename Pred2>
-class AndPredicate
-{
-public:
-	AndPredicate(Pred1 _pred1, Pred2 _pred2) : pred1(_pred1), pred2(_pred2) {}
-	bool operator()(const CUnit *unit) const { return pred1(unit) && pred2(unit); }
-private:
-	Pred1 pred1;
-	Pred2 pred2;
-};
-
-template <typename Pred1, typename Pred2>
-AndPredicate<Pred1, Pred2> MakeAndPredicate(Pred1 pred1, Pred2 pred2) { return AndPredicate<Pred1, Pred2>(pred1, pred2); }
-
-
 
 /*----------------------------------------------------------------------------
 --  Map itself
@@ -296,15 +150,22 @@ AndPredicate<Pred1, Pred2> MakeAndPredicate(Pred1 pred1, Pred2 pred2) { return A
 class CMap
 {
 public:
-	inline unsigned int getIndex(int x, int y) const {
+	unsigned int getIndex(int x, int y) const {
 		return x + y * this->Info.MapWidth;
 	}
-
 	unsigned int getIndex(const Vec2i &pos) const {
 		return getIndex(pos.x, pos.y);
 	}
-	inline CMapField *Field(unsigned int index) const {
+
+	CMapField *Field(unsigned int index) const {
 		return &this->Fields[index];
+	}
+	/// Get the MapField at location x,y
+	CMapField *Field(int x, int y) const {
+		return &this->Fields[x + y * this->Info.MapWidth];
+	}
+	CMapField *Field(const Vec2i &pos) const {
+		return Field(pos.x, pos.y);
 	}
 
 	/// Alocate and initialise map table.
@@ -325,83 +186,8 @@ public:
 	/// convert tilepos coordonates into map pixel pos (take the center of the tile)
 	PixelPos TilePosToMapPixelPos_Center(const Vec2i &tilePos) const;
 
-	/**
-	**  Find out if a field is seen (By player, or by shared vision)
-	**  This function will return > 1 with no fog of war.
-	**
-	**  @param player  Player to check for.
-	**  @param index   flat tile index adress.
-	**
-	**  @return        0 unexplored, 1 explored, > 1 visible.
-	*/
-	unsigned short IsTileVisible(const CPlayer &player, const unsigned int index) const {
-		const CMapField *const mf = &this->Fields[index];
-		unsigned short visiontype = mf->Visible[player.Index];
-
-		if (visiontype > 1) {
-			return visiontype;
-		}
-		if (player.IsVisionSharing()) {
-			for (int i = 0; i < PlayerMax ; ++i) {
-				if (player.IsBothSharedVision(Players[i])) {
-					if (mf->Visible[i] > 1) {
-						return 2;
-					}
-					visiontype |= mf->Visible[i];
-				}
-			}
-		}
-		if (visiontype) {
-			return visiontype + (NoFogOfWar ? 1 : 0);
-		}
-		return 0;
-	}
-
-	/// Check if a field flags.
-	bool CheckMask(const unsigned int index, const int mask) const {
-		return (this->Fields[index].Flags & mask) != 0;
-	}
-
-	bool CheckMask(const Vec2i &pos, int mask) const {
-		return CheckMask(getIndex(pos), mask);
-	}
-
-	/// Check if a field for the user is explored.
-	bool IsFieldExplored(const CPlayer &player, const unsigned int index) const {
-		return this->Fields[index].IsExplored(player.Index);
-	}
-
-	/// Check if a field for the user is visible.
-	bool IsFieldVisible(const CPlayer &player, const unsigned int index) const {
-		return IsTileVisible(player, index) > 1;
-	}
-
-	unsigned short IsTileVisible(const CPlayer &player, const Vec2i &pos) const {
-		return IsTileVisible(player, getIndex(pos));
-	}
-
-	/// Check if a field for the user is explored.
-	bool IsFieldExplored(const CPlayer &player, const Vec2i &pos) {
-		Assert(Info.IsPointOnMap(pos));
-		return IsFieldExplored(player, getIndex(pos));
-	}
-
-
-	/// Check if a field for the user is visible.
-	bool IsFieldVisible(const CPlayer &player, const Vec2i &pos) {
-		return IsTileVisible(player, getIndex(pos)) > 1;
-	}
-
-
 	/// Mark a tile as seen by the player.
-	void MarkSeenTile(const unsigned int index);
-
-	/// Mark a tile as seen by the player.
-	void MarkSeenTile(const Vec2i &pos) {
-		Assert(Info.IsPointOnMap(pos));
-		MarkSeenTile(getIndex(pos));
-	}
-
+	void MarkSeenTile(CMapField &mf);
 
 	/// Regenerate the forest.
 	void RegenerateForest();
@@ -409,14 +195,6 @@ public:
 	void Reveal();
 	/// Save the map.
 	void Save(CFile &file) const;
-
-	/// Get the MapField at location x,y
-	inline CMapField *Field(int x, int y) const {
-		return &this->Fields[x + y * this->Info.MapWidth];
-	}
-	CMapField *Field(const Vec2i &pos) const {
-		return Field(pos.x, pos.y);
-	}
 
 	//
 	// Wall
@@ -434,81 +212,6 @@ public:
 	bool HumanWallOnMap(const Vec2i &pos) const;
 	/// Returns true, if orc wall on the map tile field
 	bool OrcWallOnMap(const Vec2i &pos) const;
-
-
-	//
-	//  Tile type.
-	//
-
-	/// Returns true, if water on the map tile field
-	bool WaterOnMap(const unsigned int index) const {
-		return CheckMask(index, MapFieldWaterAllowed);
-	};
-
-	/**
-	**  Water on map tile.
-	**
-	**  @param pos  map tile position.
-	**
-	**  @return    True if water, false otherwise.
-	*/
-	bool WaterOnMap(const Vec2i &pos) const {
-		Assert(Info.IsPointOnMap(pos));
-		return WaterOnMap(getIndex(pos));
-	}
-
-	/// Returns true, if coast on the map tile field
-	bool CoastOnMap(const unsigned int index) const {
-		return CheckMask(index, MapFieldCoastAllowed);
-	};
-
-	/**
-	**  Coast on map tile.
-	**
-	**  @param pos  map tile position.
-	**
-	**  @return    True if coast, false otherwise.
-	*/
-	bool CoastOnMap(const Vec2i &pos) const {
-		Assert(Info.IsPointOnMap(pos));
-		return CoastOnMap(getIndex(pos));
-	}
-
-
-	/// Returns true, if forest on the map tile field
-	bool ForestOnMap(const unsigned int index) const {
-		return CheckMask(index, MapFieldForest);
-	};
-
-	/**
-	**  Forest on map tile.
-	**
-	**  @param pos  map tile position.
-	**
-	**  @return    True if forest, false otherwise.
-	*/
-	bool ForestOnMap(const Vec2i &pos) const {
-		Assert(Info.IsPointOnMap(pos));
-		return ForestOnMap(getIndex(pos));
-	}
-
-
-	/// Returns true, if rock on the map tile field
-	bool RockOnMap(const unsigned int index) const {
-		return CheckMask(index, MapFieldRocks);
-	};
-
-	/**
-	**  Rock on map tile.
-	**
-	**  @param pos  map tile position.
-	**
-	**  @return    True if rock, false otherwise.
-	*/
-	bool RockOnMap(const Vec2i &pos) const {
-		Assert(Info.IsPointOnMap(pos));
-		return RockOnMap(getIndex(pos));
-	};
 
 	//UnitCache
 
@@ -529,85 +232,6 @@ public:
 		maxpos.y = std::min<short>(maxpos.y, Info.MapHeight - 1);
 	}
 
-	void Select(const Vec2i &ltPos, const Vec2i &rbPos, std::vector<CUnit *> &units);
-	void SelectFixed(const Vec2i &ltPos, const Vec2i &rbPos, std::vector<CUnit *> &units);
-	void SelectAroundUnit(const CUnit &unit, int range, std::vector<CUnit *> &around);
-
-	template <typename Pred>
-	void SelectFixed(const Vec2i &ltPos, const Vec2i &rbPos, std::vector<CUnit *> &units, Pred pred) {
-		Assert(Info.IsPointOnMap(ltPos));
-		Assert(Info.IsPointOnMap(rbPos));
-		Assert(units.empty());
-
-		for (Vec2i posIt = ltPos; posIt.y != rbPos.y + 1; ++posIt.y) {
-			for (posIt.x = ltPos.x; posIt.x != rbPos.x + 1; ++posIt.x) {
-				const CMapField &mf = *Field(posIt);
-				const CUnitCache &cache = mf.UnitCache;
-
-				for (size_t i = 0; i != cache.size(); ++i) {
-					CUnit &unit = *cache[i];
-
-					if (unit.CacheLock == 0 && pred(&unit)) {
-						unit.CacheLock = 1;
-						units.push_back(&unit);
-					}
-				}
-			}
-		}
-		for (size_t i = 0; i != units.size(); ++i) {
-			units[i]->CacheLock = 0;
-		}
-	}
-
-	template <typename Pred>
-	void SelectAroundUnit(const CUnit &unit, int range, std::vector<CUnit *> &around, Pred pred) {
-		const Vec2i offset = {range, range};
-		const Vec2i typeSize = {unit.Type->TileWidth - 1, unit.Type->TileHeight - 1};
-
-		Select(unit.tilePos - offset,
-			   unit.tilePos + typeSize + offset, around,
-			   MakeAndPredicate(IsNotTheSameUnitAs(unit), pred));
-	}
-
-	template <typename Pred>
-	void Select(const Vec2i &ltPos, const Vec2i &rbPos, std::vector<CUnit *> &units, Pred pred) {
-		Vec2i minPos = ltPos;
-		Vec2i maxPos = rbPos;
-
-		FixSelectionArea(minPos, maxPos);
-		SelectFixed(minPos, maxPos, units, pred);
-	}
-
-
-	template <typename Pred>
-	CUnit *Find_IfFixed(const Vec2i &ltPos, const Vec2i &rbPos, Pred pred) {
-		Assert(Info.IsPointOnMap(ltPos));
-		Assert(Info.IsPointOnMap(rbPos));
-
-		for (Vec2i posIt = ltPos; posIt.y != rbPos.y + 1; ++posIt.y) {
-			for (posIt.x = ltPos.x; posIt.x != rbPos.x + 1; ++posIt.x) {
-				const CMapField &mf = *Field(posIt);
-				const CUnitCache &cache = mf.UnitCache;
-
-				CUnitCache::const_iterator it = std::find_if(cache.begin(), cache.end(), pred);
-				if (it != cache.end()) {
-					return *it;
-				}
-			}
-		}
-		return NULL;
-	}
-
-
-
-	template <typename Pred>
-	CUnit *Find_If(const Vec2i &ltPos, const Vec2i &rbPos, Pred pred) {
-		Vec2i minPos = ltPos;
-		Vec2i maxPos = rbPos;
-
-		FixSelectionArea(minPos, maxPos);
-		return Find_IfFixed(minPos, maxPos, pred);
-	}
 private:
 	/// Build tables for fog of war
 	void InitFogOfWar();
@@ -620,20 +244,17 @@ private:
 	/// Regenerate the forest.
 	void RegenerateForestTile(const Vec2i &pos);
 
-
 public:
 	CMapField *Fields;              /// fields on map
-
 	bool NoFogOfWar;           /// fog of war disabled
 
 	CTileset Tileset;          /// tileset data
-	char TileModelsFileName[PATH_MAX]; /// lua filename that loads all tilemodels
+	std::string TileModelsFileName; /// lua filename that loads all tilemodels
 	CGraphic *TileGraphic;     /// graphic for all the tiles
 	static CGraphic *FogGraphic;      /// graphic for fog of war
 
 	CMapInfo Info;             /// descriptive information
 };
-
 
 
 /*----------------------------------------------------------------------------
@@ -645,8 +266,8 @@ extern char CurrentMapPath[1024]; /// Path to the current map
 
 /// Contrast of fog of war
 extern int FogOfWarOpacity;
-/// RGB triplet (0-255) of fog of war color
-extern int FogOfWarColor[3];
+/// fog of war color
+extern CColor FogOfWarColor;
 /// Forest regeneration
 extern int ForestRegeneration;
 /// Flag must reveal the map
@@ -721,7 +342,7 @@ extern void SetTile(int tile, const Vec2i &pos, int value = 0);
 
 inline void SetTile(int tile, int x, int y, int value = 0)
 {
-	const Vec2i pos = {x, y};
+	const Vec2i pos(x, y);
 	SetTile(tile, pos, value);
 }
 
@@ -762,7 +383,7 @@ void MapUnmarkUnitSight(CUnit &unit);
 /// Can a unit with 'mask' enter the field
 inline bool CanMoveToMask(const Vec2i &pos, int mask)
 {
-	return !Map.CheckMask(pos, mask);
+	return !Map.Field(pos)->CheckMask(mask);
 }
 
 /// Handle Marking and Unmarking of radar vision

@@ -34,24 +34,19 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
-#include "unit_manager.h"
-#include "interface.h"
-#include "map.h"
-#include "tileset.h"
-#include "ui.h"
-#include "commands.h"
-#include "network.h"
-#include "iolib.h"
 
-#include "script.h"
+#include "commands.h"
+#include "interface.h"
+#include "iolib.h"
+#include "map.h"
+#include "network.h"
+#include "player.h"
+#include "ui.h"
+#include "unittype.h"
+#include "unit.h"
+#include "unit_find.h"
+#include "unit_manager.h"
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -121,7 +116,7 @@ void UnSelectAll()
 
 	while (NumSelected) {
 		CUnit *unit = Selected[--NumSelected];
-		Selected[NumSelected] = NoUnitP; // FIXME: only needed for old code
+		Selected[NumSelected] = NULL; // FIXME: only needed for old code
 		unit->Selected = 0;
 	}
 	UI.SelectedViewport->Unit = NULL;
@@ -201,7 +196,7 @@ void ChangeTeamSelectedUnits(CPlayer &player, const std::vector<CUnit *> &units,
 			while (TeamNumSelected[player.Index]) {
 				CUnit *unit = TeamSelected[player.Index][--TeamNumSelected[player.Index]];
 				unit->TeamSelected &= ~(1 << player.Index);
-				TeamSelected[player.Index][TeamNumSelected[player.Index]] = NoUnitP; // FIXME: only needed for old code
+				TeamSelected[player.Index][TeamNumSelected[player.Index]] = NULL; // FIXME: only needed for old code
 			}
 			// FALL THROUGH
 		case 2:
@@ -329,7 +324,7 @@ void UnSelectUnit(CUnit &unit)
 			Selected[i]->LastGroup = GroupId;
 		}
 	}
-	Selected[NumSelected] = NoUnitP; // FIXME: only needed for old code
+	Selected[NumSelected] = NULL; // FIXME: only needed for old code
 	unit.Selected = 0;
 
 	//Turn track unit mode off
@@ -409,11 +404,11 @@ int SelectUnitsByType(CUnit &base)
 	// StephanR: should be (MapX,MapY,MapX+MapWidth-1,MapY+MapHeight-1) ???
 	/* FIXME: this should probably be cleaner implemented if SelectUnitsByType()
 	 * took parameters of the selection rectangle as arguments */
-	const Vec2i offset = {1, 1};
+	const Vec2i offset(1, 1);
 	const Vec2i minPos = vp->MapPos - offset;
-	const Vec2i vpSize = {vp->MapWidth, vp->MapHeight};
+	const Vec2i vpSize(vp->MapWidth, vp->MapHeight);
 	const Vec2i maxPos = vp->MapPos + vpSize + offset;
-	Map.Select(minPos, maxPos, table, HasSameTypeAs(type));
+	Select(minPos, maxPos, table, HasSameTypeAs(type));
 
 	// FIXME: peon/peasant with gold/wood & co are considered from
 	//   different type... idem for tankers
@@ -461,7 +456,7 @@ int SelectUnitsByType(CUnit &base)
 */
 int ToggleUnitsByType(CUnit &base)
 {
-	const CUnitType *type = base.Type;
+	const CUnitType &type = *base.Type;
 
 	// if unit is a cadaver or hidden (not on map)
 	// no unit can be selected.
@@ -470,7 +465,7 @@ int ToggleUnitsByType(CUnit &base)
 	}
 	// if unit isn't belonging to the player, or is a static unit
 	// (like a building), only 1 unit can be selected at the same time.
-	if (!CanSelectMultipleUnits(*base.Player) || !type->SelectableByRectangle) {
+	if (!CanSelectMultipleUnits(*base.Player) || !type.SelectableByRectangle) {
 		return 0;
 	}
 
@@ -486,13 +481,13 @@ int ToggleUnitsByType(CUnit &base)
 	// FIXME: this should probably be cleaner implemented if SelectUnitsByType()
 	// took parameters of the selection rectangle as arguments */
 	const CViewport *vp = UI.MouseViewport;
-	const Vec2i offset = {1, 1};
+	const Vec2i offset(1, 1);
 	const Vec2i minPos = vp->MapPos - offset;
-	const Vec2i vpSize = {vp->MapWidth, vp->MapHeight};
+	const Vec2i vpSize(vp->MapWidth, vp->MapHeight);
 	const Vec2i maxPos = vp->MapPos + vpSize + offset;
 	std::vector<CUnit *> table;
 
-	Map.Select(minPos, maxPos, table, HasSameTypeAs(*type));
+	Select(minPos, maxPos, table, HasSameTypeAs(type));
 
 	// FIXME: peon/peasant with gold/wood & co are considered from
 	// different type... idem for tankers
@@ -564,16 +559,16 @@ int SelectGroup(int group_number, GroupSelectionMode mode)
 */
 int AddGroupFromUnitToSelection(CUnit &unit)
 {
-	int i;
-	int group;
+	int group = unit.LastGroup;
 
-	if (!(group = unit.LastGroup)) { // belongs to no group
+	if (!group) { // belongs to no group
 		return 0;
 	}
 
-	for (i = 0; i < NumUnits; ++i) {
-		if (Units[i]->LastGroup == group && !Units[i]->Removed) {
-			SelectUnit(*Units[i]);
+	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+		CUnit &unit = **it;
+		if (unit.LastGroup == group && !unit.Removed) {
+			SelectUnit(unit);
 			if (NumSelected == MaxSelectable) {
 				return NumSelected;
 			}
@@ -645,16 +640,13 @@ static bool SelectOrganicUnitsInTable(std::vector<CUnit *> &table)
 **  of its upper left and lower right corner expressed in screen map
 **  coordinate system.
 **
-**  @param sx0        x-coord of upper left corner of the rectangle
-**  @param sy0        y-coord of upper left corner of the rectangle
-**  @param sx1        x-coord of lower right corner of the rectangle
-**  @param sy1        y-coord of lower right corner of the rectangle
-**  @param table      table of units
-**  @param num_units  number of units in table
+**  @param corner_topleft      coord of upper left corner of the rectangle
+**  @param corner_bottomright  coord of lower right corner of the rectangle
+**  @param table               table of units
 **
 **  @return           number of units found
 */
-static void SelectSpritesInsideRectangle(int sx0, int sy0, int sx1, int sy1,
+static void SelectSpritesInsideRectangle(const PixelPos &corner_topleft, const PixelPos &corner_bottomright,
 										 std::vector<CUnit *> &table)
 {
 	int n = 0;
@@ -664,12 +656,12 @@ static void SelectSpritesInsideRectangle(int sx0, int sy0, int sx1, int sy1,
 		const CUnitType &type = *unit.Type;
 		PixelPos spritePos = unit.GetMapPixelPosCenter();
 
-		spritePos.x += type.OffsetX - type.BoxWidth / 2;
-		spritePos.y += type.OffsetY - type.BoxHeight / 2;
-		if (spritePos.x + type.BoxWidth < sx0
-			|| spritePos.x > sx1
-			|| spritePos.y + type.BoxHeight < sy0
-			|| spritePos.y > sy1) {
+		spritePos.x += type.OffsetX - (type.BoxWidth + type.BoxOffsetX) / 2;
+		spritePos.y += type.OffsetY - (type.BoxHeight + type.BoxOffsetY) / 2;
+		if (spritePos.x + type.BoxWidth + type.BoxOffsetX < corner_topleft.x
+			|| spritePos.x > corner_bottomright.x
+			|| spritePos.y + type.BoxHeight + type.BoxOffsetY < corner_topleft.y
+			|| spritePos.y > corner_bottomright.y) {
 			continue;
 		}
 		table[n++] = &unit;
@@ -677,15 +669,28 @@ static void SelectSpritesInsideRectangle(int sx0, int sy0, int sx1, int sy1,
 	table.resize(n);
 }
 
-static int DoSelectUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
+/**
+**  Select units in a rectangle.
+**  Proceed in order in none found:
+**    @li select local player mobile units
+**    @li select one local player static unit (random)
+**    @li select one neutral unit (critter, mine...)
+**    @li select one enemy unit (random)
+**
+**  @param corner_topleft,  start of selection rectangle
+**  @param corner_bottomright end of selection rectangle
+**
+**  @return     the number of units found.
+*/
+int SelectUnitsInRectangle(const PixelPos &corner_topleft, const PixelPos &corner_bottomright)
 {
-	const Vec2i t0 = {sx0 / PixelTileSize.x, sy0 / PixelTileSize.y};
-	const Vec2i t1 = {sx1 / PixelTileSize.x + 1, sy1 / PixelTileSize.y + 1};
-	const Vec2i range = {2, 2};
+	const Vec2i t0 = Map.MapPixelPosToTilePos(corner_topleft);
+	const Vec2i t1 = Map.MapPixelPosToTilePos(corner_bottomright);
+	const Vec2i range(2, 2);
 	std::vector<CUnit *> table;
 
-	Map.Select(t0 - range, t1 + range, table);
-	SelectSpritesInsideRectangle(sx0, sy0, sx1, sy1, table);
+	Select(t0 - range, t1 + range, table);
+	SelectSpritesInsideRectangle(corner_topleft, corner_bottomright, table);
 
 	// 1) search for the player units selectable with rectangle
 	if (SelectOrganicUnitsInTable(table)) {
@@ -712,7 +717,7 @@ static int DoSelectUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
 	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 		// Unit visible FIXME: write function UnitSelectable
-		if (!unit.IsVisibleInViewport(UI.SelectedViewport)) {
+		if (!unit.IsVisibleInViewport(*UI.SelectedViewport)) {
 			continue;
 		}
 		const CUnitType &type = *unit.Type;
@@ -730,7 +735,7 @@ static int DoSelectUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
 	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
 		// Unit visible FIXME: write function UnitSelectable
-		if (!unit.IsVisibleInViewport(UI.SelectedViewport)) {
+		if (!unit.IsVisibleInViewport(*UI.SelectedViewport)) {
 			continue;
 		}
 		// Buildings are visible but not selectable
@@ -745,38 +750,15 @@ static int DoSelectUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
 	return 0;
 }
 
-
-/**
-**  Select units in a rectangle.
-**  Proceed in order in none found:
-**    @li select local player mobile units
-**    @li select one local player static unit (random)
-**    @li select one neutral unit (critter, mine...)
-**    @li select one enemy unit (random)
-**
-**  @param sx0  X start of selection rectangle in tile coordinates
-**  @param sy0  Y start of selection rectangle in tile coordinates
-**  @param sx1  X start of selection rectangle in tile coordinates
-**  @param sy1  Y start of selection rectangle in tile coordinates
-**
-**  @return     the number of units found.
-*/
-int SelectUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
-{
-	return DoSelectUnitsInRectangle(sx0, sy0, sx1, sy1);
-}
-
 /**
 **  Add the units in the rectangle to the current selection
 **
-**  @param x0  X start of selection rectangle in tile coordinates
-**  @param y0  Y start of selection rectangle in tile coordinates
-**  @param x1  X start of selection rectangle in tile coordinates
-**  @param y1  Y start of selection rectangle in tile coordinates
+**  @param corner_topleft,  start of selection rectangle
+**  @param corner_bottomright end of selection rectangle
 **
 **  @return    the _total_ number of units selected.
 */
-int AddSelectedUnitsInRectangle(int x0, int y0, int x1, int y1)
+int AddSelectedUnitsInRectangle(const PixelPos &corner_topleft, const PixelPos &corner_bottomright)
 {
 	// Check if the original selected unit (if it's alone) is ours,
 	// and can be selectable by rectangle.
@@ -788,15 +770,15 @@ int AddSelectedUnitsInRectangle(int x0, int y0, int x1, int y1)
 	}
 	// If there is no selected unit yet, do a simple selection.
 	if (!NumSelected) {
-		return DoSelectUnitsInRectangle(x0, y0, x1, y1);
+		return SelectUnitsInRectangle(corner_topleft, corner_bottomright);
 	}
-	const Vec2i tilePos0 = {x0 / PixelTileSize.x, y0 / PixelTileSize.y};
-	const Vec2i tilePos1 = {x1 / PixelTileSize.x + 1, y1 / PixelTileSize.y + 1};
-	const Vec2i range = {2, 2};
+	const Vec2i tilePos0 = Map.MapPixelPosToTilePos(corner_topleft);
+	const Vec2i tilePos1 = Map.MapPixelPosToTilePos(corner_bottomright);
+	const Vec2i range(2, 2);
 	std::vector<CUnit *> table;
 
-	Map.Select(tilePos0 - range, tilePos1 + range, table);
-	SelectSpritesInsideRectangle(x0, y0, x1, y1, table);
+	Select(tilePos0 - range, tilePos1 + range, table);
+	SelectSpritesInsideRectangle(corner_topleft, corner_bottomright, table);
 	// If no unit in rectangle area... do nothing
 	if (table.empty()) {
 		return NumSelected;
@@ -814,15 +796,23 @@ int AddSelectedUnitsInRectangle(int x0, int y0, int x1, int y1)
 	return NumSelected;
 }
 
-static int DoSelectGroundUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
+/**
+**  Select own ground units in a rectangle.
+**
+**  @param corner_topleft,  start of selection rectangle
+**  @param corner_bottomright end of selection rectangle
+**
+**  @return     the number of units found.
+*/
+int SelectGroundUnitsInRectangle(const PixelPos &corner_topleft, const PixelPos &corner_bottomright)
 {
-	const Vec2i t0 = {sx0 / PixelTileSize.x, sy0 / PixelTileSize.y};
-	const Vec2i t1 = {sx1 / PixelTileSize.x + 1, sy1 / PixelTileSize.y + 1};
-	const Vec2i range = {2, 2};
+	const Vec2i t0 = Map.MapPixelPosToTilePos(corner_topleft);
+	const Vec2i t1 = Map.MapPixelPosToTilePos(corner_bottomright);
+	const Vec2i range(2, 2);
 	std::vector<CUnit *> table;
 
-	Map.Select(t0 - range, t1 + range, table);
-	SelectSpritesInsideRectangle(sx0, sy0, sx1, sy1, table);
+	Select(t0 - range, t1 + range, table);
+	SelectSpritesInsideRectangle(corner_topleft, corner_bottomright, table);
 
 	int n = 0;
 	for (size_t i = 0; i != table.size(); ++i) {
@@ -852,29 +842,22 @@ static int DoSelectGroundUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
 }
 
 /**
-**  Select own ground units in a rectangle.
+**  Select own air units in a rectangle.
 **
-**  @param sx0  X start of selection rectangle in tile coordinates
-**  @param sy0  Y start of selection rectangle in tile coordinates
-**  @param sx1  X start of selection rectangle in tile coordinates
-**  @param sy1  Y start of selection rectangle in tile coordinates
+**  @param corner_topleft,  start of selection rectangle
+**  @param corner_bottomright end of selection rectangle
 **
 **  @return     the number of units found.
 */
-int SelectGroundUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
+int SelectAirUnitsInRectangle(const PixelPos &corner_topleft, const PixelPos &corner_bottomright)
 {
-	return DoSelectGroundUnitsInRectangle(sx0, sy0, sx1, sy1);
-}
-
-static int DoSelectAirUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
-{
-	const Vec2i t0 = {sx0 / PixelTileSize.x, sy0 / PixelTileSize.y};
-	const Vec2i t1 = {sx1 / PixelTileSize.x + 1, sy1 / PixelTileSize.y + 1};
-	const Vec2i range = {2, 2};
+	const Vec2i t0 = Map.MapPixelPosToTilePos(corner_topleft);
+	const Vec2i t1 = Map.MapPixelPosToTilePos(corner_bottomright);
+	const Vec2i range(2, 2);
 	std::vector<CUnit *> table;
 
-	Map.Select(t0 - range, t1 + range, table);
-	SelectSpritesInsideRectangle(sx0, sy0, sx1, sy1, table);
+	Select(t0 - range, t1 + range, table);
+	SelectSpritesInsideRectangle(corner_topleft, corner_bottomright, table);
 	int n = 0;
 	for (size_t i = 0; i != table.size(); ++i) {
 		CUnit &unit = *table[i];
@@ -901,32 +884,16 @@ static int DoSelectAirUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
 	return n;
 }
 
-/**
-**  Select own air units in a rectangle.
-**
-**  @param sx0  X start of selection rectangle in tile coordinates
-**  @param sy0  Y start of selection rectangle in tile coordinates
-**  @param sx1  X start of selection rectangle in tile coordinates
-**  @param sy1  Y start of selection rectangle in tile coordinates
-**
-**  @return     the number of units found.
-*/
-int SelectAirUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
-{
-	return DoSelectAirUnitsInRectangle(sx0, sy0, sx1, sy1);
-}
 
 /**
 **  Add the ground units in the rectangle to the current selection
 **
-**  @param sx0  X start of selection rectangle in tile coordinates
-**  @param sy0  Y start of selection rectangle in tile coordinates
-**  @param sx1  X start of selection rectangle in tile coordinates
-**  @param sy1  Y start of selection rectangle in tile coordinates
+**  @param corner_topleft,     start of selection rectangle
+**  @param corner_bottomright  end of selection rectangle
 **
 **  @return     the number of units found.
 */
-int AddSelectedGroundUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
+int AddSelectedGroundUnitsInRectangle(const PixelPos &corner_topleft, const PixelPos &corner_bottomright)
 {
 	// Check if the original selected unit (if it's alone) is ours,
 	// and can be selectable by rectangle.
@@ -939,16 +906,16 @@ int AddSelectedGroundUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
 
 	// If there is no selected unit yet, do a simple selection.
 	if (!NumSelected) {
-		return DoSelectGroundUnitsInRectangle(sx0, sy0, sx1, sy1);
+		return SelectGroundUnitsInRectangle(corner_topleft, corner_bottomright);
 	}
 
-	const Vec2i t0 = {sx0 / PixelTileSize.x, sy0 / PixelTileSize.y};
-	const Vec2i t1 = {sx1 / PixelTileSize.x + 1, sy1 / PixelTileSize.y + 1};
-	const Vec2i range = {2, 2};
+	const Vec2i t0 = Map.MapPixelPosToTilePos(corner_topleft);
+	const Vec2i t1 = Map.MapPixelPosToTilePos(corner_bottomright);
+	const Vec2i range(2, 2);
 	std::vector<CUnit *> table;
 
-	Map.Select(t0 - range, t1 + range, table);
-	SelectSpritesInsideRectangle(sx0, sy0, sx1, sy1, table);
+	Select(t0 - range, t1 + range, table);
+	SelectSpritesInsideRectangle(corner_topleft, corner_bottomright, table);
 
 	int n = 0;
 	for (size_t i = 0; i < table.size(); ++i) {
@@ -983,14 +950,12 @@ int AddSelectedGroundUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
 /**
 **  Add the air units in the rectangle to the current selection
 **
-**  @param sx0  X start of selection rectangle in tile coordinates
-**  @param sy0  Y start of selection rectangle in tile coordinates
-**  @param sx1  X start of selection rectangle in tile coordinates
-**  @param sy1  Y start of selection rectangle in tile coordinates
+**  @param corner_topleft,     start of selection rectangle
+**  @param corner_bottomright  end of selection rectangle
 **
 **  @return     the number of units found.
 */
-int AddSelectedAirUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
+int AddSelectedAirUnitsInRectangle(const PixelPos &corner_topleft, const PixelPos &corner_bottomright)
 {
 	// Check if the original selected unit (if it's alone) is ours,
 	// and can be selectable by rectangle.
@@ -1003,16 +968,16 @@ int AddSelectedAirUnitsInRectangle(int sx0, int sy0, int sx1, int sy1)
 
 	// If there is no selected unit yet, do a simple selection.
 	if (!NumSelected) {
-		return DoSelectAirUnitsInRectangle(sx0, sy0, sx1, sy1);
+		return SelectAirUnitsInRectangle(corner_topleft, corner_bottomright);
 	}
 
-	const Vec2i t0 = {sx0 / PixelTileSize.x, sy0 / PixelTileSize.y};
-	const Vec2i t1 = {sx1 / PixelTileSize.x + 1, sy1 / PixelTileSize.y + 1};
-	const Vec2i range = {2, 2};
+	const Vec2i t0 = Map.MapPixelPosToTilePos(corner_topleft);
+	const Vec2i t1 = Map.MapPixelPosToTilePos(corner_bottomright);
+	const Vec2i range(2, 2);
 	std::vector<CUnit *> table;
 
-	Map.Select(t0 - range, t1 + range, table);
-	SelectSpritesInsideRectangle(sx0, sy0, sx1, sy1, table);
+	Select(t0 - range, t1 + range, table);
+	SelectSpritesInsideRectangle(corner_topleft, corner_bottomright, table);
 	int n = 0;
 	for (size_t i = 0; i < table.size(); ++i) {
 		CUnit &unit = *table[i];
@@ -1126,27 +1091,19 @@ static int CclSetGroupId(lua_State *l)
 */
 static int CclSelection(lua_State *l)
 {
-	int i;
-	int args;
-	int j;
-
 	LuaCheckArgs(l, 2);
 	if (!lua_istable(l, 2)) {
 		LuaError(l, "incorrect argument");
 	}
 	InitSelections();
 	NumSelected = LuaToNumber(l, 1);
-	i = 0;
-	args = lua_rawlen(l, 2);
-	for (j = 0; j < args; ++j) {
-		const char *str;
-
+	const int args = lua_rawlen(l, 2);
+	for (int j = 0; j < args; ++j) {
 		lua_rawgeti(l, 2, j + 1);
-		str = LuaToString(l, -1);
+		const char *str = LuaToString(l, -1);
 		lua_pop(l, 1);
-		Selected[i++] = UnitSlots[strtol(str + 1, NULL, 16)];
+		Selected[j] = &UnitManager.GetSlotUnit(strtol(str + 1, NULL, 16));
 	}
-
 	return 0;
 }
 

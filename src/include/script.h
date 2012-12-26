@@ -71,15 +71,9 @@ extern lua_State *Lua;
 extern int LuaLoadFile(const std::string &file);
 extern int LuaCall(int narg, int clear, bool exitOnError = true);
 
-#ifdef _MSC_VER
-#ifndef __func__
-#define __func__ __FUNCTION__
-#endif
-#endif
-
 #define LuaError(l, args) \
 	do { \
-		fprintf(stdout, "%s:%d: %s: ", __FILE__, __LINE__, __func__); \
+		PrintFunction(); \
 		fprintf(stdout, args); \
 		fprintf(stdout, "\n"); \
 		lua_pushfstring(l, args); lua_error(l); \
@@ -292,12 +286,14 @@ extern int LuaToNumber(lua_State *l, int narg);
 extern bool LuaToBoolean(lua_State *l, int narg);
 
 extern void CclGarbageCollect(int fast);  /// Perform garbage collection
-extern void InitCcl();                /// Initialise ccl
+extern void InitLua();                /// Initialise Lua
 extern void LoadCcl(const std::string &filename);  /// Load ccl config file
-extern void SaveCcl(CFile &file);     /// Save CCL module
 extern void SavePreferences();        /// Save user preferences
 extern int CclCommand(const std::string &command, bool exitOnError = true);
 
+extern void ScriptRegister();
+
+extern std::string SaveGlobal(lua_State *l); /// For saving lua state
 
 CUnit *CclGetUnitFromRef(lua_State *l);
 
@@ -305,10 +301,8 @@ CUnit *CclGetUnitFromRef(lua_State *l);
 **  Get a position from lua state
 **
 **  @param l  Lua state.
-**  param x  pointer to output x position.
+**  @param x  pointer to output x position.
 **  @param y  pointer to output y position.
-**
-**  @return   The unit pointer
 */
 template <typename T>
 static void CclGetPos(lua_State *l, T *x , T *y, const int offset = -1)
@@ -341,9 +335,6 @@ void FreeNumberDesc(NumberDesc *number);  /// Free number description content. (
 void FreeUnitDesc(UnitDesc *unitdesc);    /// Free unit description content. (no pointer itself).
 void FreeStringDesc(StringDesc *s);       /// Frre string description content. (no pointer itself).
 
-// call the lua function: CleanGame_Lua.
-void CleanGame_Lua();
-
 //@}
 
-#endif // !__CCL_H__
+#endif // !__SCRIPT_H__

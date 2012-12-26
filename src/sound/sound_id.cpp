@@ -33,10 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
 
 #include <string>
@@ -112,22 +108,19 @@ CSound *SoundForName(const std::string &name)
 **
 **  @return      the sound id of the created group
 */
-CSound *MakeSound(const std::string &name, const char *file[], int nb)
+CSound *MakeSound(const std::string &name, const std::vector<std::string> &files)
 {
-	CSound *sound;
+	CSound *sound = FindSound(name);
 
-	Assert(nb <= 255);
-
-	if ((sound = FindSound(name))) {
+	if (sound) {
 		DebugPrint("re-register sound `%s'\n" _C_ name.c_str());
 		return sound;
 	}
 
-	sound = RegisterSound(file, nb);
+	sound = RegisterSound(files);
 	if (sound != NO_SOUND) {
 		MapSound(name, sound);
 	}
-
 	return sound;
 }
 
@@ -146,9 +139,9 @@ CSound *MakeSound(const std::string &name, const char *file[], int nb)
 */
 CSound *MakeSoundGroup(const std::string &name, CSound *first, CSound *second)
 {
-	CSound *sound;
+	CSound *sound = FindSound(name);
 
-	if ((sound = FindSound(name))) {
+	if (sound) {
 		DebugPrint("re-register sound `%s'\n" _C_ name.c_str());
 		return sound;
 	}
@@ -157,7 +150,6 @@ CSound *MakeSoundGroup(const std::string &name, CSound *first, CSound *second)
 	if (sound != NO_SOUND) {
 		MapSound(name, sound);
 	}
-
 	return sound;
 }
 

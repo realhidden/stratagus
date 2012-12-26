@@ -36,11 +36,7 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <vector>
-
-#include "unit.h"
 #include "unitsound.h"
-#include "player.h"
 
 /*----------------------------------------------------------------------------
 --  Declarations
@@ -57,6 +53,24 @@ class LuaActionListener;
 
 #define MaxSampleVolume 255  /// Maximum sample volume
 #define NO_SOUND 0           /// No valid sound ID
+
+/**
+**  Voice groups for a unit
+*/
+enum UnitVoiceGroup {
+	VoiceSelected,          /// If selected
+	VoiceAcknowledging,     /// Acknowledge command
+	VoiceReady,             /// Command completed
+	VoiceHelpMe,            /// If attacked
+	VoiceDying,             /// If killed
+	VoiceWorkCompleted,     /// only worker, work completed
+	VoiceBuilding,          /// only for building under construction
+	VoiceDocking,           /// only for transport reaching coast
+	VoiceRepairing,         /// repairing
+	VoiceHarvesting,        /// harvesting
+	VoiceAttack             /// Attack command
+};
+
 
 /**
 **  Global game sounds, not associated to any unit-type
@@ -152,7 +166,7 @@ extern void PlayUnitSound(const CUnit &unit, UnitVoiceGroup unit_voice_group);
 /// Play a unit sound
 extern void PlayUnitSound(const CUnit &unit, CSound *sound);
 /// Play a missile sound
-extern void PlayMissileSound(const Missile *missile, CSound *sound);
+extern void PlayMissileSound(const Missile &missile, CSound *sound);
 /// Play a game sound
 extern void PlayGameSound(CSound *sound, unsigned char volume);
 
@@ -163,7 +177,7 @@ extern int PlayFile(const std::string &name, LuaActionListener *listener = NULL)
 extern void SetSoundRange(CSound *sound, unsigned char range);
 
 /// Register a sound (can be a simple sound or a group)
-extern CSound *RegisterSound(const char *files[], unsigned int number);
+extern CSound *RegisterSound(const std::vector<std::string> &files);
 
 ///  Create a special sound group with two sounds
 extern CSound *RegisterTwoGroups(CSound *first, CSound *second);
@@ -195,7 +209,7 @@ extern void MapSound(const std::string &sound_name, CSound *id);
 /// Get the sound id bound to an identifier
 extern CSound *SoundForName(const std::string &sound_name);
 /// Make a sound bound to identifier
-extern CSound *MakeSound(const std::string &sound_name, const char *file[], int nb);
+extern CSound *MakeSound(const std::string &sound_name, const std::vector<std::string> &files);
 /// Make a sound group bound to identifier
 extern CSound *MakeSoundGroup(const std::string &name, CSound *first, CSound *second);
 #ifdef DEBUG

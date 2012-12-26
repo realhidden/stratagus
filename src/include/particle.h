@@ -125,7 +125,10 @@ protected:
 class CChunkParticle : public CParticle
 {
 public:
-	CChunkParticle(CPosition position, Animation *smokeAnimation);
+	CChunkParticle(CPosition position, Animation *smokeAnimation, Animation *debrisAnimation,
+				   Animation *destroyAnimation,
+				   int minVelocity = 0, int maxVelocity = 400,
+				   int minTrajectoryAngle = 77, int maxTTL = 0);
 	virtual ~CChunkParticle();
 
 	virtual void draw();
@@ -136,11 +139,17 @@ protected:
 	CPosition initialPos;
 	int initialVelocity;
 	float trajectoryAngle;
+	int maxTTL;
 	int nextSmokeTicks;
 	int lifetime;
 	int age;
+	int minVelocity;
+	int maxVelocity;
+	int minTrajectoryAngle;
 	float height;
+	Animation *debrisAnimation;
 	Animation *smokeAnimation;
+	Animation *destroyAnimation;
 
 	struct {
 		float x;
@@ -153,7 +162,7 @@ protected:
 class CSmokeParticle : public CParticle
 {
 public:
-	CSmokeParticle(CPosition position, Animation *animation);
+	CSmokeParticle(CPosition position, Animation *animation, float speedx = 0, float speedy = -22.0f);
 	virtual ~CSmokeParticle();
 
 	virtual void draw();
@@ -162,6 +171,27 @@ public:
 
 protected:
 	Animation *puff;
+	struct {
+		float x;
+		float y;
+	} speedVector;
+};
+
+class CRadialParticle : public CParticle
+{
+public:
+	CRadialParticle(CPosition position, Animation *animation, int maxSpeed);
+	virtual ~CRadialParticle();
+
+	virtual void draw();
+	virtual void update(int ticks);
+	virtual CParticle *clone();
+
+protected:
+	Animation *animation;
+	float direction;
+	int speed;
+	int maxSpeed;
 };
 
 
@@ -174,7 +204,7 @@ public:
 	static void init();
 	static void exit();
 
-	void draw(const CViewport *vp);
+	void draw(const CViewport &vp);
 	void update();
 
 	void add(CParticle *particle);

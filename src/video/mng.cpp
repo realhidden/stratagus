@@ -37,9 +37,6 @@
 
 #ifdef USE_MNG
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "video.h"
 #include "iolib.h"
 #include "iocompat.h"
@@ -98,22 +95,16 @@ static mng_bool MNG_DECL my_readdata(mng_handle handle, mng_ptr buf, mng_uint32 
 static mng_bool MNG_DECL my_processheader(mng_handle handle, mng_uint32 width,
 										  mng_uint32 height)
 {
-	Uint32 Rmask;
-	Uint32 Gmask;
-	Uint32 Bmask;
-	mng_imgtype type;
-	Mng *mng;
-	unsigned w;
-	unsigned h;
-
-	type = mng_get_sigtype(handle);
+	mng_imgtype type = mng_get_sigtype(handle);
 	if (type != mng_it_mng) {
 		return TRUE;
 	}
 
-	mng = (Mng *)mng_get_userdata(handle);
+	Mng *mng = (Mng *)mng_get_userdata(handle);
 
 	if (UseOpenGL) {
+		unsigned w;
+		unsigned h;
 		for (w = 1; w < width; w <<= 1) {
 		}
 		for (h = 1; h < height; h <<= 1) {
@@ -131,13 +122,13 @@ static mng_bool MNG_DECL my_processheader(mng_handle handle, mng_uint32 width,
 
 	// Allocate the SDL surface to hold the image
 #if SDL_BYTEORDER == SDL_LIL_ENDIAN
-	Rmask = 0x000000FF;
-	Gmask = 0x0000FF00;
-	Bmask = 0x00FF0000;
+	const Uint32 Rmask = 0x000000FF;
+	const Uint32 Gmask = 0x0000FF00;
+	const Uint32 Bmask = 0x00FF0000;
 #else
-	Rmask = 0xFF000000 >> 8;
-	Gmask = 0x00FF0000 >> 8;
-	Bmask = 0x0000FF00 >> 8;
+	const Uint32 Rmask = 0xFF000000 >> 8;
+	const Uint32 Gmask = 0x00FF0000 >> 8;
+	const Uint32 Bmask = 0x0000FF00 >> 8;
 #endif
 
 	mng->buffer = new unsigned char[width * height * 3];
@@ -316,7 +307,6 @@ void Mng::Draw(int x, int y)
 */
 int Mng::Load(const std::string &name)
 {
-	mng_retcode myretcode;
 	char buf[PATH_MAX];
 
 	LibraryFileName(name.c_str(), buf, sizeof(buf));
@@ -339,7 +329,7 @@ int Mng::Load(const std::string &name)
 
 	mng_read(handle);
 	if (surface && iteration != 0x7fffffff) {
-		myretcode = mng_display(handle);
+		mng_display(handle);
 	}
 
 	if (!surface || iteration == 0x7fffffff) {

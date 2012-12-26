@@ -36,6 +36,7 @@
 #include "font.h"
 #include "map.h"
 #include "missile.h"
+#include "particle.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "tileset.h"
@@ -272,11 +273,12 @@ void CViewport::DrawMapBackgroundInViewport() const
 			if (ReplayRevealMap) {
 				tile = Map.Fields[sx].Tile;
 			} else {
-				tile = Map.Fields[sx].SeenTile;
+				tile = Map.Fields[sx].playerInfo.SeenTile;
 			}
 			Map.TileGraphic->DrawFrameClip(tile, dx, dy);
 
 #ifdef DEBUG
+#ifdef DEBUGMAPDRAW
 			int my_mask = 0;
 			unsigned int color = 0;
 			if (Map.CheckMask(sx, MapFieldUnpassable)) {
@@ -309,6 +311,7 @@ void CViewport::DrawMapBackgroundInViewport() const
 
 			}
 #endif
+#endif
 			++sx;
 			dx += PixelTileSize.x;
 		}
@@ -325,14 +328,14 @@ void CViewport::DrawMapBackgroundInViewport() const
 **  @param hidden  If true, write "Unrevealed terrain"
 **
 */
-static void ShowUnitName(const CViewport *vp, PixelPos pos, CUnit *unit, bool hidden = false)
+static void ShowUnitName(const CViewport &vp, PixelPos pos, CUnit *unit, bool hidden = false)
 {
-	CFont *font = GetSmallFont();
+	CFont &font = GetSmallFont();
 	int width;
-	int height = font->Height() + 6;
+	int height = font.Height() + 6;
 	CLabel label(font, "white", "red");
 	int x;
-	int y = std::min<int>(pos.y + 10, vp->BottomRightPos.y - 1 - height);
+	int y = std::min<int>(GameCursor->G->Height + pos.y + 10, vp.BottomRightPos.y - 1 - height);
 	const CPlayer *tplayer = ThisPlayer;
 
 	if (unit) {
@@ -346,15 +349,15 @@ static void ShowUnitName(const CViewport *vp, PixelPos pos, CUnit *unit, bool hi
 		} else {
 			backgroundColor = Video.MapRGB(TheScreen->format, 176, 176, 176);
 		}
-		width = font->getWidth(unit->Type->Name) + 10;
-		x = std::min<int>(pos.x, vp->BottomRightPos.x - 1 - width);
+		width = font.getWidth(unit->Type->Name) + 10;
+		x = std::min<int>(GameCursor->G->Width + pos.x, vp.BottomRightPos.x - 1 - width);
 		Video.FillTransRectangle(backgroundColor, x, y, width, height, 128);
 		Video.DrawRectangle(ColorWhite, x, y, width, height);
 		label.DrawCentered(x + width / 2, y + 3, unit->Type->Name);
 	} else if (hidden) {
 		const std::string str("Unrevealed terrain");
-		width = font->getWidth(str) + 10;
-		x = std::min<int>(pos.x, vp->BottomRightPos.x - 1 - width);
+		width = font.getWidth(str) + 10;
+		x = std::min<int>(GameCursor->G->Width + pos.x, vp.BottomRightPos.x - 1 - width);
 		Video.FillTransRectangle(ColorBlue, x, y, width, height, 128);
 		Video.DrawRectangle(ColorWhite, x, y, width, height);
 		label.DrawCentered(x + width / 2, y + 3, str);
@@ -378,7 +381,7 @@ void CViewport::Draw() const
 		std::vector<Missile *> missiletable;
 
 		// We find and sort units after draw level.
-		FindAndSortUnits(this, unittable);
+		FindAndSortUnits(*this, unittable);
 		const size_t nunits = unittable.size();
 		FindAndSortMissiles(*this, missiletable);
 		const size_t nmissiles = missiletable.size();
@@ -387,7 +390,7 @@ void CViewport::Draw() const
 
 		while (i < nunits && j < nmissiles) {
 			if (unittable[i]->Type->DrawLevel <= missiletable[j]->Type->DrawLevel) {
-				unittable[i]->Draw(this);
+				unittable[i]->Draw(*this);
 				++i;
 			} else {
 				missiletable[j]->DrawMissile(*this);
@@ -395,12 +398,14 @@ void CViewport::Draw() const
 			}
 		}
 		for (; i < nunits; ++i) {
-			unittable[i]->Draw(this);
+			unittable[i]->Draw(*this);
 		}
 		for (; j < nmissiles; ++j) {
 			missiletable[j]->DrawMissile(*this);
 		}
 	}
+
+	ParticleManager.draw(*this);
 
 	this->DrawMapFogOfWar();
 
@@ -420,13 +425,14 @@ void CViewport::Draw() const
 	// Draw unit's name popup
 	//
 	if (CursorOn == CursorOnMap && Preference.ShowNameDelay && (ShowNameDelay < GameCycle) && (GameCycle < ShowNameTime)) {
-		const PixelPos mousePos = {CursorX, CursorY};
-		const Vec2i tilePos = this->ScreenToTilePos(mousePos);
-		if (UI.MouseViewport->IsInsideMapArea(mousePos)
-			&& (Map.IsFieldVisible(*ThisPlayer, tilePos) || ReplayRevealMap)) {
-			ShowUnitName(this, mousePos, UnitUnderCursor);
-		} else if (!Map.IsFieldVisible(*ThisPlayer, tilePos)) {
-			ShowUnitName(this, mousePos, NULL, true);
+		const Vec2i tilePos = this->ScreenToTilePos(CursorScreenPos);
+		const bool isMapFieldVisile = Map.Field(tilePos)->playerInfo.IsTeamVisible(*ThisPlayer);
+
+		if (UI.MouseViewport->IsInsideMapArea(CursorScreenPos)
+			&& (isMapFieldVisile || ReplayRevealMap)) {
+			ShowUnitName(*this, CursorScreenPos, UnitUnderCursor);
+		} else if (!isMapFieldVisile) {
+			ShowUnitName(*this, CursorScreenPos, NULL, true);
 		}
 	}
 

@@ -34,10 +34,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
 
 #include <string>
@@ -1032,9 +1028,9 @@ static void MakeTextures2(CGraphic *g, GLuint texture, CUnitColors *colors,
 					b = (c & f->Bmask) >> f->Bshift;
 					if (b && ((c & f->Rmask) >> f->Rshift) == 0 &&
 						((c & f->Gmask) >> f->Gshift) == b) {
-						pc = ((colors->Colors[0].r * b / 255) << f->Rshift) |
-							 ((colors->Colors[0].g * b / 255) << f->Gshift) |
-							 ((colors->Colors[0].b * b / 255) << f->Bshift);
+						pc = ((colors->Colors[0].R * b / 255) << f->Rshift) |
+							 ((colors->Colors[0].G * b / 255) << f->Gshift) |
+							 ((colors->Colors[0].B * b / 255) << f->Bshift);
 						if (bpp == 4) {
 							pc |= (c & f->Amask);
 						} else {
@@ -1093,9 +1089,7 @@ static void MakeTextures(CGraphic *g, int player, CUnitColors *colors)
 	g->TextureHeight = (GLfloat)h / PowerOf2(h);
 
 	g->NumTextures = tw * th;
-	if (g->NumTextures > 1) {
-		tw = tw;
-	}
+
 	CPlayerColorGraphic *cg = dynamic_cast<CPlayerColorGraphic *>(g);
 	GLuint *textures;
 	if (!colors || !cg) {

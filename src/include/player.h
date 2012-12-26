@@ -37,14 +37,23 @@
 ----------------------------------------------------------------------------*/
 
 #include <string>
-#include "upgrade_structs.h"
-#include "video.h"
 
-#ifndef __MAP_TILE_H__
-#include "tile.h"
-#endif
+#include "color.h"
+#include "upgrade_structs.h"
+
 #include "vec2i.h"
 
+class CGraphic;
+
+/*----------------------------------------------------------------------------
+--  Definitons
+----------------------------------------------------------------------------*/
+
+#define STORE_OVERALL 0
+#define STORE_BUILDING 1
+#define STORE_BOTH 2
+
+#define SPEEDUP_FACTOR 100
 /*----------------------------------------------------------------------------
 --  Declarations
 ----------------------------------------------------------------------------*/
@@ -58,6 +67,13 @@ struct lua_State;
 /*----------------------------------------------------------------------------
 --  Player type
 ----------------------------------------------------------------------------*/
+
+enum _diplomacy_ {
+	DiplomacyAllied,   /// Ally with opponent
+	DiplomacyNeutral,  /// Don't attack be neutral
+	DiplomacyEnemy,    /// Attack opponent
+	DiplomacyCrazy     /// Ally and attack opponent
+}; /// Diplomacy states for CommandDiplomacy
 
 ///  Player structure
 class CPlayer
@@ -84,6 +100,13 @@ public:
 	int Incomes[MaxCosts];        /// income of the resources
 	int Revenue[MaxCosts];        /// income rate of the resources
 
+	int SpeedResourcesHarvest[MaxCosts]; /// speed factor for harvesting resources
+	int SpeedResourcesReturn[MaxCosts];  /// speed factor for returning resources
+	int SpeedBuild;                  /// speed factor for building
+	int SpeedTrain;                  /// speed factor for training
+	int SpeedUpgrade;                /// speed factor for upgrading
+	int SpeedResearch;               /// speed factor for researching
+
 	// FIXME: shouldn't use the constant
 	int UnitTypesCount[UnitTypeMax];  /// total units of unit-type
 
@@ -105,9 +128,11 @@ public:
 	int    TotalRazings;
 	int    TotalKills;      /// How many unit killed
 
-	Uint32 Color;           /// color of units on minimap
+	IntColor Color;           /// color of units on minimap
 
 	CUnitColors UnitColors; /// Unit colors for new units
+
+	std::vector<CUnit *> FreeWorkers;	/// Container for free workers
 
 	// Upgrades/Allows:
 	CAllow Allow;                 /// Allowed for player
@@ -129,15 +154,16 @@ public:
 
 	void AddUnit(CUnit &unit);
 	void RemoveUnit(CUnit &unit);
+	void UpdateFreeWorkers();
 
 	/// Get a resource of the player
-	int GetResource(int resource, int type);
+	int GetResource(const int resource, const int type);
 	/// Adds/subtracts some resources to/from the player store
-	void ChangeResource(int resource, int value, bool store = false);
+	void ChangeResource(const int resource, const int value, const bool store = false);
 	/// Set a resource of the player
-	void SetResource(int resource, int value, bool store = false);
+	void SetResource(const int resource, const int value, const int type = STORE_OVERALL);
 	/// Check, if there enough resources for action.
-	bool CheckResource(int resource, int value);
+	bool CheckResource(const int resource, const int value);
 
 	/// Check if the unit-type didn't break any unit limits and supply/demand
 	int CheckLimits(const CUnitType &type) const;
@@ -213,7 +239,6 @@ private:
 **  Races for the player
 **  Mapped with #PlayerRaces to a symbolic name.
 */
-#define MAX_RACES 8
 class PlayerRace
 {
 public:
@@ -221,10 +246,14 @@ public:
 		memset(Visible, 0, sizeof(Visible));
 	}
 
+	void Clean();
+	int GetRaceIndexByName(const char *raceName) const;
+
+public:
 	bool Visible[MAX_RACES];        /// race should be visible in pulldown
-	std::string Name[MAX_RACES];     /// race names
-	std::string Display[MAX_RACES];  /// text to display in pulldown
-	unsigned int   Count;            /// number of races
+	std::string Name[MAX_RACES];    /// race names
+	std::string Display[MAX_RACES]; /// text to display in pulldown
+	unsigned int Count;             /// number of races
 };
 
 
@@ -299,8 +328,8 @@ extern int NumPlayers;             /// How many player slots used
 extern CPlayer Players[PlayerMax];  /// All players
 extern CPlayer *ThisPlayer;         /// Player on local computer
 extern bool NoRescueCheck;          /// Disable rescue check
-extern SDL_Color *PlayerColorsRGB[PlayerMax]; /// Player colors
-extern Uint32 *PlayerColors[PlayerMax];       /// Player colors
+extern std::vector<CColor> PlayerColorsRGB[PlayerMax]; /// Player colors
+extern std::vector<IntColor> PlayerColors[PlayerMax]; /// Player colors
 extern std::string PlayerColorNames[PlayerMax];  /// Player color names
 
 extern PlayerRace PlayerRaces;  /// Player races
@@ -319,8 +348,6 @@ extern int PlayerColorIndexCount;
 extern void InitPlayers();
 /// Clean up players
 extern void CleanPlayers();
-/// Clean up races
-extern void CleanRaces();
 /// Save players
 extern void SavePlayers(CFile &file);
 

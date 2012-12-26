@@ -37,9 +37,6 @@
 
 #ifdef USE_MIKMOD // {
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
 #include "sound.h"
 #include "sound_server.h"
 #include "iolib.h"
@@ -230,11 +227,13 @@ CSample *LoadMikMod(const char *name, int flags)
 	}
 
 	if (flags & PlayAudioStream) {
-		sample = new CSampleMikModStream;
-		data = &((CSampleMikModStream *)sample)->Data;
+		CSampleMikModStream *sampleMikModStream = new CSampleMikModStream;
+		sample = sampleMikModStream;
+		data = &sampleMikModStream->Data;
 	} else {
-		sample = new CSampleMikMod;
-		data = &((CSampleMikMod *)sample)->Data;
+		CSampleMikMod *sampleMikMod = new CSampleMikMod;
+		sample = sampleMikMod;
+		data = &sampleMikMod->Data;
 	}
 	data->MikModFile = f;
 	data->MikModModule = module;

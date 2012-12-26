@@ -38,16 +38,6 @@
 
 #include <vector>
 
-#ifdef USE_ZLIB
-#include <zlib.h>
-#endif
-
-#ifdef USE_BZ2LIB
-#include <bzlib.h>
-#endif
-
-class CMapInfo;
-
 /*----------------------------------------------------------------------------
 --  Definitons
 ----------------------------------------------------------------------------*/
@@ -82,19 +72,23 @@ public:
 */
 FileWriter *CreateFileWriter(const std::string &filename);
 
-
-
 /**
 **  FileList struct used by directory access routine
 */
 class FileList
 {
 public:
-	FileList() : name(NULL), type(0), xdata(NULL) {}
+	FileList() : type(0) {}
 
-	char *name;              /// Name of the file
-	int type;                /// Type of the file
-	CMapInfo *xdata;          /// Extra data attached by high level
+	bool operator < (const FileList &rhs) const {
+		if (type != rhs.type) {
+			return type < rhs.type;
+		}
+		return name < rhs.name;
+	}
+public:
+	std::string name;  /// Name of the file
+	int type;          /// Type of the file
 };
 
 
@@ -117,16 +111,12 @@ public:
 	long tell();
 
 	int printf(const char *format, ...) PRINTF_VAARG_ATTRIBUTE(2, 3); // Don't forget to count this
-
 private:
-	int   cl_type;   /// type of CFile
-	FILE *cl_plain;  /// standard file pointer
-#ifdef USE_ZLIB
-	gzFile cl_gz;    /// gzip file pointer
-#endif // !USE_ZLIB
-#ifdef USE_BZ2LIB
-	BZFILE *cl_bz;   /// bzip2 file pointer
-#endif // !USE_BZ2LIB
+	CFile(const CFile &rhs); // No implementation
+	const CFile &operator = (const CFile &rhs); // No implementation
+private:
+	class PImpl;
+	PImpl *pimpl;
 };
 
 enum {
@@ -148,9 +138,10 @@ enum {
 /// Build libary path name
 extern char *LibraryFileName(const char *file, char *buffer, size_t buffersize);
 
+extern bool CanAccessFile(const char *filename);
+
 /// Read the contents of a directory
-extern int ReadDataDirectory(const char *dirname, int (*filter)(char *, FileList *),
-							 std::vector<FileList> &flp);
+extern int ReadDataDirectory(const char *dirname, std::vector<FileList> &flp);
 
 //@}
 

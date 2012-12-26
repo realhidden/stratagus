@@ -333,7 +333,8 @@ enum {
 	MissileClassFlameShield, /// Missile surround x,y
 	MissileClassDeathCoil, /// Missile is death coil.
 	MissileClassTracer, /// Missile seeks towards to target unit
-	MissileClassClipToTarget /// Missile remains clipped to target's current goal and plays his animation once
+	MissileClassClipToTarget, /// Missile remains clipped to target's current goal and plays his animation once
+	MissileClassContinious /// Missile stays and plays it's animation several times
 };
 
 /// Base structure of missile-types
@@ -360,6 +361,9 @@ public:
 	int DrawLevel;             /// Level to draw missile at
 	int SpriteFrames;          /// number of sprite frames in graphic
 	int NumDirections;         /// number of directions missile can face
+	int ChangeVariable;        /// variable to change
+	int ChangeAmount;          /// how many to change
+	bool ChangeMax;            /// modify the max, if value will exceed it
 
 	/// @todo FiredSound defined but not used!
 	SoundConfig FiredSound;    /// fired sound
@@ -370,18 +374,24 @@ public:
 	bool CanHitOwner;          /// missile can hit the owner
 	bool FriendlyFire;         /// missile can't hit own units
 	bool AlwaysFire;           /// missile will always fire (even if target is dead)
+	bool Pierce;               /// missile will hit every unit on his way
+	bool PierceOnce;           /// pierce every target only once
 
 	int Class;                 /// missile class
 	int NumBounces;            /// number of bounces
 	int StartDelay;            /// missile start delay
 	int Sleep;                 /// missile sleep
 	int Speed;                 /// missile speed
+	int TTL;                   /// missile time-to-live
+	int Damage;                /// missile damage (used for non-direct missiles, e.g. impacts)
+	int ReduceFactor;          /// Multiplier for reduce or increase damage dealt to the next unit
 
-	int Range;                 /// missile damage range
-	int SplashFactor;          /// missile splash divisor
-	MissileConfig Impact;      /// missile produces an impact
-	MissileConfig Smoke;       /// Trailling missile
-	LuaCallback *ImpactParticle; /// impact particle
+	int Range;                             /// missile damage range
+	int SplashFactor;                      /// missile splash divisor
+	std::vector <MissileConfig *> Impact;  /// missile produces an impact
+	MissileConfig Smoke;                   /// trailing missile
+	LuaCallback *ImpactParticle;           /// impact particle
+	LuaCallback *SmokeParticle;            /// smoke particle
 
 	// --- FILLED UP ---
 	CGraphic *G;         /// missile graphic
@@ -398,7 +408,7 @@ protected:
 	Missile();
 
 public:
-	virtual ~Missile() {};
+	virtual ~Missile();
 
 	static Missile *Init(const MissileType &mtype, const PixelPos &startPos, const PixelPos &destPos);
 
@@ -406,7 +416,7 @@ public:
 
 	void DrawMissile(const CViewport &vp) const;
 	void SaveMissile(CFile &file) const;
-	void MissileHit();
+	void MissileHit(CUnit *unit = NULL);
 	bool NextMissileFrame(char sign, char longAnimation);
 	void NextMissileFrameCycle();
 	void MissileNewHeadingFromXY(const PixelPos &delta);
@@ -426,6 +436,8 @@ public:
 	CUnitPtr SourceUnit;  /// unit that fires (could be killed)
 	CUnitPtr TargetUnit;  /// target unit, used for spells
 
+	std::vector<CUnit *> PiercedUnits;	/// Units which are already pierced by this missile
+
 	int Damage;  /// direct damage that missile applies
 
 	int TTL;     /// time to live (ticks) used for spells
@@ -443,6 +455,7 @@ public:
 
 extern bool MissileInitMove(Missile &missile);
 extern bool PointToPointMissile(Missile &missile);
+extern void MissileHandlePierce(Missile &missile, const Vec2i &pos);
 
 class MissileNone : public Missile
 {
@@ -522,6 +535,12 @@ public:
 };
 
 class MissileClipToTarget : public Missile
+{
+public:
+	virtual void Action();
+};
+
+class MissileContinious : public Missile
 {
 public:
 	virtual void Action();

@@ -34,21 +34,21 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
-#include "video.h"
+
+#include "ui.h"
+
 #include "font.h"
 #include "interface.h"
-#include "map.h"
-#include "tileset.h"
-#include "ui.h"
-#include "menus.h"
 #include "iolib.h"
-#include "unit.h"
+#include "map.h"
+#include "menus.h"
+#include "tileset.h"
 #include "title.h"
+#include "unit.h"
+#include "video.h"
+
+#include <stdarg.h>
 
 /*----------------------------------------------------------------------------
 -- Variables
@@ -69,10 +69,41 @@ CUserInterface UI;
 -- Functions
 ----------------------------------------------------------------------------*/
 
+/**
+**  Show load progress.
+**
+**  @param fmt  printf format string.
+*/
+void ShowLoadProgress(const char *fmt, ...)
+{
+	va_list va;
+	char temp[4096];
+
+	va_start(va, fmt);
+	vsnprintf(temp, sizeof(temp) - 1, fmt, va);
+	temp[sizeof(temp) - 1] = '\0';
+	va_end(va);
+
+	if (Video.Depth && GetGameFont().IsLoaded()) {
+		// Remove non printable chars
+		for (char *s = temp; *s; ++s) {
+			if (*s < 32) {
+				*s = ' ';
+			}
+		}
+		Video.FillRectangle(ColorBlack, 5, Video.Height - 18, Video.Width - 10, 18);
+		CLabel(GetGameFont()).DrawCentered(Video.Width / 2, Video.Height - 16, temp);
+		InvalidateArea(5, Video.Height - 18, Video.Width - 10, 18);
+		RealizeVideoMemory();
+	} else {
+		DebugPrint("!!!!%s\n" _C_ temp);
+	}
+}
+
+
 CUserInterface::CUserInterface() :
 	MouseScroll(false), KeyScroll(false), MouseScrollSpeed(1),
 	MouseScrollSpeedDefault(0), MouseScrollSpeedControl(0),
-	MouseWarpX(0), MouseWarpY(0),
 	SingleSelectedButton(NULL),
 	MaxSelectedFont(NULL), MaxSelectedTextX(0), MaxSelectedTextY(0),
 	SingleTrainingButton(NULL),
@@ -85,7 +116,7 @@ CUserInterface::CUserInterface() :
 	ViewportCursorColor(0), Offset640X(0), Offset480Y(0),
 	VictoryBackgroundG(NULL), DefeatBackgroundG(NULL)
 {
-	memset(&CompletedBarColorRGB, 0, sizeof(CompletedBarColorRGB));
+	MouseWarpPos.x = MouseWarpPos.y = 0;
 
 	Point.Name = "cursor-point";
 	Glass.Name = "cursor-glass";
@@ -145,10 +176,7 @@ void InitUserInterface()
 
 	SetViewportMode(VIEWPORT_SINGLE);
 
-	UI.CompletedBarColor = Video.MapRGB(TheScreen->format,
-										UI.CompletedBarColorRGB.r,
-										UI.CompletedBarColorRGB.g,
-										UI.CompletedBarColorRGB.b);
+	UI.CompletedBarColor = Video.MapRGB(TheScreen->format, UI.CompletedBarColorRGB);
 	UI.ViewportCursorColor = ColorWhite;
 }
 
@@ -176,7 +204,7 @@ void CUserInterface::Load()
 		Fillers[i].Load();
 	}
 
-	for (int i = 0; i <= ManaResCost; ++i) {
+	for (int i = 0; i <= FreeWorkersCount; ++i) {
 		if (Resources[i].G) {
 			Resources[i].G->Load();
 			Resources[i].G->UseDisplayFormat();
@@ -269,7 +297,7 @@ void CleanUserInterface()
 	UI.Fillers.clear();
 
 	// Resource Icons
-	for (int i = 0; i <= ManaResCost; ++i) {
+	for (int i = 0; i <= FreeWorkersCount; ++i) {
 		CGraphic::Free(UI.Resources[i].G);
 	}
 
@@ -392,7 +420,6 @@ static void FinishViewportModeConfiguration(CViewport new_vps[], int num_vps)
 	//
 	//  Update the viewport pointers
 	//
-	PixelPos CursorScreenPos = {CursorX, CursorY};
 	UI.MouseViewport = GetViewport(CursorScreenPos);
 	if (UI.SelectedViewport > UI.Viewports + UI.NumViewports - 1) {
 		UI.SelectedViewport = UI.Viewports + UI.NumViewports - 1;

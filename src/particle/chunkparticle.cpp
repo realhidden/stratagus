@@ -44,27 +44,36 @@ static inline float deg2rad(int degrees)
 }
 
 
-CChunkParticle::CChunkParticle(CPosition position, Animation *smokeAnimation) :
-	CParticle(position), initialPos(position), nextSmokeTicks(0), age(0),
-	height(0.f)
+CChunkParticle::CChunkParticle(CPosition position, Animation *smokeAnimation, Animation *debrisAnimation,
+							   Animation *destroyAnimation,
+							   int minVelocity, int maxVelocity, int minTrajectoryAngle, int maxTTL) :
+	CParticle(position), initialPos(position), maxTTL(maxTTL), nextSmokeTicks(0),
+	age(0), height(0.f)
 {
 	float radians = deg2rad(MyRand() % 360);
 	direction.x = cos(radians);
 	direction.y = sin(radians);
 
-	const int maxVelocity = 400;
-	initialVelocity = MyRand() % maxVelocity;
+	this->minVelocity = minVelocity;
+	this->maxVelocity = maxVelocity;
+	this->minTrajectoryAngle = minTrajectoryAngle;
+	this->initialVelocity = this->minVelocity + MyRand() % (this->maxVelocity - this->minVelocity + 1);
+	this->trajectoryAngle = deg2rad(MyRand() % (90 - this->minTrajectoryAngle) + this->minTrajectoryAngle);
+	this->lifetime = (int)(1000 * (initialVelocity * sin(trajectoryAngle) / gravity) * 2);
+	if (maxTTL) {
+		this->lifetime = std::min(maxTTL, this->lifetime);
+	}
 
-	int minTrajectoryAngle = 77;
-	trajectoryAngle = deg2rad(MyRand() % (90 - minTrajectoryAngle) + minTrajectoryAngle);
-
-	lifetime = (int)(1000 * (initialVelocity * sin(trajectoryAngle) / gravity) * 2);
 	this->smokeAnimation = smokeAnimation->clone();
+	this->debrisAnimation = debrisAnimation->clone();
+	this->destroyAnimation = destroyAnimation->clone();
 }
 
 CChunkParticle::~CChunkParticle()
 {
+	delete debrisAnimation;
 	delete smokeAnimation;
+	delete destroyAnimation;
 }
 
 static float calculateScreenPos(float posy, float height)
@@ -75,10 +84,8 @@ static float calculateScreenPos(float posy, float height)
 void CChunkParticle::draw()
 {
 	CPosition screenPos = ParticleManager.getScreenPos(pos);
-	Uint32 color = ColorBlack;
-
-	Video.DrawRectangleClip(color, (int)screenPos.x - 1,
-							(int)calculateScreenPos(screenPos.y, height) - 1, 2, 2);
+	screenPos.y = calculateScreenPos(screenPos.y, height);
+	debrisAnimation->draw(static_cast<int>(screenPos.x), static_cast<int>(screenPos.y));
 }
 
 static float getHorizontalPosition(int initialVelocity, float trajectoryAngle, float time)
@@ -96,6 +103,13 @@ void CChunkParticle::update(int ticks)
 {
 	age += ticks;
 	if (age >= lifetime) {
+		if (destroyAnimation) {
+			CPosition p(pos.x, calculateScreenPos(pos.y, height));
+			Animation *destroyanimation = destroyAnimation->clone();
+			StaticParticle *destroy = new StaticParticle(p, destroyanimation);
+			ParticleManager.add(destroy);
+		}
+
 		destroy();
 		return;
 	}
@@ -105,11 +119,18 @@ void CChunkParticle::update(int ticks)
 
 	if (age > nextSmokeTicks) {
 		CPosition p(pos.x, calculateScreenPos(pos.y, height));
-		Animation *animation = smokeAnimation->clone();
-		CSmokeParticle *smoke = new CSmokeParticle(p, animation);
+		Animation *smokeanimation = smokeAnimation->clone();
+		CSmokeParticle *smoke = new CSmokeParticle(p, smokeanimation);
 		ParticleManager.add(smoke);
 
 		nextSmokeTicks += MyRand() % randSmokeTicks + minSmokeTicks;
+	}
+
+	debrisAnimation->update(ticks);
+	if (debrisAnimation->isFinished()) {
+		Animation *debrisanimation = debrisAnimation->clone();
+		delete debrisAnimation;
+		debrisAnimation = debrisanimation;
 	}
 
 	float time = age / 1000.f;
@@ -124,7 +145,7 @@ void CChunkParticle::update(int ticks)
 
 CParticle *CChunkParticle::clone()
 {
-	return new CChunkParticle(pos, smokeAnimation);
+	return new CChunkParticle(pos, smokeAnimation, debrisAnimation, destroyAnimation, minVelocity, maxVelocity, minTrajectoryAngle, maxTTL);
 }
 
 //@}

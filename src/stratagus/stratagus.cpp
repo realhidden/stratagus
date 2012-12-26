@@ -158,13 +158,7 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
-#include <string.h>
-#include <time.h>
 #include <ctype.h>
-#include <sstream>
 
 #ifdef USE_BEOS
 #include <fcntl.h>
@@ -196,41 +190,44 @@ extern int getopt(int argc, char *const *argv, const char *opt);
 #include "SDL.h"
 
 #include "stratagus.h"
-#include "unit_manager.h"
-#include "video.h"
-#include "font.h"
-#include "cursor.h"
-#include "ui.h"
-#include "interface.h"
-#include "menus.h"
-#include "sound_server.h"
-#include "sound.h"
-#include "settings.h"
-#include "script.h"
-#include "network.h"
-#include "netconnect.h"
+
 #include "ai.h"
-#include "commands.h"
+#include "editor.h"
+#include "game.h"
+#include "guichan.h"
+#include "interface.h"
+#include "iocompat.h"
+#include "iolib.h"
+#include "map.h"
+#include "netconnect.h"
+#include "network.h"
+#include "player.h"
 #include "replay.h"
 #include "results.h"
-#include "editor.h"
-#include "movie.h"
-#include "pathfinder.h"
-#include "widgets.h"
-#include "iolib.h"
-#include "util.h"
-#include "guichan.h"
+#include "settings.h"
+#include "sound_server.h"
 #include "title.h"
-#include "map.h"
+#include "translate.h"
+#include "ui.h"
+#include "unit_manager.h"
+#include "version.h"
+#include "video.h"
+#include "widgets.h"
 
 #ifdef DEBUG
 #include "missile.h" //for FreeBurningBuildingFrames
 #endif
 
+#include <stdlib.h>
+#include <stdio.h>
+
+
 #if defined(USE_WIN32) && ! defined(NO_STDIO_REDIRECT)
 #define REDIRECT_OUTPUT
 #endif
 
+
+extern void CleanGame();
 
 void Parameters::SetDefaultValues()
 {
@@ -261,7 +258,6 @@ void Parameters::SetUserDirectory()
 #endif
 }
 
-
 /* static */ Parameters Parameters::Instance;
 
 
@@ -278,61 +274,39 @@ std::string CliMapName;          /// Filename of the map given on the command li
 static std::vector<gcn::Container *> Containers;
 std::string MenuRace;
 
-/*----------------------------------------------------------------------------
---  Speedups FIXME: Move to some other more logic place
-----------------------------------------------------------------------------*/
-
-int SpeedResourcesHarvest[MaxCosts]; /// speed factor for harvesting resources
-int SpeedResourcesReturn[MaxCosts];  /// speed factor for returning resources
-int SpeedBuild = 1;                  /// speed factor for building
-int SpeedTrain = 1;                  /// speed factor for training
-int SpeedUpgrade = 1;                /// speed factor for upgrading
-int SpeedResearch = 1;               /// speed factor for researching
-
 /*============================================================================
 ==  DISPLAY
 ============================================================================*/
 
 unsigned long GameCycle;             /// Game simulation cycle counter
-unsigned long ResultGameCycle;       /// Used in game result
 unsigned long FastForwardCycle;      /// Cycle to fastforward to in a replay
 
 /*============================================================================
 ==  MAIN
 ============================================================================*/
 
-/**
-**  Show load progress.
-**
-**  @param fmt  printf format string.
-*/
-void ShowLoadProgress(const char *fmt, ...)
+void PrintLocation(const char *file, int line, const char *funcName)
 {
-	va_list va;
-	char temp[4096];
-
-	va_start(va, fmt);
-	vsnprintf(temp, sizeof(temp) - 1, fmt, va);
-	temp[sizeof(temp) - 1] = '\0';
-	va_end(va);
-
-	if (Video.Depth && GetGameFont() && GetGameFont()->IsLoaded()) {
-		// Remove non printable chars
-		for (char *s = temp; *s; ++s) {
-			if (*s < 32) {
-				*s = ' ';
-			}
-		}
-		Video.FillRectangle(ColorBlack, 5, Video.Height - 18, Video.Width - 10, 18);
-		CLabel(GetGameFont()).DrawCentered(Video.Width / 2, Video.Height - 16, temp);
-		InvalidateArea(5, Video.Height - 18, Video.Width - 10, 18);
-		RealizeVideoMemory();
-	} else {
-		DebugPrint("!!!!%s\n" _C_ temp);
-	}
+	fprintf(stdout, "%s:%d: %s: ", file, line, funcName);
 }
 
-//----------------------------------------------------------------------------
+#ifdef DEBUG
+
+void AbortAt(const char *file, int line, const char *funcName, const char *conditionStr)
+{
+	fprintf(stderr, "Assertion failed at %s:%d: %s: %s\n", file, line, funcName, conditionStr);
+	abort();
+}
+
+void PrintOnStdOut(const char *format, ...)
+{
+	va_list valist;
+	va_start(valist, format);
+	vprintf(format, valist);
+	va_end(valist);
+}
+
+#endif
 
 /**
 **  Pre menu setup.
@@ -388,50 +362,6 @@ static int MenuLoop()
 	return status;
 }
 
-extern void CleanMissiles();
-extern void CleanTriggers();
-
-/**
-**  Cleanup game.
-**
-**  Call each module to clean up.
-**  Contrary to CleanModules, maps can be restarted
-**  without reloading all lua files.
-*/
-void CleanGame()
-{
-	EndReplayLog();
-	CleanMessages();
-
-	CleanGame_Lua();
-	CleanTriggers();
-	CleanAi();
-	CleanGroups();
-	CleanMissiles();
-	CleanUnits();
-	CleanSelections();
-	CleanTilesets();
-	Map.Clean();
-	CleanReplayLog();
-	FreePathfinder();
-	CursorBuilding = NULL;
-	UnitUnderCursor = NULL;
-}
-
-static void ExpandPath(std::string &newpath, const std::string &path)
-{
-	if (path[0] == '~') {
-		newpath = Parameters::Instance.GetUserDirectory();
-		if (!GameName.empty()) {
-			newpath += "/";
-			newpath += GameName;
-		}
-		newpath += "/" + path.substr(1);
-	} else {
-		newpath = StratagusLibPath + "/" + path;
-	}
-}
-
 extern gcn::Gui *Gui;
 
 void StartMap(const std::string &filename, bool clean)
@@ -474,89 +404,6 @@ void StartMap(const std::string &filename, bool clean)
 	Gui->setTop(oldTop);
 	Containers.erase(std::find(Containers.begin(), Containers.end(), container));
 	delete container;
-}
-
-void StartSavedGame(const std::string &filename)
-{
-	std::string path;
-
-	SaveGameLoading = true;
-	CleanPlayers();
-	ExpandPath(path, filename);
-	LoadGame(path);
-
-	StartMap(filename, false);
-	//SetDefaultTextColors(nc, rc);
-}
-
-void StartReplay(const std::string &filename, bool reveal)
-{
-	std::string replay;
-
-	CleanPlayers();
-	ExpandPath(replay, filename);
-	LoadReplay(replay);
-
-	ReplayRevealMap = reveal;
-
-	StartMap(CurrentMapPath, false);
-}
-
-/**
-**  Save the replay
-**
-**  @param filename  Name of the file to save to
-**
-**  @return          0 for success, -1 for failure
-*/
-int SaveReplay(const std::string &filename)
-{
-	FILE *fd;
-	char *buf;
-	std::ostringstream logfile;
-	std::string destination;
-	struct stat sb;
-	size_t size;
-
-	if (filename.find_first_of("\\/") != std::string::npos) {
-		fprintf(stderr, "\\ or / not allowed in SaveReplay filename\n");
-		return -1;
-	}
-
-	destination = Parameters::Instance.GetUserDirectory() + "/logs/" + filename;
-
-	logfile << Parameters::Instance.GetUserDirectory() << "/logs/log_of_stratagus_" << ThisPlayer->Index << ".log";
-
-	if (stat(logfile.str().c_str(), &sb)) {
-		fprintf(stderr, "stat failed\n");
-		return -1;
-	}
-	buf = new char[sb.st_size];
-	if (!buf) {
-		fprintf(stderr, "Out of memory\n");
-		return -1;
-	}
-	fd = fopen(logfile.str().c_str(), "rb");
-	if (!fd) {
-		fprintf(stderr, "fopen failed\n");
-		delete[] buf;
-		return -1;
-	}
-	size = fread(buf, sb.st_size, 1, fd);
-	fclose(fd);
-
-	fd = fopen(destination.c_str(), "wb");
-	if (!fd) {
-		fprintf(stderr, "Can't save to `%s'\n", destination.c_str());
-		delete[] buf;
-		return -1;
-	}
-	fwrite(buf, size, 1, fd);
-	fclose(fd);
-
-	delete[] buf;
-
-	return 0;
 }
 
 //----------------------------------------------------------------------------
@@ -931,8 +778,11 @@ int main(int argc, char **argv)
 
 	Parameters &parameters = Parameters::Instance;
 	parameters.SetDefaultValues();
-	parameters.applicationName = argv[0];
 	parameters.LocalPlayerName = GetLocalPlayerNameFromEnv();
+
+	if (argc > 0) {
+		parameters.applicationName = argv[0];
+	}
 
 	// FIXME: Parse options before or after scripts?
 	ParseCommandLine(argc, argv, parameters);
@@ -942,7 +792,8 @@ int main(int argc, char **argv)
 	makedir(parameters.GetUserDirectory().c_str(), 0777);
 
 	// Init Lua and register lua functions!
-	InitCcl();
+	InitLua();
+	LuaRegisterModules();
 
 	// Initialise AI module
 	InitAiModule();

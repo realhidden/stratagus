@@ -40,6 +40,7 @@
 #include "actions.h"
 #include "map.h"
 #include "unit.h"
+#include "unit_find.h"
 
 /**
 **  Death-Coil class. Damages organic units and gives to the caster.
@@ -75,8 +76,8 @@ void MissileDeathCoil::Action()
 			//
 			std::vector<CUnit *> table;
 			const Vec2i destPos = Map.MapPixelPosToTilePos(this->destination);
-			const Vec2i range = {2, 2};
-			Map.Select(destPos - range, destPos + range, table, IsEnemyWith(*source.Player));
+			const Vec2i range(2, 2);
+			Select(destPos - range, destPos + range, table, IsEnemyWith(*source.Player));
 
 			if (table.empty()) {
 				return;

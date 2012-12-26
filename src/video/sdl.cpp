@@ -42,9 +42,8 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
-#include <stdlib.h>
-#include <string.h>
 
 #include <limits.h>
 
@@ -78,17 +77,18 @@
 #include "maemo.h"
 #endif
 
-#include "video.h"
+#include "editor.h"
 #include "font.h"
-#include "interface.h"
-#include "network.h"
-#include "ui.h"
-#include "sound_server.h"
-#include "sound.h"
+#include "game.h"
 #include "interface.h"
 #include "minimap.h"
+#include "network.h"
+#include "sound.h"
+#include "sound_server.h"
+#include "translate.h"
+#include "ui.h"
+#include "video.h"
 #include "widgets.h"
-#include "editor.h"
 
 /*----------------------------------------------------------------------------
 --  Declarations
@@ -102,7 +102,7 @@ SDL_Surface *TheScreen; /// Internal screen
 
 static SDL_Rect Rects[100];
 static int NumRects;
-GLint GLMaxTextureSize;   /// Max texture size supported on the video card
+GLint GLMaxTextureSize = 256;   /// Max texture size supported on the video card
 GLint GLMaxTextureSizeOverride;     /// User-specified limit for ::GLMaxTextureSize
 bool GLTextureCompressionSupported; /// Is OpenGL texture compression supported
 bool UseGLTextureCompression;       /// Use OpenGL texture compression
@@ -466,10 +466,12 @@ void InitVideoSdl()
 		signal(SIGABRT, CleanExit);
 #endif
 		// Set WindowManager Title
-		if (FullGameName.empty()) {
-			SDL_WM_SetCaption("Stratagus", "Stratagus");
-		} else {
+		if (!FullGameName.empty()) {
 			SDL_WM_SetCaption(FullGameName.c_str(), FullGameName.c_str());
+		} else if (!Parameters::Instance.applicationName.empty()) {
+			SDL_WM_SetCaption(Parameters::Instance.applicationName.c_str(), Parameters::Instance.applicationName.c_str());
+		} else {
+			SDL_WM_SetCaption("Stratagus", "Stratagus");
 		}
 
 #if ! defined(USE_WIN32) && ! defined(USE_MAEMO)
@@ -481,17 +483,35 @@ void InitVideoSdl()
 		CGraphic *g = NULL;
 		struct stat st;
 
-		char pixmaps[4][1024];
-		sprintf(pixmaps[0], "/usr/share/pixmaps/%s.png", FullGameName.c_str());
-		sprintf(pixmaps[1], "/usr/share/pixmaps/%s.png", FullGameName.c_str());
-		sprintf(pixmaps[2], "/usr/share/pixmaps/stratagus.png");
-		sprintf(pixmaps[3], "/usr/share/pixmaps/Stratagus.png");
-		pixmaps[1][19] = tolower(pixmaps[1][19]);
+		std::string FullGameNameL = FullGameName;
+		for (size_t i = 0; i < FullGameNameL.size(); ++i) {
+			FullGameNameL[i] = tolower(FullGameNameL[i]);
+		}
 
-		for (int i = 0; i < 4; ++i) {
-			if (stat(pixmaps[i], &st) == 0) {
+		std::string ApplicationName = Parameters::Instance.applicationName;
+		std::string ApplicationNameL = ApplicationName;
+		for (size_t i = 0; i < ApplicationNameL.size(); ++i) {
+			ApplicationNameL[i] = tolower(ApplicationNameL[i]);
+		}
+
+		std::vector <std::string> pixmaps;
+		pixmaps.push_back(std::string() + PIXMAPS + "/" + FullGameName + ".png");
+		pixmaps.push_back(std::string() + PIXMAPS + "/" + FullGameNameL + ".png");
+		pixmaps.push_back(std::string() + "/usr/share/pixmaps" + "/" + FullGameName + ".png");
+		pixmaps.push_back(std::string() + "/usr/share/pixmaps" + "/" + FullGameNameL + ".png");
+		pixmaps.push_back(std::string() + PIXMAPS + "/" + ApplicationName + ".png");
+		pixmaps.push_back(std::string() + PIXMAPS + "/" + ApplicationNameL + ".png");
+		pixmaps.push_back(std::string() + "/usr/share/pixmaps" + "/" + ApplicationName + ".png");
+		pixmaps.push_back(std::string() + "/usr/share/pixmaps" + "/" + ApplicationNameL + ".png");
+		pixmaps.push_back(std::string() + PIXMAPS + "/" + "Stratagus" + ".png");
+		pixmaps.push_back(std::string() + PIXMAPS + "/" + "stratagus" + ".png");
+		pixmaps.push_back(std::string() + "/usr/share/pixmaps" + "/" + "Stratagus" + ".png");
+		pixmaps.push_back(std::string() + "/usr/share/pixmaps" + "/" + "stratagus" + ".png");
+
+		for (size_t i = 0; i < pixmaps.size(); ++i) {
+			if (stat(pixmaps[i].c_str(), &st) == 0) {
 				if (g) { CGraphic::Free(g); }
-				g = CGraphic::New(pixmaps[i]);
+				g = CGraphic::New(pixmaps[i].c_str());
 				g->Load();
 				icon = g->Surface;
 				if (icon) { break; }
@@ -509,21 +529,17 @@ void InitVideoSdl()
 		UseOpenGL = UseOpenGL_orig;
 #endif
 #ifdef USE_WIN32
-		int argc = 0;
-		LPWSTR *argv = NULL;
 		HWND hwnd = NULL;
 		HICON hicon = NULL;
 		SDL_SysWMinfo info;
 		SDL_VERSION(&info.version);
 
-		argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-
 		if (SDL_GetWMInfo(&info)) {
 			hwnd = info.window;
 		}
 
-		if (hwnd && argc > 0 && argv) {
-			hicon = ExtractIconW(GetModuleHandle(NULL), argv[0], 0);
+		if (hwnd) {
+			hicon = ExtractIcon(GetModuleHandle(NULL), Parameters::Instance.applicationName.c_str(), 0);
 		}
 
 		if (hicon) {
@@ -627,7 +643,7 @@ void InitVideoSdl()
 	ColorGreen = Video.MapRGB(TheScreen->format, 0, 252, 0);
 	ColorYellow = Video.MapRGB(TheScreen->format, 252, 252, 0);
 
-	UI.MouseWarpX = UI.MouseWarpY = -1;
+	UI.MouseWarpPos.x = UI.MouseWarpPos.y = -1;
 }
 
 /**
@@ -687,52 +703,51 @@ void Invalidate()
 **  @param callbacks  Callback structure for events.
 **  @param event      SDL event structure pointer.
 */
-static void SdlDoEvent(const EventCallback *callbacks, const SDL_Event *event)
+static void SdlDoEvent(const EventCallback &callbacks, const SDL_Event &event)
 {
-	switch (event->type) {
+	switch (event.type) {
 		case SDL_MOUSEBUTTONDOWN:
-			InputMouseButtonPress(callbacks, SDL_GetTicks(), event->button.button);
+			InputMouseButtonPress(callbacks, SDL_GetTicks(), event.button.button);
 			break;
 
 		case SDL_MOUSEBUTTONUP:
-			InputMouseButtonRelease(callbacks, SDL_GetTicks(), event->button.button);
+			InputMouseButtonRelease(callbacks, SDL_GetTicks(), event.button.button);
 			break;
 
 			// FIXME: check if this is only useful for the cursor
 			// FIXME: if this is the case we don't need this.
 		case SDL_MOUSEMOTION:
-			InputMouseMove(callbacks, SDL_GetTicks(),
-						   event->motion.x, event->motion.y);
+			InputMouseMove(callbacks, SDL_GetTicks(), event.motion.x, event.motion.y);
 			// FIXME: Same bug fix from X11
-			if ((UI.MouseWarpX != -1 || UI.MouseWarpY != -1)
-				&& (event->motion.x != UI.MouseWarpX || event->motion.y != UI.MouseWarpY)) {
-				int xw = UI.MouseWarpX;
-				int yw = UI.MouseWarpY;
-				UI.MouseWarpX = -1;
-				UI.MouseWarpY = -1;
+			if ((UI.MouseWarpPos.x != -1 || UI.MouseWarpPos.y != -1)
+				&& (event.motion.x != UI.MouseWarpPos.x || event.motion.y != UI.MouseWarpPos.y)) {
+				int xw = UI.MouseWarpPos.x;
+				int yw = UI.MouseWarpPos.y;
+				UI.MouseWarpPos.x = -1;
+				UI.MouseWarpPos.y = -1;
 				SDL_WarpMouse(xw, yw);
 			}
 			break;
 
 		case SDL_ACTIVEEVENT:
-			if (event->active.state & SDL_APPMOUSEFOCUS) {
+			if (event.active.state & SDL_APPMOUSEFOCUS) {
 				static bool InMainWindow = true;
 
-				if (InMainWindow && !event->active.gain) {
+				if (InMainWindow && !event.active.gain) {
 					InputMouseExit(callbacks, SDL_GetTicks());
 				}
-				InMainWindow = (event->active.gain != 0);
+				InMainWindow = (event.active.gain != 0);
 			}
-			if (event->active.state & SDL_APPACTIVE || SDL_GetAppState() & SDL_APPACTIVE) {
+			if (event.active.state & SDL_APPACTIVE || SDL_GetAppState() & SDL_APPACTIVE) {
 				static bool DoTogglePause = false;
 
-				if (IsSDLWindowVisible && !event->active.gain) {
+				if (IsSDLWindowVisible && !event.active.gain) {
 					IsSDLWindowVisible = false;
 					if (!GamePaused) {
 						DoTogglePause = true;
 						UiTogglePause();
 					}
-				} else if (!IsSDLWindowVisible && event->active.gain) {
+				} else if (!IsSDLWindowVisible && event.active.gain) {
 					IsSDLWindowVisible = true;
 					if (GamePaused && DoTogglePause) {
 						DoTogglePause = false;
@@ -744,12 +759,12 @@ static void SdlDoEvent(const EventCallback *callbacks, const SDL_Event *event)
 
 		case SDL_KEYDOWN:
 			InputKeyButtonPress(callbacks, SDL_GetTicks(),
-								event->key.keysym.sym, event->key.keysym.unicode);
+								event.key.keysym.sym, event.key.keysym.unicode);
 			break;
 
 		case SDL_KEYUP:
 			InputKeyButtonRelease(callbacks, SDL_GetTicks(),
-								  event->key.keysym.sym, event->key.keysym.unicode);
+								  event.key.keysym.sym, event.key.keysym.unicode);
 			break;
 
 		case SDL_QUIT:
@@ -757,8 +772,8 @@ static void SdlDoEvent(const EventCallback *callbacks, const SDL_Event *event)
 			break;
 	}
 
-	if (callbacks == GetCallbacks()) {
-		handleInput(event);
+	if (&callbacks == GetCallbacks()) {
+		handleInput(&event);
 	}
 }
 
@@ -815,8 +830,8 @@ void WaitEventsOneFrame()
 		++SlowFrameCounter;
 	}
 
-	InputMouseTimeout(GetCallbacks(), ticks);
-	InputKeyTimeout(GetCallbacks(), ticks);
+	InputMouseTimeout(*GetCallbacks(), ticks);
+	InputKeyTimeout(*GetCallbacks(), ticks);
 	CursorAnimate(ticks);
 
 	interrupts = 0;
@@ -874,7 +889,7 @@ void WaitEventsOneFrame()
 #endif
 
 		if (i) { // Handle SDL event
-			SdlDoEvent(GetCallbacks(), event);
+			SdlDoEvent(*GetCallbacks(), *event);
 		}
 
 		if (s > 0) {

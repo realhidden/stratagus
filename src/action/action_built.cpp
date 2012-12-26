@@ -30,19 +30,18 @@
 
 //@{
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 #include "action/action_built.h"
 
 #include "ai.h"
+#include "commands.h"
 #include "construct.h"
 #include "iolib.h"
 #include "map.h"
 #include "player.h"
 #include "script.h"
 #include "sound.h"
+#include "translate.h"
 #include "unit.h"
 #include "unittype.h"
 
@@ -221,7 +220,7 @@ static void Finish(COrder_Built &order, CUnit &unit)
 	UpdateForNewUnit(unit, 0);
 
 	// Set the direction of the building if it supports them
-	if (type.NumDirections > 1) {
+	if (type.NumDirections > 1 && type.NoRandomPlacing == false) {
 		if (type.Wall) { // Special logic for walls
 			CorrectWallDirections(unit);
 			CorrectWallNeighBours(unit);
@@ -260,7 +259,6 @@ static void Finish(COrder_Built &order, CUnit &unit)
 		DebugPrint("%d: %s canceled.\n" _C_ unit.Player->Index _C_ unit.Type->Name.c_str());
 
 		CancelBuilt(*this, unit);
-		this->Finished = true;
 		return ;
 	}
 
@@ -352,7 +350,7 @@ void COrder_Built::Progress(CUnit &unit, int amount)
 	Boost(unit, amount, HP_INDEX);
 	Boost(unit, amount, SHIELD_INDEX);
 
-	this->ProgressCounter += amount * SpeedBuild;
+	this->ProgressCounter += amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR;
 	UpdateConstructionFrame(unit);
 }
 
@@ -360,7 +358,7 @@ void COrder_Built::ProgressHp(CUnit &unit, int amount)
 {
 	Boost(unit, amount, HP_INDEX);
 
-	this->ProgressCounter += amount * SpeedBuild;
+	this->ProgressCounter += amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR;
 	UpdateConstructionFrame(unit);
 }
 
@@ -371,7 +369,7 @@ void COrder_Built::Boost(CUnit &building, int amount, int varIndex) const
 
 	const int costs = building.Stats->Costs[TimeCost] * 600;
 	const int progress = this->ProgressCounter;
-	const int newProgress = progress + amount * SpeedBuild;
+	const int newProgress = progress + amount * building.Player->SpeedBuild / SPEEDUP_FACTOR;
 	const int maxValue = building.Variable[varIndex].Max;
 
 	int &currentValue = building.Variable[varIndex].Value;

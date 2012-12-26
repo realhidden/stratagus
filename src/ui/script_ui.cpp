@@ -33,24 +33,22 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
-#include "script.h"
-#include "interface.h"
+
 #include "ui.h"
-#include "video.h"
+
+#include "font.h"
+#include "interface.h"
 #include "map.h"
 #include "menus.h"
-#include "font.h"
+#include "script.h"
+#include "spells.h"
+#include "title.h"
 #include "util.h"
 #include "unit.h"
 #include "unit_manager.h"
 #include "unittype.h"
-#include "spells.h"
-#include "title.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -148,9 +146,7 @@ static int CclGetMouseScrollSpeedControl(lua_State *l)
 */
 static int CclSetClickMissile(lua_State *l)
 {
-	int args;
-
-	args = lua_gettop(l);
+	const int args = lua_gettop(l);
 	if (args > 1 || (args == 1 && (!lua_isnil(l, 1) && !lua_isstring(l, 1)))) {
 		LuaError(l, "incorrect argument");
 	}
@@ -158,7 +154,6 @@ static int CclSetClickMissile(lua_State *l)
 	if (args == 1 && !lua_isnil(l, 1)) {
 		ClickMissile = lua_tostring(l, 1);
 	}
-
 	return 0;
 }
 
@@ -169,9 +164,8 @@ static int CclSetClickMissile(lua_State *l)
 */
 static int CclSetDamageMissile(lua_State *l)
 {
-	int args;
+	const int args = lua_gettop(l);
 
-	args = lua_gettop(l);
 	if (args > 1 || (args == 1 && (!lua_isnil(l, 1) && !lua_isstring(l, 1)))) {
 		LuaError(l, "incorrect argument");
 	}
@@ -179,7 +173,6 @@ static int CclSetDamageMissile(lua_State *l)
 	if (args == 1 && !lua_isnil(l, 1)) {
 		DamageMissile = lua_tostring(l, 1);
 	}
-
 	return 0;
 }
 
@@ -189,10 +182,8 @@ static int CclSetMaxOpenGLTexture(lua_State *l)
 	if (CclInConfigFile) {
 		GLMaxTextureSizeOverride = LuaToNumber(l, 1);
 	}
-
 	return 0;
 }
-
 
 static int CclSetUseOpenGL(lua_State *l)
 {
@@ -273,26 +264,19 @@ static int CclGetVideoFullScreen(lua_State *l)
 */
 static int CclSetTitleScreens(lua_State *l)
 {
-	const char *value;
-	int i;
-	int args;
-	int j;
-	int subargs;
-	int k;
-
 	if (TitleScreens) {
-		for (i = 0; TitleScreens[i]; ++i) {
+		for (int i = 0; TitleScreens[i]; ++i) {
 			delete TitleScreens[i];
 		}
 		delete[] TitleScreens;
 		TitleScreens = NULL;
 	}
 
-	args = lua_gettop(l);
+	const int args = lua_gettop(l);
 	TitleScreens = new TitleScreen *[args + 1];
 	memset(TitleScreens, 0, (args + 1) * sizeof(TitleScreen *));
 
-	for (j = 0; j < args; ++j) {
+	for (int j = 0; j < args; ++j) {
 		if (!lua_istable(l, j + 1)) {
 			LuaError(l, "incorrect argument");
 		}
@@ -300,7 +284,7 @@ static int CclSetTitleScreens(lua_State *l)
 		TitleScreens[j]->Iterations = 1;
 		lua_pushnil(l);
 		while (lua_next(l, j + 1)) {
-			value = LuaToString(l, -2);
+			const char *value = LuaToString(l, -2);
 			if (!strcmp(value, "Image")) {
 				TitleScreens[j]->File = LuaToString(l, -1);
 			} else if (!strcmp(value, "Music")) {
@@ -315,10 +299,10 @@ static int CclSetTitleScreens(lua_State *l)
 				if (!lua_istable(l, -1)) {
 					LuaError(l, "incorrect argument");
 				}
-				subargs = lua_rawlen(l, -1);
+				const int subargs = lua_rawlen(l, -1);
 				TitleScreens[j]->Labels = new TitleScreenLabel *[subargs + 1];
 				memset(TitleScreens[j]->Labels, 0, (subargs + 1) * sizeof(TitleScreenLabel *));
-				for (k = 0; k < subargs; ++k) {
+				for (int k = 0; k < subargs; ++k) {
 					lua_rawgeti(l, -1, k + 1);
 					if (!lua_istable(l, -1)) {
 						LuaError(l, "incorrect argument");
@@ -326,32 +310,21 @@ static int CclSetTitleScreens(lua_State *l)
 					TitleScreens[j]->Labels[k] = new TitleScreenLabel;
 					lua_pushnil(l);
 					while (lua_next(l, -2)) {
-						value = LuaToString(l, -2);
+						const char *value = LuaToString(l, -2);
 						if (!strcmp(value, "Text")) {
 							TitleScreens[j]->Labels[k]->Text = LuaToString(l, -1);
 						} else if (!strcmp(value, "Font")) {
 							TitleScreens[j]->Labels[k]->Font = CFont::Get(LuaToString(l, -1));
 						} else if (!strcmp(value, "Pos")) {
-							if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-								LuaError(l, "incorrect argument");
-							}
-							lua_rawgeti(l, -1, 1);
-							TitleScreens[j]->Labels[k]->Xofs = LuaToNumber(l, -1);
-							lua_pop(l, 1);
-							lua_rawgeti(l, -1, 2);
-							TitleScreens[j]->Labels[k]->Yofs = LuaToNumber(l, -1);
-							lua_pop(l, 1);
+							CclGetPos(l, &TitleScreens[j]->Labels[k]->Xofs, &TitleScreens[j]->Labels[k]->Yofs);
 						} else if (!strcmp(value, "Flags")) {
-							int subsubargs;
-							int subk;
-
 							if (!lua_istable(l, -1)) {
 								LuaError(l, "incorrect argument");
 							}
-							subsubargs = lua_rawlen(l, -1);
-							for (subk = 0; subk < subsubargs; ++subk) {
+							const int subsubargs = lua_rawlen(l, -1);
+							for (int subk = 0; subk < subsubargs; ++subk) {
 								lua_rawgeti(l, -1, subk + 1);
-								value = LuaToString(l, -1);
+								const char *value = LuaToString(l, -1);
 								lua_pop(l, 1);
 								if (!strcmp(value, "center")) {
 									TitleScreens[j]->Labels[k]->Flags |= TitleFlagCenter;
@@ -372,117 +345,6 @@ static int CclSetTitleScreens(lua_State *l)
 			lua_pop(l, 1);
 		}
 	}
-
-	return 0;
-}
-
-/**
-**  Define a cursor.
-**
-**  @param l  Lua state.
-*/
-static int CclDefineCursor(lua_State *l)
-{
-	const char *value;
-	std::string name;
-	std::string race;
-	std::string file;
-	int hotx;
-	int hoty;
-	int w;
-	int h;
-	int rate;
-
-	LuaCheckArgs(l, 1);
-	if (!lua_istable(l, 1)) {
-		LuaError(l, "incorrect argument");
-	}
-	hotx = hoty = w = h = rate = 0;
-	lua_pushnil(l);
-	while (lua_next(l, 1)) {
-		value = LuaToString(l, -2);
-		if (!strcmp(value, "Name")) {
-			name = LuaToString(l, -1);
-		} else if (!strcmp(value, "Race")) {
-			race = LuaToString(l, -1);
-		} else if (!strcmp(value, "File")) {
-			file = LuaToString(l, -1);
-		} else if (!strcmp(value, "HotSpot")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			hotx = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			hoty = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-		} else if (!strcmp(value, "Size")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			w = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			h = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-		} else if (!strcmp(value, "Rate")) {
-			rate = LuaToNumber(l, -1);
-		} else {
-			LuaError(l, "Unsupported tag: %s" _C_ value);
-		}
-		lua_pop(l, 1);
-	}
-
-	Assert(!name.empty() && !file.empty() && w && h);
-
-	if (race == "any") {
-		race.clear();
-	}
-
-	//
-	//  Look if this kind of cursor already exists.
-	//
-	CCursor *ct = NULL;
-	for (int i = 0; i < (int)AllCursors.size(); ++i) {
-		//  Race not same, not found.
-		if (AllCursors[i]->Race != race) {
-			continue;
-		}
-		if (AllCursors[i]->Ident == name) {
-			ct = AllCursors[i];
-			break;
-		}
-	}
-
-	//
-	//  Not found, make a new slot.
-	//
-	if (!ct) {
-		ct = new CCursor();
-		AllCursors.push_back(ct);
-		ct->Ident = name;
-		ct->Race = race;
-	}
-
-	ct->G = CGraphic::New(file, w, h);
-	ct->HotX = hotx;
-	ct->HotY = hoty;
-	ct->FrameRate = rate;
-
-	return 0;
-}
-
-/**
-**  Set the current game cursor.
-**
-**  @param l  Lua state.
-*/
-static int CclSetGameCursor(lua_State *l)
-{
-	LuaCheckArgs(l, 1);
-	GameCursor = CursorByIdent(LuaToString(l, 1));
 	return 0;
 }
 
@@ -509,9 +371,8 @@ EnumVariable Str2EnumVariable(lua_State *l, const char *s)
 		{"Name", VariableName},
 		{0, VariableValue}
 	}; // List of possible values.
-	int i; // Iterator.
 
-	for (i = 0; list[i].s; i++) {
+	for (int i = 0; list[i].s; ++i) {
 		if (!strcmp(s, list[i].s)) {
 			return list[i].e;
 		}
@@ -542,9 +403,8 @@ static EnumUnit Str2EnumUnit(lua_State *l, const char *s)
 		{"Goal", UnitRefGoal},
 		{0, UnitRefItSelf}
 	}; // List of possible values.
-	int i; // Iterator.
 
-	for (i = 0; list[i].s; i++) {
+	for (int i = 0; list[i].s; ++i) {
 		if (!strcmp(s, list[i].s)) {
 			return list[i].e;
 		}
@@ -560,14 +420,12 @@ static EnumUnit Str2EnumUnit(lua_State *l, const char *s)
 */
 static ConditionPanel *ParseConditionPanel(lua_State *l)
 {
-	ConditionPanel *condition; // Condition parsed
-	const char *key;           // key of lua table.
-
 	Assert(lua_istable(l, -1));
 
-	condition = new ConditionPanel;
+	ConditionPanel *condition = new ConditionPanel;
+
 	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-		key = LuaToString(l, -2);
+		const char *key = LuaToString(l, -2);
 		if (!strcmp(key, "ShowOnlySelected")) {
 			condition->ShowOnlySelected = LuaToBoolean(l, -1);
 		} else if (!strcmp(key, "HideNeutral")) {
@@ -603,235 +461,245 @@ static ConditionPanel *ParseConditionPanel(lua_State *l)
 	return condition;
 }
 
+/* virtual */ void CContentTypeText::Parse(lua_State *l)
+{
+	Assert(lua_istable(l, -1) || lua_isstring(l, -1));
+
+	if (lua_isstring(l, -1)) {
+		this->Text = CclParseStringDesc(l);
+		lua_pushnil(l); // ParseStringDesc eat token
+	} else {
+		for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+			const char *key = LuaToString(l, -2);
+			if (!strcmp(key, "Text")) {
+				this->Text = CclParseStringDesc(l);
+				lua_pushnil(l); // ParseStringDesc eat token
+			} else if (!strcmp(key, "Font")) {
+				this->Font = CFont::Get(LuaToString(l, -1));
+			} else if (!strcmp(key, "Centered")) {
+				this->Centered = LuaToBoolean(l, -1);
+			} else if (!strcmp(key, "Variable")) {
+				const char *const name = LuaToString(l, -1);
+				this->Index = UnitTypeVar.VariableNameLookup[name];
+				if (this->Index == -1) {
+					LuaError(l, "unknown variable '%s'" _C_ LuaToString(l, -1));
+				}
+			} else if (!strcmp(key, "Component")) {
+				this->Component = Str2EnumVariable(l, LuaToString(l, -1));
+			} else if (!strcmp(key, "Stat")) {
+				this->Stat = LuaToBoolean(l, -1);
+			} else if (!strcmp(key, "ShowName")) {
+				this->ShowName = LuaToBoolean(l, -1);
+			} else {
+				LuaError(l, "'%s' invalid for method 'Text' in DefinePanels" _C_ key);
+			}
+		}
+	}
+}
+
+/* virtual */ void CContentTypeFormattedText::Parse(lua_State *l)
+{
+	Assert(lua_istable(l, -1));
+
+	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+		const char *key = LuaToString(l, -2);
+		if (!strcmp(key, "Format")) {
+			this->Format = LuaToString(l, -1);
+		} else if (!strcmp(key, "Font")) {
+			this->Font = CFont::Get(LuaToString(l, -1));
+		} else if (!strcmp(key, "Variable")) {
+			const char *const name = LuaToString(l, -1);
+			this->Index = UnitTypeVar.VariableNameLookup[name];
+			if (this->Index == -1) {
+				LuaError(l, "unknown variable '%s'" _C_ name);
+			}
+		} else if (!strcmp(key, "Component")) {
+			this->Component = Str2EnumVariable(l, LuaToString(l, -1));
+		} else if (!strcmp(key, "Centered")) {
+			this->Centered = LuaToBoolean(l, -1);
+		} else {
+			LuaError(l, "'%s' invalid for method 'FormattedText' in DefinePanels" _C_ key);
+		}
+	}
+}
+
+/* virtual */ void CContentTypeFormattedText2::Parse(lua_State *l)
+{
+	Assert(lua_istable(l, -1));
+	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+		const char *key = LuaToString(l, -2);
+		if (!strcmp(key, "Format")) {
+			this->Format = LuaToString(l, -1);
+		} else if (!strcmp(key, "Font")) {
+			this->Font = CFont::Get(LuaToString(l, -1));
+		} else if (!strcmp(key, "Variable")) {
+			const char *const name = LuaToString(l, -1);
+			this->Index1 = UnitTypeVar.VariableNameLookup[name];
+			this->Index2 = this->Index1;
+			if (this->Index1 == -1) {
+				LuaError(l, "unknown variable '%s'" _C_ name);
+			}
+		} else if (!strcmp(key, "Component")) {
+			this->Component1 = Str2EnumVariable(l, LuaToString(l, -1));
+			this->Component2 = Str2EnumVariable(l, LuaToString(l, -1));
+		} else if (!strcmp(key, "Variable1")) {
+			const char *const name = LuaToString(l, -1);
+			this->Index1 = UnitTypeVar.VariableNameLookup[name];
+			if (this->Index1 == -1) {
+				LuaError(l, "unknown variable '%s'" _C_ name);
+			}
+		} else if (!strcmp(key, "Component1")) {
+			this->Component1 = Str2EnumVariable(l, LuaToString(l, -1));
+		} else if (!strcmp(key, "Variable2")) {
+			const char *const name = LuaToString(l, -1);
+			this->Index2 = UnitTypeVar.VariableNameLookup[name];
+			if (this->Index2 == -1) {
+				LuaError(l, "unknown variable '%s'" _C_ LuaToString(l, -1));
+			}
+		} else if (!strcmp(key, "Component2")) {
+			this->Component2 = Str2EnumVariable(l, LuaToString(l, -1));
+		} else if (!strcmp(key, "Centered")) {
+			this->Centered = LuaToBoolean(l, -1);
+		} else {
+			LuaError(l, "'%s' invalid for method 'FormattedText2' in DefinePanels" _C_ key);
+		}
+	}
+
+}
+
+/* virtual */ void CContentTypeIcon::Parse(lua_State *l)
+{
+	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+		const char *key = LuaToString(l, -2);
+		if (!strcmp(key, "Unit")) {
+			this->UnitRef = Str2EnumUnit(l, LuaToString(l, -1));
+		} else {
+			LuaError(l, "'%s' invalid for method 'Icon' in DefinePanels" _C_ key);
+		}
+	}
+}
+
+/* virtual */ void CContentTypeLifeBar::Parse(lua_State *l)
+{
+	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+		const char *key = LuaToString(l, -2);
+		if (!strcmp(key, "Variable")) {
+			const char *const name = LuaToString(l, -1);
+			this->Index = UnitTypeVar.VariableNameLookup[name];
+			if (this->Index == -1) {
+				LuaError(l, "unknown variable '%s'" _C_ name);
+			}
+		} else if (!strcmp(key, "Height")) {
+			this->Height = LuaToNumber(l, -1);
+		} else if (!strcmp(key, "Width")) {
+			this->Width = LuaToNumber(l, -1);
+		} else {
+			LuaError(l, "'%s' invalid for method 'LifeBar' in DefinePanels" _C_ key);
+		}
+	}
+	// Default value and checking errors.
+	if (this->Height <= 0) {
+		this->Height = 5; // Default value.
+	}
+	if (this->Width <= 0) {
+		this->Width = 50; // Default value.
+	}
+	if (this->Index == -1) {
+		LuaError(l, "variable undefined for LifeBar");
+	}
+}
+
+/* virtual */ void CContentTypeCompleteBar::Parse(lua_State *l)
+{
+	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+		const char *key = LuaToString(l, -2);
+
+		if (!strcmp(key, "Variable")) {
+			const char *const name = LuaToString(l, -1);
+			this->Index = UnitTypeVar.VariableNameLookup[name];
+			if (this->Index == -1) {
+				LuaError(l, "unknown variable '%s'" _C_ name);
+			}
+		} else if (!strcmp(key, "Height")) {
+			this->Height = LuaToNumber(l, -1);
+		} else if (!strcmp(key, "Width")) {
+			this->Width = LuaToNumber(l, -1);
+		} else if (!strcmp(key, "Border")) {
+			this->Border = LuaToBoolean(l, -1);
+		} else if (!strcmp(key, "Color")) {
+			//FIXME: need more general way
+			const char *const color = LuaToString(l, -1);
+			if (!strcmp(color, "red")) {
+				this->Color = 1;
+			} else if (!strcmp(color, "yellow")) {
+				this->Color = 2;
+			} else if (!strcmp(color, "green")) {
+				this->Color = 3;
+			} else if (!strcmp(color, "gray")) {
+				this->Color = 4;
+			} else if (!strcmp(color, "white")) {
+				this->Color = 5;
+			} else if (!strcmp(color, "orange")) {
+				this->Color = 6;
+			} else if (!strcmp(color, "blue")) {
+				this->Color = 7;
+			} else if (!strcmp(color, "dark-green")) {
+				this->Color = 8;
+			} else if (!strcmp(color, "black")) {
+				this->Color = 9;
+			} else {
+				LuaError(l, "incorrect color: '%s' " _C_ color);
+			}
+		} else {
+			LuaError(l, "'%s' invalid for method 'CompleteBar' in DefinePanels" _C_ key);
+		}
+	}
+	// Default value and checking errors.
+	if (this->Height <= 0) {
+		this->Height = 5; // Default value.
+	}
+	if (this->Width <= 0) {
+		this->Width = 50; // Default value.
+	}
+	if (this->Index == -1) {
+		LuaError(l, "variable undefined for CompleteBar");
+	}
+}
+
 static CContentType *CclParseContent(lua_State *l)
 {
-	CContentType *content;
-	const char *key;
+	Assert(lua_istable(l, -1));
+
+	CContentType *content = NULL;
+	ConditionPanel *condition = NULL;
 	int posX = 0;
 	int posY = 0;
-	ConditionPanel *condition;
 
-	Assert(lua_istable(l, -1));
-	content = NULL;
-	condition = NULL;
 	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-		key = LuaToString(l, -2);
+		const char *key = LuaToString(l, -2);
 		if (!strcmp(key, "Pos")) {
-			Assert(lua_istable(l, -1));
-			lua_rawgeti(l, -1, 1); // X
-			lua_rawgeti(l, -2, 2); // Y
-			posX = LuaToNumber(l, -2);
-			posY = LuaToNumber(l, -1);
-			lua_pop(l, 2); // Pop X and Y
+			CclGetPos(l, &posX, &posY);
 		} else if (!strcmp(key, "More")) {
 			Assert(lua_istable(l, -1));
 			lua_rawgeti(l, -1, 1); // Method name
 			lua_rawgeti(l, -2, 2); // Method data
 			key = LuaToString(l, -2);
 			if (!strcmp(key, "Text")) {
-				CContentTypeText *contenttext = new CContentTypeText;
-
-				Assert(lua_istable(l, -1) || lua_isstring(l, -1));
-				if (lua_isstring(l, -1)) {
-					contenttext->Text = CclParseStringDesc(l);
-					lua_pushnil(l); // ParseStringDesc eat token
-				} else {
-					for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-						key = LuaToString(l, -2);
-						if (!strcmp(key, "Text")) {
-							contenttext->Text = CclParseStringDesc(l);
-							lua_pushnil(l); // ParseStringDesc eat token
-						} else if (!strcmp(key, "Font")) {
-							contenttext->Font = CFont::Get(LuaToString(l, -1));
-						} else if (!strcmp(key, "Centered")) {
-							contenttext->Centered = LuaToBoolean(l, -1);
-						} else if (!strcmp(key, "Variable")) {
-							const char *const name = LuaToString(l, -1);
-							contenttext->Index = UnitTypeVar.VariableNameLookup[name];
-							if (contenttext->Index == -1) {
-								LuaError(l, "unknown variable '%s'" _C_ LuaToString(l, -1));
-							}
-						} else if (!strcmp(key, "Component")) {
-							contenttext->Component = Str2EnumVariable(l, LuaToString(l, -1));
-						} else if (!strcmp(key, "Stat")) {
-							contenttext->Stat = LuaToBoolean(l, -1);
-						} else if (!strcmp(key, "ShowName")) {
-							contenttext->ShowName = LuaToBoolean(l, -1);
-						} else {
-							LuaError(l, "'%s' invalid for method 'Text' in DefinePanels" _C_ key);
-						}
-					}
-				}
-				content = contenttext;
+				content = new CContentTypeText;
 			} else if (!strcmp(key, "FormattedText")) {
-				CContentTypeFormattedText *contentformattedtext = new CContentTypeFormattedText;
-
-				Assert(lua_istable(l, -1));
-				for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-					key = LuaToString(l, -2);
-					if (!strcmp(key, "Format")) {
-						contentformattedtext->Format = LuaToString(l, -1);
-					} else if (!strcmp(key, "Font")) {
-						contentformattedtext->Font = CFont::Get(LuaToString(l, -1));
-					} else if (!strcmp(key, "Variable")) {
-						const char *const name = LuaToString(l, -1);
-						contentformattedtext->Index = UnitTypeVar.VariableNameLookup[name];
-						if (contentformattedtext->Index == -1) {
-							LuaError(l, "unknown variable '%s'" _C_ name);
-						}
-					} else if (!strcmp(key, "Component")) {
-						contentformattedtext->Component = Str2EnumVariable(l, LuaToString(l, -1));
-					} else if (!strcmp(key, "Centered")) {
-						contentformattedtext->Centered = LuaToBoolean(l, -1);
-					} else {
-						LuaError(l, "'%s' invalid for method 'FormattedText' in DefinePanels" _C_ key);
-					}
-				}
-				content = contentformattedtext;
+				content = new CContentTypeFormattedText;
 			} else if (!strcmp(key, "FormattedText2")) {
-				CContentTypeFormattedText2 *contentformattedtext2 = new CContentTypeFormattedText2;
-
-				Assert(lua_istable(l, -1));
-				for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-					key = LuaToString(l, -2);
-					if (!strcmp(key, "Format")) {
-						contentformattedtext2->Format = LuaToString(l, -1);
-					} else if (!strcmp(key, "Font")) {
-						contentformattedtext2->Font = CFont::Get(LuaToString(l, -1));
-					} else if (!strcmp(key, "Variable")) {
-						const char *const name = LuaToString(l, -1);
-						contentformattedtext2->Index1 = UnitTypeVar.VariableNameLookup[name];
-						contentformattedtext2->Index2 = contentformattedtext2->Index1;
-						if (contentformattedtext2->Index1 == -1) {
-							LuaError(l, "unknown variable '%s'" _C_ name);
-						}
-					} else if (!strcmp(key, "Component")) {
-						contentformattedtext2->Component1 = Str2EnumVariable(l, LuaToString(l, -1));
-						contentformattedtext2->Component2 = Str2EnumVariable(l, LuaToString(l, -1));
-					} else if (!strcmp(key, "Variable1")) {
-						const char *const name = LuaToString(l, -1);
-						contentformattedtext2->Index1 = UnitTypeVar.VariableNameLookup[name];
-						if (contentformattedtext2->Index1 == -1) {
-							LuaError(l, "unknown variable '%s'" _C_ name);
-						}
-					} else if (!strcmp(key, "Component1")) {
-						contentformattedtext2->Component1 = Str2EnumVariable(l, LuaToString(l, -1));
-					} else if (!strcmp(key, "Variable2")) {
-						const char *const name = LuaToString(l, -1);
-						contentformattedtext2->Index2 = UnitTypeVar.VariableNameLookup[name];
-						if (contentformattedtext2->Index2 == -1) {
-							LuaError(l, "unknown variable '%s'" _C_ LuaToString(l, -1));
-						}
-					} else if (!strcmp(key, "Component2")) {
-						contentformattedtext2->Component2 = Str2EnumVariable(l, LuaToString(l, -1));
-					} else if (!strcmp(key, "Centered")) {
-						contentformattedtext2->Centered = LuaToBoolean(l, -1);
-					} else {
-						LuaError(l, "'%s' invalid for method 'FormattedText2' in DefinePanels" _C_ key);
-					}
-				}
-				content = contentformattedtext2;
+				content = new CContentTypeFormattedText2;
 			} else if (!strcmp(key, "Icon")) {
-				CContentTypeIcon *contenticon = new CContentTypeIcon;
-
-				for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-					key = LuaToString(l, -2);
-					if (!strcmp(key, "Unit")) {
-						contenticon->UnitRef = Str2EnumUnit(l, LuaToString(l, -1));
-					} else {
-						LuaError(l, "'%s' invalid for method 'Icon' in DefinePanels" _C_ key);
-					}
-				}
-				content = contenticon;
+				content = new CContentTypeIcon;
 			} else if (!strcmp(key, "LifeBar")) {
-				CContentTypeLifeBar *contentlifebar = new CContentTypeLifeBar;
-
-				for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-					key = LuaToString(l, -2);
-					if (!strcmp(key, "Variable")) {
-						const char *const name = LuaToString(l, -1);
-						contentlifebar->Index = UnitTypeVar.VariableNameLookup[name];
-						if (contentlifebar->Index == -1) {
-							LuaError(l, "unknown variable '%s'" _C_ name);
-						}
-					} else if (!strcmp(key, "Height")) {
-						contentlifebar->Height = LuaToNumber(l, -1);
-					} else if (!strcmp(key, "Width")) {
-						contentlifebar->Width = LuaToNumber(l, -1);
-					} else {
-						LuaError(l, "'%s' invalid for method 'LifeBar' in DefinePanels" _C_ key);
-					}
-				}
-				// Default value and checking errors.
-				if (contentlifebar->Height <= 0) {
-					contentlifebar->Height = 5; // Default value.
-				}
-				if (contentlifebar->Width <= 0) {
-					contentlifebar->Width = 50; // Default value.
-				}
-				if (contentlifebar->Index == -1) {
-					LuaError(l, "variable undefined for LifeBar");
-				}
-				content = contentlifebar;
+				content = new CContentTypeLifeBar;
 			} else if (!strcmp(key, "CompleteBar")) {
-				CContentTypeCompleteBar *contenttypecompletebar = new CContentTypeCompleteBar;
-
-				for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-					key = LuaToString(l, -2);
-					if (!strcmp(key, "Variable")) {
-						const char *const name = LuaToString(l, -1);
-						contenttypecompletebar->Index = UnitTypeVar.VariableNameLookup[name];
-						if (contenttypecompletebar->Index == -1) {
-							LuaError(l, "unknown variable '%s'" _C_ name);
-						}
-					} else if (!strcmp(key, "Height")) {
-						contenttypecompletebar->Height = LuaToNumber(l, -1);
-					} else if (!strcmp(key, "Width")) {
-						contenttypecompletebar->Width = LuaToNumber(l, -1);
-					} else if (!strcmp(key, "Border")) {
-						contenttypecompletebar->Border = LuaToBoolean(l, -1);
-					} else if (!strcmp(key, "Color")) {
-						//FIXME: need more general way
-						const char *const color = LuaToString(l, -1);
-						if (!strcmp(color, "red")) {
-							contenttypecompletebar->Color = 1;
-						} else if (!strcmp(color, "yellow")) {
-							contenttypecompletebar->Color = 2;
-						} else if (!strcmp(color, "green")) {
-							contenttypecompletebar->Color = 3;
-						} else if (!strcmp(color, "gray")) {
-							contenttypecompletebar->Color = 4;
-						} else if (!strcmp(color, "white")) {
-							contenttypecompletebar->Color = 5;
-						} else if (!strcmp(color, "orange")) {
-							contenttypecompletebar->Color = 6;
-						} else if (!strcmp(color, "blue")) {
-							contenttypecompletebar->Color = 7;
-						} else if (!strcmp(color, "dark-green")) {
-							contenttypecompletebar->Color = 8;
-						} else if (!strcmp(color, "black")) {
-							contenttypecompletebar->Color = 9;
-						} else {
-							LuaError(l, "incorrect color: '%s' " _C_ color);
-						}
-					} else {
-						LuaError(l, "'%s' invalid for method 'CompleteBar' in DefinePanels" _C_ key);
-					}
-				}
-				// Default value and checking errors.
-				if (contenttypecompletebar->Height <= 0) {
-					contenttypecompletebar->Height = 5; // Default value.
-				}
-				if (contenttypecompletebar->Width <= 0) {
-					contenttypecompletebar->Width = 50; // Default value.
-				}
-				if (contenttypecompletebar->Index == -1) {
-					LuaError(l, "variable undefined for CompleteBar");
-				}
-				content = contenttypecompletebar;
+				content = new CContentTypeCompleteBar;
 			} else {
 				LuaError(l, "Invalid drawing method '%s' in DefinePanels" _C_ key);
 			}
+			content->Parse(l);
 			lua_pop(l, 2); // Pop Variable Name and Method
 		} else if (!strcmp(key, "Condition")) {
 			condition = ParseConditionPanel(l);
@@ -867,12 +735,7 @@ static int CclDefinePanelContents(lua_State *l)
 			if (!strcmp(key, "Ident")) {
 				infopanel->Name = LuaToString(l, -1);
 			} else if (!strcmp(key, "Pos")) {
-				Assert(lua_istable(l, -1));
-				lua_rawgeti(l, -1, 1); // X
-				lua_rawgeti(l, -2, 2); // Y
-				infopanel->PosX = LuaToNumber(l, -2);
-				infopanel->PosY = LuaToNumber(l, -1);
-				lua_pop(l, 2); // Pop X and Y
+				CclGetPos(l, &infopanel->PosX, &infopanel->PosY);
 			} else if (!strcmp(key, "DefaultFont")) {
 				infopanel->DefaultFont = CFont::Get(LuaToString(l, -1));
 			} else if (!strcmp(key, "Condition")) {
@@ -915,18 +778,65 @@ static int CclDefinePanelContents(lua_State *l)
 */
 static PopupConditionPanel *ParsePopupConditions(lua_State *l)
 {
-	PopupConditionPanel *condition; // Condition parsed
-	const char *key;				// key of lua table.
-
 	Assert(lua_istable(l, -1));
 
-	condition = new PopupConditionPanel;
+	PopupConditionPanel *condition = new PopupConditionPanel;
 	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-		key = LuaToString(l, -2);
+		const char *key = LuaToString(l, -2);
+
 		if (!strcmp(key, "HasHint")) {
 			condition->HasHint = LuaToBoolean(l, -1);
 		} else if (!strcmp(key, "HasDescription")) {
 			condition->HasDescription = LuaToBoolean(l, -1);
+		} else if (!strcmp(key, "HasDependencies")) {
+			condition->HasDependencies = LuaToBoolean(l, -1);
+		} else if (!strcmp(key, "ButtonValue")) {
+			condition->ButtonValue = LuaToString(l, -1);
+		} else if (!strcmp(key, "ButtonAction")) {
+			const char *value = LuaToString(l, -1);
+			if (!strcmp(value, "move")) {
+				condition->ButtonAction = ButtonMove;
+			} else if (!strcmp(value, "stop")) {
+				condition->ButtonAction = ButtonStop;
+			} else if (!strcmp(value, "attack")) {
+				condition->ButtonAction = ButtonAttack;
+			} else if (!strcmp(value, "repair")) {
+				condition->ButtonAction = ButtonRepair;
+			} else if (!strcmp(value, "harvest")) {
+				condition->ButtonAction = ButtonHarvest;
+			} else if (!strcmp(value, "button")) {
+				condition->ButtonAction = ButtonButton;
+			} else if (!strcmp(value, "build")) {
+				condition->ButtonAction = ButtonBuild;
+			} else if (!strcmp(value, "train-unit")) {
+				condition->ButtonAction = ButtonTrain;
+			} else if (!strcmp(value, "patrol")) {
+				condition->ButtonAction = ButtonPatrol;
+			} else if (!strcmp(value, "stand-ground")) {
+				condition->ButtonAction = ButtonStandGround;
+			} else if (!strcmp(value, "attack-ground")) {
+				condition->ButtonAction = ButtonAttackGround;
+			} else if (!strcmp(value, "return-goods")) {
+				condition->ButtonAction = ButtonReturn;
+			} else if (!strcmp(value, "cast-spell")) {
+				condition->ButtonAction = ButtonSpellCast;
+			} else if (!strcmp(value, "research")) {
+				condition->ButtonAction = ButtonResearch;
+			} else if (!strcmp(value, "upgrade-to")) {
+				condition->ButtonAction = ButtonUpgradeTo;
+			} else if (!strcmp(value, "unload")) {
+				condition->ButtonAction = ButtonUnload;
+			} else if (!strcmp(value, "cancel")) {
+				condition->ButtonAction = ButtonCancel;
+			} else if (!strcmp(value, "cancel-upgrade")) {
+				condition->ButtonAction = ButtonCancelUpgrade;
+			} else if (!strcmp(value, "cancel-train-unit")) {
+				condition->ButtonAction = ButtonCancelTrain;
+			} else if (!strcmp(value, "cancel-build")) {
+				condition->ButtonAction = ButtonCancelBuild;
+			} else {
+				LuaError(l, "Unsupported button action: %s" _C_ value);
+			}
 		} else {
 			int index = UnitTypeVar.BoolFlagNameLookup[key];
 			if (index != -1) {
@@ -954,31 +864,142 @@ static PopupConditionPanel *ParsePopupConditions(lua_State *l)
 	return condition;
 }
 
-static CPopupContentType *CclParsePopupContent(lua_State *l)
+/* virtual*/ void CPopupContentTypeButtonInfo::Parse(lua_State *l)
 {
-	CPopupContentType *content;
-	const char *key;
+	Assert(lua_istable(l, -1));
+
+	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+		const char *key = LuaToString(l, -2);
+		if (!strcmp(key, "InfoType")) {
+			std::string temp(LuaToString(l, -1));
+			if (temp == "Hint") {
+				this->InfoType = PopupButtonInfo_Hint;
+			} else if (temp == "Description") {
+				this->InfoType = PopupButtonInfo_Description;
+			} else if (temp == "Dependencies") {
+				this->InfoType = PopupButtonInfo_Dependencies;
+			}
+		} else if (!strcmp(key, "MaxWidth")) {
+			this->MaxWidth = LuaToNumber(l, -1);
+		} else if (!strcmp(key, "Font")) {
+			this->Font = CFont::Get(LuaToString(l, -1));
+		} else {
+			LuaError(l, "'%s' invalid for method 'Name' in DefinePopups" _C_ key);
+		}
+	}
+}
+
+/* virtual*/ void CPopupContentTypeText::Parse(lua_State *l)
+{
+	Assert(lua_istable(l, -1));
+
+	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+		const char *key = LuaToString(l, -2);
+		if (!strcmp(key, "Text")) {
+			this->Text = LuaToString(l, -1);
+		} else if (!strcmp(key, "MaxWidth")) {
+			this->MaxWidth = LuaToNumber(l, -1);
+		} else if (!strcmp(key, "Font")) {
+			this->Font = CFont::Get(LuaToString(l, -1));
+		} else {
+			LuaError(l, "'%s' invalid for method 'Text' in DefinePopups" _C_ key);
+		}
+	}
+}
+
+/* virtual*/ void CPopupContentTypeCosts::Parse(lua_State *l)
+{
+	Assert(lua_istable(l, -1) || lua_isnil(l, -1));
+
+	if (!lua_isnil(l, -1)) {
+		for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+			const char *key = LuaToString(l, -2);
+			if (!strcmp(key, "Font")) {
+				this->Font = CFont::Get(LuaToString(l, -1));
+			} else if (!strcmp(key, "Centered")) {
+				this->Centered = LuaToBoolean(l, -1);
+			} else {
+				LuaError(l, "'%s' invalid for method 'Costs' in DefinePopups" _C_ key);
+			}
+		}
+	}
+}
+
+/* virtual*/ void CPopupContentTypeLine::Parse(lua_State *l)
+{
+	Assert(lua_istable(l, -1) || lua_isnil(l, -1));
+
+	if (!lua_isnil(l, -1)) {
+		for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+			const char *key = LuaToString(l, -2);
+			if (!strcmp(key, "Width")) {
+				this->Width = LuaToNumber(l, -1);
+			} else if (!strcmp(key, "Height")) {
+				this->Height = LuaToNumber(l, -1);
+			} else if (!strcmp(key, "Color")) {
+				this->Color = LuaToNumber(l, -1);
+			} else {
+				LuaError(l, "'%s' invalid for method 'Costs' in DefinePopups" _C_ key);
+			}
+		}
+	}
+}
+
+/* virtual*/ void CPopupContentTypeVariable::Parse(lua_State *l)
+{
+	Assert(lua_istable(l, -1) || lua_isstring(l, -1));
+
+	if (lua_isstring(l, -1)) {
+		this->Text = CclParseStringDesc(l);
+		lua_pushnil(l); // ParseStringDesc eat token
+	} else {
+		for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
+			const char *key = LuaToString(l, -2);
+			if (!strcmp(key, "Text")) {
+				this->Text = CclParseStringDesc(l);
+				lua_pushnil(l); // ParseStringDesc eat token
+			} else if (!strcmp(key, "Font")) {
+				this->Font = CFont::Get(LuaToString(l, -1));
+			} else if (!strcmp(key, "Centered")) {
+				this->Centered = LuaToBoolean(l, -1);
+			} else if (!strcmp(key, "Variable")) {
+				const char *const name = LuaToString(l, -1);
+				this->Index = UnitTypeVar.VariableNameLookup[name];
+				if (this->Index == -1) {
+					LuaError(l, "unknown variable '%s'" _C_ LuaToString(l, -1));
+				}
+			} else {
+				LuaError(l, "'%s' invalid for method 'Text' in DefinePopups" _C_ key);
+			}
+		}
+	}
+}
+
+/* static */ CPopupContentType *CPopupContentType::ParsePopupContent(lua_State *l)
+{
+	Assert(lua_istable(l, -1));
+
 	bool wrap = true;
 	int marginX = MARGIN_X;
 	int marginY = MARGIN_Y;
 	int minWidth = 0;
 	int minHeight = 0;
-	PopupConditionPanel *condition;
+	std::string textColor("white");
+	std::string highColor("red");
+	CPopupContentType *content = NULL;
+	PopupConditionPanel *condition = NULL;
 
-	Assert(lua_istable(l, -1));
-	content = NULL;
-	condition = NULL;
 	for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-		key = LuaToString(l, -2);
+		const char *key = LuaToString(l, -2);
+
 		if (!strcmp(key, "Wrap")) {
 			wrap = LuaToBoolean(l, -1);
+		} else if (!strcmp(key, "TextColor")) {
+			textColor = LuaToString(l, -1);
+		} else if (!strcmp(key, "HighlightColor")) {
+			highColor = LuaToString(l, -1);
 		} else if (!strcmp(key, "Margin")) {
-			Assert(lua_istable(l, -1));
-			lua_rawgeti(l, -1, 1); // X
-			lua_rawgeti(l, -2, 2); // Y
-			marginX = LuaToNumber(l, -2);
-			marginY = LuaToNumber(l, -1);
-			lua_pop(l, 2); // Pop X and Y
+			CclGetPos(l, &marginX, &marginY);
 		} else if (!strcmp(key, "MinWidth")) {
 			minWidth = LuaToNumber(l, -1);
 		} else if (!strcmp(key, "MinHeight")) {
@@ -989,97 +1010,19 @@ static CPopupContentType *CclParsePopupContent(lua_State *l)
 			lua_rawgeti(l, -2, 2); // Method data
 			key = LuaToString(l, -2);
 			if (!strcmp(key, "ButtonInfo")) {
-				CPopupContentTypeButtonInfo *contentbtype = new CPopupContentTypeButtonInfo;
-
-				Assert(lua_istable(l, -1));
-				for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-					key = LuaToString(l, -2);
-					if (!strcmp(key, "InfoType")) {
-						std::string temp(LuaToString(l, -1));
-						if (temp == "Hint") {
-							contentbtype->InfoType = PopupButtonInfo_Hint;
-						} else if (temp == "Description") {
-							contentbtype->InfoType = PopupButtonInfo_Description;
-						}
-					} else if (!strcmp(key, "MaxWidth")) {
-						contentbtype->MaxWidth = LuaToNumber(l, -1);
-					} else if (!strcmp(key, "Font")) {
-						contentbtype->Font = CFont::Get(LuaToString(l, -1));
-					} else if (!strcmp(key, "Centered")) {
-						contentbtype->Centered = LuaToBoolean(l, -1);
-					} else {
-						LuaError(l, "'%s' invalid for method 'Name' in DefinePopups" _C_ key);
-					}
-				}
-				content = contentbtype;
+				content = new CPopupContentTypeButtonInfo;
+			} else if (!strcmp(key, "Text")) {
+				content = new CPopupContentTypeText;
 			} else if (!strcmp(key, "Costs")) {
-				CPopupContentTypeCosts *contentcosts = new CPopupContentTypeCosts;
-
-				Assert(lua_istable(l, -1) || lua_isnil(l, -1));
-				if (!lua_isnil(l, -1)) {
-					for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-						key = LuaToString(l, -2);
-						if (!strcmp(key, "Font")) {
-							contentcosts->Font = CFont::Get(LuaToString(l, -1));
-						} else if (!strcmp(key, "Centered")) {
-							contentcosts->Centered = LuaToBoolean(l, -1);
-						} else {
-							LuaError(l, "'%s' invalid for method 'Costs' in DefinePopups" _C_ key);
-						}
-					}
-				}
-				content = contentcosts;
+				content = new CPopupContentTypeCosts;
 			} else if (!strcmp(key, "Line")) {
-				CPopupContentTypeLine *contentline = new CPopupContentTypeLine;
-
-				Assert(lua_istable(l, -1) || lua_isnil(l, -1));
-				if (!lua_isnil(l, -1)) {
-					for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-						key = LuaToString(l, -2);
-						if (!strcmp(key, "Width")) {
-							contentline->Width = LuaToNumber(l, -1);
-						} else if (!strcmp(key, "Height")) {
-							contentline->Height = LuaToNumber(l, -1);
-						} else if (!strcmp(key, "Color")) {
-							contentline->Color = LuaToNumber(l, -1);
-						} else {
-							LuaError(l, "'%s' invalid for method 'Costs' in DefinePopups" _C_ key);
-						}
-					}
-				}
-				content = contentline;
+				content = new CPopupContentTypeLine;
 			} else if (!strcmp(key, "Variable")) {
-				CPopupContentTypeVariable *contenttext = new CPopupContentTypeVariable;
-
-				Assert(lua_istable(l, -1) || lua_isstring(l, -1));
-				if (lua_isstring(l, -1)) {
-					contenttext->Text = CclParseStringDesc(l);
-					lua_pushnil(l); // ParseStringDesc eat token
-				} else {
-					for (lua_pushnil(l); lua_next(l, -2); lua_pop(l, 1)) {
-						key = LuaToString(l, -2);
-						if (!strcmp(key, "Text")) {
-							contenttext->Text = CclParseStringDesc(l);
-							lua_pushnil(l); // ParseStringDesc eat token
-						} else if (!strcmp(key, "Font")) {
-							contenttext->Font = CFont::Get(LuaToString(l, -1));
-						} else if (!strcmp(key, "Centered")) {
-							contenttext->Centered = LuaToBoolean(l, -1);
-						} else if (!strcmp(key, "Variable")) {
-							const char *const name = LuaToString(l, -1);
-							contenttext->Index = UnitTypeVar.VariableNameLookup[name];
-							if (contenttext->Index == -1) {
-								LuaError(l, "unknown variable '%s'" _C_ LuaToString(l, -1));
-							}
-						} else {
-							LuaError(l, "'%s' invalid for method 'Text' in DefinePopups" _C_ key);
-						}
-					}
-				}
-				content = contenttext;
+				content = new CPopupContentTypeVariable;
 			} else {
 				LuaError(l, "Invalid drawing method '%s' in DefinePopups" _C_ key);
 			}
+			content->Parse(l);
 			lua_pop(l, 2); // Pop Variable Name and Method
 		} else if (!strcmp(key, "Condition")) {
 			condition = ParsePopupConditions(l);
@@ -1090,9 +1033,11 @@ static CPopupContentType *CclParsePopupContent(lua_State *l)
 	content->Wrap = wrap;
 	content->MarginX = marginX;
 	content->MarginY = marginY;
-	content->MinWidth = minWidth;
-	content->MinHeight = minHeight;
+	content->minSize.x = minWidth;
+	content->minSize.y = minHeight;
 	content->Condition = condition;
+	content->TextColor = textColor;
+	content->HighlightColor = highColor;
 	return content;
 }
 
@@ -1121,12 +1066,7 @@ static int CclDefinePopup(lua_State *l)
 		} else if (!strcmp(key, "BorderColor")) {
 			popup->BorderColor = LuaToNumber(l, -1);
 		} else if (!strcmp(key, "Margin")) {
-			Assert(lua_istable(l, -1));
-			lua_rawgeti(l, -1, 1); // X
-			lua_rawgeti(l, -2, 2); // Y
-			popup->MarginX = LuaToNumber(l, -2);
-			popup->MarginY = LuaToNumber(l, -1);
-			lua_pop(l, 2); // Pop X and Y
+			CclGetPos(l, &popup->MarginX, &popup->MarginY);
 		} else if (!strcmp(key, "MinWidth")) {
 			popup->MinWidth = LuaToNumber(l, -1);
 		} else if (!strcmp(key, "MinHeight")) {
@@ -1135,7 +1075,7 @@ static int CclDefinePopup(lua_State *l)
 			Assert(lua_istable(l, -1));
 			for (size_t j = 0; j < lua_rawlen(l, -1); j++, lua_pop(l, 1)) {
 				lua_rawgeti(l, -1, j + 1);
-				popup->Contents.push_back(CclParsePopupContent(l));
+				popup->Contents.push_back(CPopupContentType::ParsePopupContent(l));
 			}
 		} else {
 			LuaError(l, "'%s' invalid for DefinePopups" _C_ key);
@@ -1160,18 +1100,14 @@ static int CclDefinePopup(lua_State *l)
 */
 static int CclDefineViewports(lua_State *l)
 {
-	const char *value;
-	int i;
-	int args;
-	int slot;
+	int i = 0;
+	const int args = lua_gettop(l);
 
-	i = 0;
-	args = lua_gettop(l);
 	for (int j = 0; j < args; ++j) {
-		value = LuaToString(l, j + 1);
+		const char *value = LuaToString(l, j + 1);
 		++j;
 		if (!strcmp(value, "mode")) {
-			UI.ViewportMode = (ViewportModeType)(int)LuaToNumber(l, j + 1);
+			UI.ViewportMode = (ViewportModeType)LuaToNumber(l, j + 1);
 		} else if (!strcmp(value, "viewport")) {
 			if (!lua_istable(l, j + 1) && lua_rawlen(l, j + 1) != 3) {
 				LuaError(l, "incorrect argument");
@@ -1183,9 +1119,9 @@ static int CclDefineViewports(lua_State *l)
 			UI.Viewports[i].MapPos.y = LuaToNumber(l, -1);
 			lua_pop(l, 1);
 			lua_rawgeti(l, j + 1, 3);
-			slot = (int)LuaToNumber(l, -1);
+			const int slot = LuaToNumber(l, -1);
 			if (slot != -1) {
-				UI.Viewports[i].Unit = UnitSlots[slot];
+				UI.Viewports[i].Unit = &UnitManager.GetSlotUnit(slot);
 			}
 			lua_pop(l, 1);
 			++i;
@@ -1194,7 +1130,6 @@ static int CclDefineViewports(lua_State *l)
 		}
 	}
 	UI.NumViewports = i;
-
 	return 0;
 }
 
@@ -1254,32 +1189,20 @@ ButtonStyle *FindButtonStyle(const std::string &style)
 */
 static void ParseButtonStyleProperties(lua_State *l, ButtonStyleProperties *p)
 {
-	const char *value;
-	std::string file;
-	int w;
-	int h;
-
 	if (!lua_istable(l, -1)) {
 		LuaError(l, "incorrect argument");
 	}
-
-	w = h = 0;
+	std::string file;
+	int w = 0;
+	int h = 0;
 
 	lua_pushnil(l);
 	while (lua_next(l, -2)) {
-		value = LuaToString(l, -2);
+		const char *value = LuaToString(l, -2);
 		if (!strcmp(value, "File")) {
 			file = LuaToString(l, -1);
 		} else if (!strcmp(value, "Size")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			w = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			h = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &w, &h);
 		} else if (!strcmp(value, "Frame")) {
 			p->Frame = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Border")) {
@@ -1290,18 +1213,7 @@ static void ParseButtonStyleProperties(lua_State *l, ButtonStyleProperties *p)
 			while (lua_next(l, -2)) {
 				value = LuaToString(l, -2);
 				if (!strcmp(value, "Color")) {
-					if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 3) {
-						LuaError(l, "incorrect argument");
-					}
-					lua_rawgeti(l, -1, 1);
-					p->BorderColorRGB.r = LuaToNumber(l, -1);
-					lua_pop(l, 1);
-					lua_rawgeti(l, -1, 2);
-					p->BorderColorRGB.g = LuaToNumber(l, -1);
-					lua_pop(l, 1);
-					lua_rawgeti(l, -1, 3);
-					p->BorderColorRGB.b = LuaToNumber(l, -1);
-					lua_pop(l, 1);
+					p->BorderColorRGB.Parse(l);
 				} else if (!strcmp(value, "Size")) {
 					p->BorderSize = LuaToNumber(l, -1);
 				} else {
@@ -1310,15 +1222,7 @@ static void ParseButtonStyleProperties(lua_State *l, ButtonStyleProperties *p)
 				lua_pop(l, 1);
 			}
 		} else if (!strcmp(value, "TextPos")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			p->TextX = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			p->TextY = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &p->TextPos.x, &p->TextPos.y);
 		} else if (!strcmp(value, "TextAlign")) {
 			value = LuaToString(l, -1);
 			if (!strcmp(value, "Center")) {
@@ -1352,36 +1256,24 @@ static void ParseButtonStyleProperties(lua_State *l, ButtonStyleProperties *p)
 */
 static int CclDefineButtonStyle(lua_State *l)
 {
-	const char *style;
-	const char *value;
-	ButtonStyle *b;
-
 	LuaCheckArgs(l, 2);
 	if (!lua_istable(l, 2)) {
 		LuaError(l, "incorrect argument");
 	}
-
-	style = LuaToString(l, 1);
-	b = ButtonStyleHash[style];
+	const char *style = LuaToString(l, 1);
+	ButtonStyle *&b = ButtonStyleHash[style];
 	if (!b) {
-		b = ButtonStyleHash[style] = new ButtonStyle;
+		b = new ButtonStyle;
 		// Set to bogus value to see if it was set later
-		b->Default.TextX = b->Hover.TextX = b->Clicked.TextX = 0xFFFFFF;
+		b->Default.TextPos.x = b->Hover.TextPos.x = b->Clicked.TextPos.x = 0xFFFFFF;
 	}
 
 	lua_pushnil(l);
 	while (lua_next(l, 2)) {
-		value = LuaToString(l, -2);
+		const char *value = LuaToString(l, -2);
+
 		if (!strcmp(value, "Size")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			b->Width = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			b->Height = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &b->Width, &b->Height);
 		} else if (!strcmp(value, "Font")) {
 			b->Font = CFont::Get(LuaToString(l, -1));
 		} else if (!strcmp(value, "TextNormalColor")) {
@@ -1389,15 +1281,7 @@ static int CclDefineButtonStyle(lua_State *l)
 		} else if (!strcmp(value, "TextReverseColor")) {
 			b->TextReverseColor = LuaToString(l, -1);
 		} else if (!strcmp(value, "TextPos")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			b->TextX = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			b->TextY = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &b->TextX, &b->TextY);
 		} else if (!strcmp(value, "TextAlign")) {
 			value = LuaToString(l, -1);
 			if (!strcmp(value, "Center")) {
@@ -1421,17 +1305,17 @@ static int CclDefineButtonStyle(lua_State *l)
 		lua_pop(l, 1);
 	}
 
-	if (b->Default.TextX == 0xFFFFFF) {
-		b->Default.TextX = b->TextX;
-		b->Default.TextY = b->TextY;
+	if (b->Default.TextPos.x == 0xFFFFFF) {
+		b->Default.TextPos.x = b->TextX;
+		b->Default.TextPos.y = b->TextY;
 	}
-	if (b->Hover.TextX == 0xFFFFFF) {
-		b->Hover.TextX = b->TextX;
-		b->Hover.TextY = b->TextY;
+	if (b->Hover.TextPos.x == 0xFFFFFF) {
+		b->Hover.TextPos.x = b->TextX;
+		b->Hover.TextPos.y = b->TextY;
 	}
-	if (b->Clicked.TextX == 0xFFFFFF) {
-		b->Clicked.TextX = b->TextX;
-		b->Clicked.TextY = b->TextY;
+	if (b->Clicked.TextPos.x == 0xFFFFFF) {
+		b->Clicked.TextPos.x = b->TextX;
+		b->Clicked.TextPos.y = b->TextY;
 	}
 
 	if (b->Default.TextAlign == TextAlignUndefined) {
@@ -1443,7 +1327,6 @@ static int CclDefineButtonStyle(lua_State *l)
 	if (b->Clicked.TextAlign == TextAlignUndefined) {
 		b->Clicked.TextAlign = b->TextAlign;
 	}
-
 	return 0;
 }
 
@@ -1486,26 +1369,24 @@ void CallHandler(unsigned int handle, int value)
 */
 static int CclDefineButton(lua_State *l)
 {
-	char buf[64];
-	const char *value;
-	const char *s2;
-	ButtonAction ba;
-
 	LuaCheckArgs(l, 1);
 	if (!lua_istable(l, 1)) {
 		LuaError(l, "incorrect argument");
 	}
+	ButtonAction ba;
 
 	//
 	// Parse the arguments
 	//
 	lua_pushnil(l);
 	while (lua_next(l, 1)) {
-		value = LuaToString(l, -2);
+		const char *value = LuaToString(l, -2);
 		if (!strcmp(value, "Pos")) {
 			ba.Pos = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Level")) {
 			ba.Level = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "AlwaysShow")) {
+			ba.AlwaysShow = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "Icon")) {
 			ba.Icon.Name = LuaToString(l, -1);
 		} else if (!strcmp(value, "Action")) {
@@ -1557,6 +1438,9 @@ static int CclDefineButton(lua_State *l)
 			if (!lua_isnumber(l, -1) && !lua_isstring(l, -1)) {
 				LuaError(l, "incorrect argument");
 			}
+			char buf[64];
+			const char *s2;
+
 			if (lua_isnumber(l, -1)) {
 				snprintf(buf, sizeof(buf), "%ld", (long int)lua_tonumber(l, -1));
 				s2 = buf;
@@ -1572,6 +1456,8 @@ static int CclDefineButton(lua_State *l)
 				ba.Allowed = ButtonCheckFalse;
 			} else if (!strcmp(value, "check-upgrade")) {
 				ba.Allowed = ButtonCheckUpgrade;
+			} else if (!strcmp(value, "check-unit-variable")) {
+				ba.Allowed = ButtonCheckUnitVariable;
 			} else if (!strcmp(value, "check-units-or")) {
 				ba.Allowed = ButtonCheckUnitsOr;
 			} else if (!strcmp(value, "check-units-and")) {
@@ -1604,7 +1490,7 @@ static int CclDefineButton(lua_State *l)
 
 			for (unsigned int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
-				s2 = LuaToString(l, -1);
+				const char *s2 = LuaToString(l, -1);
 				lua_pop(l, 1);
 				allowstr += s2;
 				if (k != subargs - 1) {
@@ -1633,7 +1519,7 @@ static int CclDefineButton(lua_State *l)
 			const unsigned subargs = lua_rawlen(l, -1);
 			for (unsigned int k = 0; k < subargs; ++k) {
 				lua_rawgeti(l, -1, k + 1);
-				s2 = LuaToString(l, -1);
+				const char *s2 = LuaToString(l, -1);
 				lua_pop(l, 1);
 				umask += s2;
 				umask += ",";
@@ -1649,7 +1535,7 @@ static int CclDefineButton(lua_State *l)
 	}
 	AddButton(ba.Pos, ba.Level, ba.Icon.Name, ba.Action, ba.ValueStr,
 			  ba.Allowed, ba.AllowStr, /*ba.Key,*/ ba.Hint, ba.Description, ba.CommentSound.Name,
-			  ba.ButtonCursor, ba.UnitMask, ba.Popup);
+			  ba.ButtonCursor, ba.UnitMask, ba.Popup, ba.AlwaysShow);
 	return 0;
 }
 
@@ -1684,11 +1570,9 @@ void SelectedUnitChanged()
 */
 static int CclSetSelectionStyle(lua_State *l)
 {
-	const char *style;
-
 	LuaCheckArgs(l, 1);
 
-	style = LuaToString(l, 1);
+	const char *style = LuaToString(l, 1);
 	if (!strcmp(style, "rectangle")) {
 		DrawSelection = DrawSelectionRectangle;
 	} else if (!strcmp(style, "alpha-rectangle")) {
@@ -1702,7 +1586,6 @@ static int CclSetSelectionStyle(lua_State *l)
 	} else {
 		LuaError(l, "Unsupported selection style");
 	}
-
 	return 0;
 }
 
@@ -1726,10 +1609,7 @@ static int CclAddMessage(lua_State *l)
 static int CclSetGroupKeys(lua_State *l)
 {
 	LuaCheckArgs(l, 1);
-	if (UiGroupKeys != DefaultGroupKeys) {
-		delete[] UiGroupKeys;
-	}
-	UiGroupKeys = new_strdup(LuaToString(l, 1));
+	UiGroupKeys = LuaToString(l, 1);
 	return 0;
 }
 
@@ -1769,6 +1649,7 @@ static int CclDefineMapSetup(lua_State *l)
 */
 void UserInterfaceCclRegister()
 {
+	CursorCclRegister();
 	lua_register(Lua, "AddMessage", CclAddMessage);
 
 	lua_register(Lua, "SetMouseScrollSpeed", CclSetMouseScrollSpeed);
@@ -1790,8 +1671,6 @@ void UserInterfaceCclRegister()
 
 	lua_register(Lua, "SetTitleScreens", CclSetTitleScreens);
 
-	lua_register(Lua, "DefineCursor", CclDefineCursor);
-	lua_register(Lua, "SetGameCursor", CclSetGameCursor);
 	lua_register(Lua, "DefinePanelContents", CclDefinePanelContents);
 	lua_register(Lua, "DefinePopup", CclDefinePopup);
 	lua_register(Lua, "DefineViewports", CclDefineViewports);

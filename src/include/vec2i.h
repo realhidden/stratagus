@@ -36,6 +36,9 @@ template <typename T>
 class Vec2T
 {
 public:
+	Vec2T() : x(0), y(0) {}
+	Vec2T(T x, T y) : x(x), y(y) {}
+public:
 	T x;
 	T y;
 };
@@ -128,6 +131,20 @@ inline Vec2T<T> operator / (const Vec2T<T> &lhs, int rhs)
 
 	res /= rhs;
 	return res;
+}
+
+template <typename T>
+inline int SquareDistance(const Vec2T<T> &pos1, const Vec2T<T> &pos2)
+{
+	const Vec2T<T> diff = pos2 - pos1;
+
+	return diff.x * diff.x + diff.y * diff.y;
+}
+
+template <typename T>
+inline int Distance(const Vec2T<T> &pos1, const Vec2T<T> &pos2)
+{
+	return isqrt(SquareDistance(pos1, pos2));
 }
 
 typedef Vec2T<short int> Vec2i;

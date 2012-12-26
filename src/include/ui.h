@@ -39,15 +39,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <vector>
-#include <string>
-#include <map>
-
-#include "SDL.h"
-
-#ifndef __UPGRADE_STRUCTS_H__
-#include "upgrade_structs.h"
-#endif
 #ifndef __CURSOR_H__
 #include "cursor.h"
 #endif
@@ -61,7 +52,12 @@
 #include "minimap.h"
 #endif
 
+#include "color.h"
 #include "viewport.h"
+
+#include <vector>
+#include <string>
+#include <map>
 
 /*----------------------------------------------------------------------------
 --  Declarations
@@ -89,18 +85,16 @@ class ButtonStyleProperties
 public:
 	ButtonStyleProperties() : Sprite(NULL), Frame(0), BorderColor(0),
 		BorderSize(0), TextAlign(TextAlignUndefined),
-		TextX(0), TextY(0) {
-		BorderColorRGB.r = BorderColorRGB.g = BorderColorRGB.b = 0;
-	}
+		TextPos(0, 0)
+	{}
 
 	CGraphic *Sprite;
 	int Frame;
-	SDL_Color BorderColorRGB;
-	Uint32 BorderColor;
+	CColor BorderColorRGB;
+	IntColor BorderColor;
 	int BorderSize;
 	TextAlignment TextAlign;        /// Text alignment
-	int TextX;                      /// Text X location
-	int TextY;                      /// Text Y location
+	PixelPos TextPos;               /// Text location
 	std::string TextNormalColor;    /// Normal text color
 	std::string TextReverseColor;   /// Reverse text color
 };
@@ -213,6 +207,8 @@ public:
 	/// Tell how show the variable Index.
 	virtual void Draw(const CUnit &unit, CFont *defaultfont) const = 0;
 
+	virtual void Parse(lua_State *l) = 0;
+
 	int PosX;             /// X coordinate where to display.
 	int PosY;             /// Y coordinate where to display.
 
@@ -233,7 +229,9 @@ public:
 	}
 
 	virtual void Draw(const CUnit &unit, CFont *defaultfont) const;
+	virtual void Parse(lua_State *l);
 
+private:
 	StringDesc *Text;            /// Text to display.
 	CFont *Font;                 /// Font to use.
 	char Centered;               /// if true, center the display.
@@ -254,7 +252,9 @@ public:
 	virtual ~CContentTypeFormattedText() {}
 
 	virtual void Draw(const CUnit &unit, CFont *defaultfont) const;
+	virtual void Parse(lua_State *l);
 
+private:
 	std::string Format;          /// Text to display
 	CFont *Font;                 /// Font to use.
 	bool Centered;               /// if true, center the display.
@@ -273,7 +273,9 @@ public:
 	virtual ~CContentTypeFormattedText2() {}
 
 	virtual void Draw(const CUnit &unit, CFont *defaultfont) const;
+	virtual void Parse(lua_State *l);
 
+private:
 	std::string Format;          /// Text to display
 	CFont *Font;                 /// Font to use.
 	bool Centered;               /// if true, center the display.
@@ -290,7 +292,9 @@ class CContentTypeIcon : public CContentType
 {
 public:
 	virtual void Draw(const CUnit &unit, CFont *defaultfont) const;
+	virtual void Parse(lua_State *l);
 
+private:
 	EnumUnit UnitRef;           /// Which unit icon to display.(itself, container, ...)
 };
 
@@ -303,7 +307,9 @@ public:
 	CContentTypeLifeBar() : Index(-1), Width(0), Height(0) {}
 
 	virtual void Draw(const CUnit &unit, CFont *defaultfont) const;
+	virtual void Parse(lua_State *l);
 
+private:
 	int Index;           /// Index of the variable to show, -1 if not.
 	int Width;           /// Width of the bar.
 	int Height;          /// Height of the bar.
@@ -322,7 +328,9 @@ public:
 	CContentTypeCompleteBar() : Index(-1), Width(0), Height(0), Border(0), Color(0) {}
 
 	virtual void Draw(const CUnit &unit, CFont *defaultfont) const;
+	virtual void Parse(lua_State *l);
 
+private:
 	int Index;           /// Index of the variable to show, -1 if not.
 	int Width;           /// Width of the bar.
 	int Height;          /// Height of the bar.
@@ -404,22 +412,39 @@ public:
 class CButtonPanel
 {
 public:
-	CButtonPanel() : G(NULL), X(0), Y(0), ShowCommandKey(true) {
-		AutoCastBorderColorRGB.r = 0;
-		AutoCastBorderColorRGB.g = 0;
-		AutoCastBorderColorRGB.b = 0;
-	}
+	CButtonPanel() : G(NULL), X(0), Y(0), ShowCommandKey(true)
+	{}
 
 	void Draw();
 	void Update();
 	void DoClicked(int button);
 	int DoKey(int key);
 
+private:
+	void DoClicked_SelectTarget(int button);
+
+	void DoClicked_Unload(int button);
+	void DoClicked_SpellCast(int button);
+	void DoClicked_Repair(int button);
+	void DoClicked_Return();
+	void DoClicked_Stop();
+	void DoClicked_StandGround();
+	void DoClicked_Button(int button);
+	void DoClicked_CancelUpgrade();
+	void DoClicked_CancelTrain();
+	void DoClicked_CancelBuild();
+	void DoClicked_Build(int button);
+	void DoClicked_Train(int button);
+	void DoClicked_UpgradeTo(int button);
+	void DoClicked_Research(int button);
+
+
+public:
 	CGraphic *G;
 	int X;
 	int Y;
 	std::vector<CUIButton> Buttons;
-	SDL_Color AutoCastBorderColorRGB;
+	CColor AutoCastBorderColorRGB;
 	bool ShowCommandKey;
 };
 
@@ -433,13 +458,13 @@ public:
 
 	CGraphic *G;         /// Optional background image
 	int MouseButton;     /// Which mouse button pops up the piemenu, deactivate with NoButton
-	int X[8];            /// X position of the pies
-	int Y[8];            /// Y position of the pies
+	int X[9];            /// X position of the pies
+	int Y[9];            /// Y position of the pies
 
 	void SetRadius(int radius) {
-		const int coeffX[] = {    0,  193, 256, 193,   0, -193, -256, -193};
-		const int coeffY[] = { -256, -193,   0, 193, 256,  193,    0, -193};
-		for (int i = 0; i < 8; ++i) {
+		const int coeffX[] = {    0,  193, 256, 193,   0, -193, -256, -193, 0};
+		const int coeffY[] = { -256, -193,   0, 193, 256,  193,    0, -193, 0};
+		for (int i = 0; i < 9; ++i) {
 			this->X[i] = (coeffX[i] * radius) >> 8;
 			this->Y[i] = (coeffY[i] * radius) >> 8;
 		}
@@ -454,7 +479,8 @@ public:
 class PopupConditionPanel
 {
 public:
-	PopupConditionPanel() :  HasHint(false), HasDescription(false), BoolFlags(NULL), Variables(NULL) {}
+	PopupConditionPanel() :  HasHint(false), HasDescription(false), HasDependencies(false),
+		ButtonAction(-1), BoolFlags(NULL), Variables(NULL) {}
 	~PopupConditionPanel() {
 		delete[] BoolFlags;
 		delete[] Variables;
@@ -462,6 +488,9 @@ public:
 
 	bool HasHint;               /// check if button has hint.
 	bool HasDescription;        /// check if button has description.
+	bool HasDependencies;       /// check if button has dependencies or restrictions.
+	int ButtonAction;           /// action type of button
+	std::string ButtonValue;    /// value used in ValueStr field of button
 
 	char *BoolFlags;            /// array of condition about user flags.
 	char *Variables;            /// array of variable to verify (enable and max > 0)
@@ -470,49 +499,78 @@ public:
 class CPopupContentType
 {
 public:
-	CPopupContentType() : PosX(0), PosY(0),
-		MarginX(MARGIN_X), MarginY(MARGIN_Y), MinWidth(0), MinHeight(0),
+	CPopupContentType() : pos(0, 0),
+		MarginX(MARGIN_X), MarginY(MARGIN_Y), minSize(0, 0),
 		Wrap(true), Condition(NULL) {}
 	virtual ~CPopupContentType() { delete Condition; }
 
 	/// Tell how show the variable Index.
-	virtual void Draw(int x, int y, const CPopup *popup, const unsigned int popupWidth, const ButtonAction *button, int *Costs) const = 0;
+	virtual void Draw(int x, int y, const CPopup &popup, const unsigned int popupWidth, const ButtonAction &button, int *Costs) const = 0;
 	/// Get the content's width
-	virtual int GetWidth(const ButtonAction *button, int *Costs) const = 0;
+	virtual int GetWidth(const ButtonAction &button, int *Costs) const = 0;
 	/// Get the content's height
-	virtual int GetHeight(const ButtonAction *button, int *Costs) const = 0;
+	virtual int GetHeight(const ButtonAction &button, int *Costs) const = 0;
 
-	int PosX;                   /// X position to draw.
-	int PosY;                   /// X position to draw.
+	virtual void Parse(lua_State *l) = 0;
+
+	static CPopupContentType *ParsePopupContent(lua_State *l);
+
+public:
+	PixelPos pos;               /// position to draw.
+
 	int MarginX;                /// Left and right margin width.
 	int MarginY;                /// Upper and lower margin height.
-	int MinWidth;               /// Minimal width covered by content type.
-	int MinHeight;              /// Minimal height covered by content type.
+	PixelSize minSize;          /// Minimal size covered by content type.
 	bool Wrap;                  /// If true, the next content will be placed on the next "line".
-
+protected:
+	std::string TextColor;      /// Color used for plain text in content.
+	std::string HighlightColor; /// Color used for highlighted letters.
+public:
 	PopupConditionPanel *Condition; /// Condition to show the content; if NULL, no condition.
 };
 
 enum PopupButtonInfo_Types {
 	PopupButtonInfo_Hint,
-	PopupButtonInfo_Description
+	PopupButtonInfo_Description,
+	PopupButtonInfo_Dependencies
 };
 
 class CPopupContentTypeButtonInfo : public CPopupContentType
 {
 public:
-	CPopupContentTypeButtonInfo() : InfoType(0), MaxWidth(0), Font(NULL), Centered(0) {}
+	CPopupContentTypeButtonInfo() : InfoType(0), MaxWidth(0), Font(NULL) {}
 	virtual ~CPopupContentTypeButtonInfo() {}
 
-	virtual void Draw(int x, int y, const CPopup *popup, const unsigned int popupWidth, const ButtonAction *button, int *Costs) const;
+	virtual void Draw(int x, int y, const CPopup &popup, const unsigned int popupWidth, const ButtonAction &button, int *Costs) const;
 
-	virtual int GetWidth(const ButtonAction *button, int *Costs) const;
-	virtual int GetHeight(const ButtonAction *button, int *Costs) const;
+	virtual int GetWidth(const ButtonAction &button, int *Costs) const;
+	virtual int GetHeight(const ButtonAction &button, int *Costs) const;
 
+	virtual void Parse(lua_State *l);
+
+private:
 	int InfoType;                /// Type of information to show.
 	unsigned int MaxWidth;       /// Maximum width of multilined information.
 	CFont *Font;                 /// Font to use.
-	char Centered;               /// if true, center the display.
+};
+
+class CPopupContentTypeText : public CPopupContentType
+{
+public:
+	CPopupContentTypeText() : MaxWidth(0), Font(NULL) {}
+	virtual ~CPopupContentTypeText() {}
+
+	virtual void Draw(int x, int y, const CPopup &popup, const unsigned int popupWidth, const ButtonAction &button, int *Costs) const;
+
+	virtual int GetWidth(const ButtonAction &button, int *Costs) const;
+	virtual int GetHeight(const ButtonAction &button, int *Costs) const;
+
+	virtual void Parse(lua_State *l);
+
+private:
+	std::string Text;            /// Text to display
+	unsigned int MaxWidth;       /// Maximum width of multilined text.
+	CFont *Font;                 /// Font to use.
 };
 
 class CPopupContentTypeCosts : public CPopupContentType
@@ -521,11 +579,14 @@ public:
 	CPopupContentTypeCosts() : Font(NULL), Centered(0) {}
 	virtual ~CPopupContentTypeCosts() {}
 
-	virtual void Draw(int x, int y, const CPopup *popup, const unsigned int popupWidth, const ButtonAction *button, int *Costs) const;
+	virtual void Draw(int x, int y, const CPopup &popup, const unsigned int popupWidth, const ButtonAction &button, int *Costs) const;
 
-	virtual int GetWidth(const ButtonAction *button, int *Costs) const;
-	virtual int GetHeight(const ButtonAction *button, int *Costs) const;
+	virtual int GetWidth(const ButtonAction &button, int *Costs) const;
+	virtual int GetHeight(const ButtonAction &button, int *Costs) const;
 
+	virtual void Parse(lua_State *l);
+
+private:
 	CFont *Font;                 /// Font to use.
 	char Centered;               /// if true, center the display.
 };
@@ -533,15 +594,18 @@ public:
 class CPopupContentTypeLine : public CPopupContentType
 {
 public:
-	CPopupContentTypeLine() : Color(ColorWhite), Width(0), Height(1) {}
+	CPopupContentTypeLine();
 	virtual ~CPopupContentTypeLine() {}
 
-	virtual void Draw(int x, int y, const CPopup *popup, const unsigned int popupWidth, const ButtonAction *button, int *Costs) const;
+	virtual void Draw(int x, int y, const CPopup &popup, const unsigned int popupWidth, const ButtonAction &button, int *Costs) const;
 
-	virtual int GetWidth(const ButtonAction *button, int *Costs) const;
-	virtual int GetHeight(const ButtonAction *button, int *Costs) const;
+	virtual int GetWidth(const ButtonAction &button, int *Costs) const;
+	virtual int GetHeight(const ButtonAction &button, int *Costs) const;
 
-	Uint32 Color;  /// Color used for line.
+	virtual void Parse(lua_State *l);
+
+private:
+	IntColor Color;  /// Color used for line.
 	unsigned int Width;     /// line height
 	unsigned int Height;    /// line height
 };
@@ -555,11 +619,14 @@ public:
 		delete Text;
 	}
 
-	virtual void Draw(int x, int y, const CPopup *popup, const unsigned int popupWidth, const ButtonAction *button, int *Costs) const;
+	virtual void Draw(int x, int y, const CPopup &popup, const unsigned int popupWidth, const ButtonAction &button, int *Costs) const;
 
-	virtual int GetWidth(const ButtonAction *button, int *Costs) const;
-	virtual int GetHeight(const ButtonAction *button, int *Costs) const;
+	virtual int GetWidth(const ButtonAction &button, int *Costs) const;
+	virtual int GetHeight(const ButtonAction &button, int *Costs) const;
 
+	virtual void Parse(lua_State *l);
+
+private:
 	StringDesc *Text;            /// Text to display.
 	CFont *Font;                 /// Font to use.
 	char Centered;               /// if true, center the display.
@@ -569,14 +636,8 @@ public:
 class CPopup
 {
 public:
-	CPopup() : Contents(), MarginX(MARGIN_X), MarginY(MARGIN_Y), MinWidth(0), MinHeight(0),
-		DefaultFont(NULL), BackgroundColor(ColorBlue), BorderColor(ColorWhite) {}
-	~CPopup() {
-		for (std::vector<CPopupContentType *>::iterator content = Contents.begin();
-			 content != Contents.end(); ++content) {
-			delete *content;
-		}
-	}
+	CPopup();
+	~CPopup();
 
 	std::vector<CPopupContentType *> Contents; /// Array of contents to display.
 	std::string Ident;                         /// Ident of the popup.
@@ -585,8 +646,8 @@ public:
 	int MinWidth;                              /// Minimal width covered by popup.
 	int MinHeight;                             /// Minimal height covered by popup.
 	CFont *DefaultFont;                        /// Default font for content.
-	Uint32 BackgroundColor;                    /// Color used for popup's background.
-	Uint32 BorderColor;                        /// Color used for popup's borders.
+	IntColor BackgroundColor;                  /// Color used for popup's background.
+	IntColor BorderColor;                      /// Color used for popup's borders.
 };
 
 class CResourceInfo
@@ -603,7 +664,7 @@ public:
 	int TextX;     /// text X position
 	int TextY;     /// text Y position
 };
-#define MaxResourceInfo  MaxCosts + 3 /// +3 for food and score and mana
+#define MaxResourceInfo  MaxCosts + 4 /// +4 for food and score and mana and free workers count
 
 class CInfoPanel
 {
@@ -668,8 +729,7 @@ public:
 	/// Middle-Mouse Scroll Speed with Control pressed
 	int MouseScrollSpeedControl;
 
-	int MouseWarpX;                     /// Cursor warp X position
-	int MouseWarpY;                     /// Cursor warp Y position
+	PixelPos MouseWarpPos;              /// Cursor warp screen position
 
 	std::string NormalFontColor;        /// Color for normal text displayed
 	std::string ReverseFontColor;       /// Color for reverse text displayed
@@ -681,7 +741,7 @@ public:
 	CInfoPanel InfoPanel;               /// Info panel
 	std::vector<CUnitInfoPanel *> InfoPanelContents;/// Info panel contents
 
-	std::vector<CPopup *> ButtonPopups;	/// Popup windows for buttons
+	std::vector<CPopup *> ButtonPopups; /// Popup windows for buttons
 
 	CUIButton *SingleSelectedButton;    /// Button for single selected unit
 
@@ -709,9 +769,9 @@ public:
 	std::vector<CUIButton> TransportingButtons;/// Button info for transporting
 
 	// Completed bar
-	SDL_Color CompletedBarColorRGB;     /// color for completed bar
-	Uint32 CompletedBarColor;           /// color for completed bar
-	bool CompletedBarShadow;             /// should complete bar have shadow
+	CColor CompletedBarColorRGB;     /// color for completed bar
+	IntColor CompletedBarColor;      /// color for completed bar
+	bool CompletedBarShadow;         /// should complete bar have shadow
 
 	// Button panel
 	CButtonPanel ButtonPanel;
@@ -736,7 +796,7 @@ public:
 
 	// The minimap
 	CMinimap Minimap;                   /// minimap
-	Uint32 ViewportCursorColor;         /// minimap cursor color
+	IntColor ViewportCursorColor;       /// minimap cursor color
 
 	// The status line
 	CStatusLine StatusLine;             /// status line
@@ -849,13 +909,17 @@ extern ButtonActionProxy CurrentButtons;    /// Current Selected Buttons
 
 extern CUserInterface UI;                           /// The user interface
 
+extern std::string ClickMissile;            /// Missile to show when you click
+extern std::string DamageMissile;           /// Missile to show damage caused
+
+
 /// Hash table of all the button styles
 extern std::map<std::string, ButtonStyle *> ButtonStyleHash;
 
 extern bool RightButtonAttacks;         /// right button attacks
 
 extern const char DefaultGroupKeys[];         /// Default group keys
-extern const char *UiGroupKeys;               /// Up to 11 keys used for group selection
+extern std::string UiGroupKeys;               /// Up to 11 keys used for group selection
 
 extern bool FancyBuildings;             /// Mirror buildings 1 yes, 0 now.
 
@@ -884,7 +948,7 @@ extern CPopup *PopupByIdent(const std::string &ident);
 extern ButtonStyle *FindButtonStyle(const std::string &style);
 
 /// Called if the mouse is moved in Normal interface state
-extern void UIHandleMouseMove(int x, int y);
+extern void UIHandleMouseMove(const PixelPos &pos);
 /// Called if any mouse button is pressed down
 extern void UIHandleButtonDown(unsigned button);
 /// Called if any mouse button is released up
@@ -925,6 +989,8 @@ extern void SetLeaveStops(bool enabled);
 extern int AddHandler(lua_State *l);
 extern void CallHandler(unsigned int handle, int value);
 
+/// Show load progress
+extern void ShowLoadProgress(const char *fmt, ...) PRINTF_VAARG_ATTRIBUTE(1, 2);
 
 //@}
 

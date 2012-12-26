@@ -39,15 +39,17 @@
 #include "icons.h"
 #endif
 
-#ifndef __UNIT_H__
-#include "unit.h"
-#endif
+#include "unitsound.h"
+#include "vec2i.h"
+#include <vector>
 
 /*----------------------------------------------------------------------------
 --  Declarations
 ----------------------------------------------------------------------------*/
 
-struct _event_callback_;
+class CUIButton;
+class CUnit;
+struct EventCallback;
 
 /*----------------------------------------------------------------------------
 --  Definitons
@@ -78,17 +80,18 @@ enum ButtonCmd {
 };
 
 class ButtonAction;
-typedef bool (*ButtonCheckFunc)(const CUnit &, const ButtonAction *);
+typedef bool (*ButtonCheckFunc)(const CUnit &, const ButtonAction &);
 
 /// Action of button
 class ButtonAction
 {
 public:
-	ButtonAction() : Pos(0), Level(0), Action(ButtonMove), Value(0),
+	ButtonAction() : Pos(0), Level(0), AlwaysShow(false), Action(ButtonMove), Value(0),
 		Allowed(NULL), Key(0) {}
 
 	int Pos;          /// button position in the grid
 	int Level;        /// requires button level
+	bool AlwaysShow;  /// button is always shown but drawn grayscale if not available
 	ButtonCmd Action; /// command on button press
 	int Value;        /// extra value for command
 	std::string ValueStr;    /// keep original value string
@@ -259,7 +262,9 @@ extern int AddButton(int pos, int level, const std::string &IconIdent,
 					 ButtonCmd action, const std::string &value, const ButtonCheckFunc func,
 					 const std::string &arg, const std::string &hint, const std::string &descr,
 					 const std::string &sound, const std::string &cursor, const std::string &umask,
-					 const std::string &popup);
+					 const std::string &popup, bool alwaysShow);
+// Check if the button is allowed for the unit.
+extern bool IsButtonAllowed(const CUnit &unit, const ButtonAction &buttonaction);
 
 //
 // in mouse.cpp
@@ -271,7 +276,7 @@ extern void HandleButtonUp(unsigned button);
 /// Keep coordinates in window and update cursor position
 extern void HandleCursorMove(int *x, int *y);
 /// Called if the mouse is moved
-extern void HandleMouseMove(int x, int y);
+extern void HandleMouseMove(const PixelPos &pos);
 /// Called if the mouse exits the game window (only for some videomodes)
 extern void HandleMouseExit();
 
@@ -291,30 +296,22 @@ extern void HandleKeyRepeat(unsigned keycode, unsigned keychar);
 // in interface.c (for link between video and mouse.c)
 //
 /// Called if any mouse button is pressed down
-extern void InputMouseButtonPress(const struct _event_callback_ *callbacks,
-								  unsigned ticks, unsigned button);
+extern void InputMouseButtonPress(const EventCallback &callbacks, unsigned ticks, unsigned button);
 /// Called if any mouse button is released up
-extern void InputMouseButtonRelease(const struct _event_callback_ *callbacks,
-									unsigned ticks, unsigned button);
+extern void InputMouseButtonRelease(const EventCallback &callbacks, unsigned ticks, unsigned button);
 /// Called if the mouse is moved
-extern void InputMouseMove(const struct _event_callback_ *callbacks,
-						   unsigned ticks, int x, int y);
+extern void InputMouseMove(const EventCallback &callbacks, unsigned ticks, int x, int y);
 /// Called if the mouse exits the game window (when supported by videomode)
-extern void InputMouseExit(const struct _event_callback_ *callbacks,
-						   unsigned ticks);
+extern void InputMouseExit(const EventCallback &callbacks, unsigned ticks);
 /// Called to look for mouse timeouts
-extern void InputMouseTimeout(const struct _event_callback_ *callbacks,
-							  unsigned ticks);
+extern void InputMouseTimeout(const EventCallback &callbacks, unsigned ticks);
 
 /// Called if any key button is pressed down
-extern void InputKeyButtonPress(const struct _event_callback_ *callbacks,
-								unsigned ticks, unsigned ikey, unsigned ikeychar);
+extern void InputKeyButtonPress(const EventCallback &callbacks, unsigned ticks, unsigned ikey, unsigned ikeychar);
 /// Called if any key button is released up
-extern void InputKeyButtonRelease(const struct _event_callback_ *callbacks,
-								  unsigned ticks, unsigned ikey, unsigned ikeychar);
+extern void InputKeyButtonRelease(const EventCallback &callbacks, unsigned ticks, unsigned ikey, unsigned ikeychar);
 /// Called to look for key timeouts
-extern void InputKeyTimeout(const struct _event_callback_ *callbacks,
-							unsigned ticks);
+extern void InputKeyTimeout(const EventCallback &callbacks, unsigned ticks);
 
 /// Get double click delay
 extern int GetDoubleClickDelay();
@@ -372,42 +369,46 @@ extern void DrawTimer();
 /// Update the timer
 extern void UpdateTimer();
 /// Update the status line with hints from the button
-extern void UpdateStatusLineForButton(const ButtonAction *button);
+extern void UpdateStatusLineForButton(const ButtonAction &button);
 /// Draw the Pie Menu
 extern void DrawPieMenu();
+/// Draw the button popup
+extern void DrawPopup(const ButtonAction &button, const CUIButton &uibutton);
 
 /// Handle the mouse in scroll area
-extern int HandleMouseScrollArea(int x, int y);
+extern bool HandleMouseScrollArea(const PixelPos &mousePos);
 
 //
 // in button_checks.cpp
 //
 /// Check is always true
-extern bool ButtonCheckTrue(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckTrue(const CUnit &unit, const ButtonAction &button);
 /// Check is always false
-extern bool ButtonCheckFalse(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckFalse(const CUnit &unit, const ButtonAction &button);
 /// Check if allowed upgrade is ready
-extern bool ButtonCheckUpgrade(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckUpgrade(const CUnit &unit, const ButtonAction &button);
+/// Check if unit's variables pass the condition check
+extern bool ButtonCheckUnitVariable(const CUnit &unit, const ButtonAction &button);
 /// Check if allowed units exists
-extern bool ButtonCheckUnitsOr(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckUnitsOr(const CUnit &unit, const ButtonAction &button);
 /// Check if allowed units exists
-extern bool ButtonCheckUnitsAnd(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckUnitsAnd(const CUnit &unit, const ButtonAction &button);
 /// Check if have network play
-extern bool ButtonCheckNetwork(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckNetwork(const CUnit &unit, const ButtonAction &button);
 /// Check if don't have network play
-extern bool ButtonCheckNoNetwork(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckNoNetwork(const CUnit &unit, const ButtonAction &button);
 /// Check if unit isn't working (train,upgrade,research)
-extern bool ButtonCheckNoWork(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckNoWork(const CUnit &unit, const ButtonAction &button);
 /// Check if unit isn't researching or upgrading
-extern bool ButtonCheckNoResearch(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckNoResearch(const CUnit &unit, const ButtonAction &button);
 /// Check if all requirements for an attack to are meet
-extern bool ButtonCheckAttack(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckAttack(const CUnit &unit, const ButtonAction &button);
 /// Check if all requirements for an upgrade to are meet
-extern bool ButtonCheckUpgradeTo(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckUpgradeTo(const CUnit &unit, const ButtonAction &button);
 /// Check if all requirements for a research are meet
-extern bool ButtonCheckResearch(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckResearch(const CUnit &unit, const ButtonAction &button);
 /// Check if all requirements for a single research are meet
-extern bool ButtonCheckSingleResearch(const CUnit &unit, const ButtonAction *button);
+extern bool ButtonCheckSingleResearch(const CUnit &unit, const ButtonAction &button);
 
 //
 // in ccl_ui.c

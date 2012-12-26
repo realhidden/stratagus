@@ -48,7 +48,8 @@
 #include "player.h"
 #include "spells.h"
 #include "unittype.h"
-#include "unit_manager.h"
+
+#include <stdio.h>
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -74,7 +75,7 @@ std::string UnitReference(const CUnitPtr &unit)
 
 	std::ostringstream ss;
 	ss << "U" << std::setfill('0') << std::setw(4) << std::uppercase
-	   << std::hex << unit->Slot;
+	   << std::hex << UnitNumber(*unit);
 	return ss.str();
 }
 
@@ -131,10 +132,6 @@ void SaveUnit(const CUnit &unit, CFile &file)
 	}
 
 	file.printf("\"player\", %d,\n  ", unit.Player->Index);
-
-	if (unit.Next) {
-		file.printf("\"next\", %d, ", UnitNumber(*unit.Next));
-	}
 
 	file.printf("\"tile\", {%d, %d}, ", unit.tilePos.x, unit.tilePos.y);
 	file.printf("\"seen-tile\", {%d, %d}, ", unit.Seen.tilePos.x, unit.Seen.tilePos.y);
@@ -237,7 +234,6 @@ void SaveUnit(const CUnit &unit, CFile &file)
 	unit.pathFinderData->output.Save(file);
 
 	file.printf("\"wait\", %d, ", unit.Wait);
-	file.printf("\"state\", %d,", unit.State);
 	CAnimations::SaveUnitAnim(file, unit);
 	file.printf(",\n  \"blink\", %d,", unit.Blink);
 	if (unit.Moving) {
@@ -317,20 +313,6 @@ void SaveUnit(const CUnit &unit, CFile &file)
 	}
 
 	file.printf("})\n");
-}
-
-/**
-**  Save state of units to file.
-**
-**  @param file  Output file.
-*/
-void SaveUnits(CFile &file)
-{
-	UnitManager.Save(file);
-
-	for (CUnit **table = Units; table < &Units[NumUnits]; ++table) {
-		SaveUnit(**table, file);
-	}
 }
 
 //@}

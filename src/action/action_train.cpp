@@ -33,9 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "action/action_train.h"
@@ -45,6 +42,7 @@
 #include "iolib.h"
 #include "player.h"
 #include "sound.h"
+#include "translate.h"
 #include "ui.h"
 #include "unit.h"
 #include "unitsound.h"
@@ -189,19 +187,13 @@ static void AnimateActionTrain(CUnit &unit)
 	CPlayer &player = *unit.Player;
 	const CUnitType &nType = *this->Type;
 	const int cost = nType.Stats[player.Index].Costs[TimeCost];
-	this->Ticks += SpeedTrain;
+	this->Ticks += player.SpeedTrain / SPEEDUP_FACTOR;
 
 	if (this->Ticks < cost) {
 		unit.Wait = CYCLES_PER_SECOND / 6;
 		return ;
 	}
 	this->Ticks = std::min(this->Ticks, cost);
-
-	// Check if there are still unit slots.
-	if (NumUnits >= UnitMax) {
-		unit.Wait = CYCLES_PER_SECOND / 6;
-		return ;
-	}
 
 	// Check if enough supply available.
 	const int food = player.CheckLimits(nType);
@@ -239,7 +231,7 @@ static void AnimateActionTrain(CUnit &unit)
 	}
 
 	DropOutOnSide(*newUnit, LookingW, &unit);
-	player.Notify(NotifyYellow, newUnit->tilePos, _("New %s ready"), nType.Name.c_str());
+	player.Notify(NotifyGreen, newUnit->tilePos, _("New %s ready"), nType.Name.c_str());
 	if (&player == ThisPlayer) {
 		PlayUnitSound(*newUnit, VoiceReady);
 	}

@@ -34,26 +34,16 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
 
-#include "SDL.h"
+#include "sound.h"
 
-#include "sound.h"
-#include "video.h"
-#include "sound.h"
-#include "unitsound.h"
-#include "unittype.h"
-#include "player.h"
-#include "unit.h"
-#include "sound_server.h"
-#include "missile.h"
 #include "map.h"
-#include "tileset.h"
+#include "missile.h"
+#include "sound_server.h"
 #include "ui.h"
+#include "unit.h"
+#include "video.h"
 #include "widgets.h"
 
 /*----------------------------------------------------------------------------
@@ -87,14 +77,14 @@ int DistanceSilent;              /// silent distance
 /**
 **  "Randomly" choose a sample from a sound group.
 */
-static CSample *SimpleChooseSample(const CSound *sound)
+static CSample *SimpleChooseSample(const CSound &sound)
 {
-	if (sound->Number == ONE_SOUND) {
-		return sound->Sound.OneSound;
+	if (sound.Number == ONE_SOUND) {
+		return sound.Sound.OneSound;
 	} else {
 		//FIXME: check for errors
 		//FIXME: valid only in shared memory context (FrameCounter)
-		return sound->Sound.OneGroup[FrameCounter % sound->Number];
+		return sound.Sound.OneGroup[FrameCounter % sound.Number];
 	}
 }
 
@@ -114,7 +104,7 @@ static CSample *ChooseSample(CSound *sound, bool selection, Origin &source)
 		if (SelectionHandler.Source.Base == source.Base
 			&& SelectionHandler.Source.Id == source.Id) {
 			if (SelectionHandler.Sound == sound->Sound.TwoGroups.First) {
-				result = SimpleChooseSample(SelectionHandler.Sound);
+				result = SimpleChooseSample(*SelectionHandler.Sound);
 				SelectionHandler.HowMany++;
 				if (SelectionHandler.HowMany >= 3) {
 					SelectionHandler.HowMany = 0;
@@ -139,12 +129,12 @@ static CSample *ChooseSample(CSound *sound, bool selection, Origin &source)
 		} else {
 			SelectionHandler.Source = source;
 			SelectionHandler.Sound = sound->Sound.TwoGroups.First;
-			result = SimpleChooseSample(SelectionHandler.Sound);
+			result = SimpleChooseSample(*SelectionHandler.Sound);
 			SelectionHandler.HowMany = 1;
 		}
 	} else {
 		// normal sound/sound group handling
-		result = SimpleChooseSample(sound);
+		result = SimpleChooseSample(*sound);
 		if (selection) {
 			SelectionHandler.Source = source;
 		}
@@ -206,17 +196,14 @@ static CSound *ChooseUnitVoiceSound(const CUnit &unit, UnitVoiceGroup voice)
 */
 static unsigned char VolumeForDistance(unsigned short d, unsigned char range)
 {
-	int d_tmp;
-	int range_tmp;
-
 	// FIXME: THIS IS SLOW!!!!!!!
 	if (d <= ViewPointOffset || range == INFINITE_SOUND_RANGE) {
 		return MaxVolume;
 	} else {
 		if (range) {
 			d -= ViewPointOffset;
-			d_tmp = d * MAX_SOUND_RANGE;
-			range_tmp = DistanceSilent * range;
+			int d_tmp = d * MAX_SOUND_RANGE;
+			int range_tmp = DistanceSilent * range;
 			if (d_tmp > range_tmp) {
 				return 0;
 			} else {
@@ -274,7 +261,7 @@ void PlayUnitSound(const CUnit &unit, UnitVoiceGroup voice)
 	}
 
 	bool selection = (voice == VoiceSelected || voice == VoiceBuilding);
-	Origin source = {&unit, unit.Slot};
+	Origin source = {&unit, UnitNumber(unit)};
 
 	if (UnitSoundIsPlaying(&source)) {
 		return;
@@ -298,7 +285,7 @@ void PlayUnitSound(const CUnit &unit, UnitVoiceGroup voice)
 */
 void PlayUnitSound(const CUnit &unit, CSound *sound)
 {
-	Origin source = {&unit, unit.Slot};
+	Origin source = {&unit, UnitNumber(unit)};
 
 	int channel = PlaySample(ChooseSample(sound, false, source));
 	if (channel == -1) {
@@ -314,9 +301,9 @@ void PlayUnitSound(const CUnit &unit, CSound *sound)
 **  @param missile  Sound initiator, missile exploding
 **  @param sound    Sound to be generated
 */
-void PlayMissileSound(const Missile *missile, CSound *sound)
+void PlayMissileSound(const Missile &missile, CSound *sound)
 {
-	int stereo = ((missile->position.x + missile->Type->G->Width / 2 -
+	int stereo = ((missile.position.x + missile.Type->G->Width / 2 -
 				   UI.SelectedViewport->MapPos.x * PixelTileSize.x) * 256 /
 				  ((UI.SelectedViewport->MapWidth - 1) * PixelTileSize.x)) - 128;
 	clamp(&stereo, -128, 127);
@@ -327,7 +314,7 @@ void PlayMissileSound(const Missile *missile, CSound *sound)
 	if (channel == -1) {
 		return;
 	}
-	SetChannelVolume(channel, CalculateVolume(false, ViewPointDistanceToMissile(*missile), sound->Range));
+	SetChannelVolume(channel, CalculateVolume(false, ViewPointDistanceToMissile(missile), sound->Range));
 	SetChannelStereo(channel, stereo);
 }
 
@@ -380,9 +367,8 @@ static void PlaySoundFileCallback(int channel)
 int PlayFile(const std::string &name, LuaActionListener *listener)
 {
 	int channel = -1;
-	CSample *sample;
+	CSample *sample = LoadSample(name);
 
-	sample = LoadSample(name);
 	if (sample) {
 		channel = PlaySample(sample);
 		if (channel != -1) {
@@ -391,7 +377,6 @@ int PlayFile(const std::string &name, LuaActionListener *listener)
 			ChannelMap[channel] = listener;
 		}
 	}
-
 	return channel;
 }
 
@@ -420,17 +405,16 @@ void SetSoundRange(CSound *sound, unsigned char range)
 **
 **  @todo FIXME: Must handle the errors better.
 */
-CSound *RegisterSound(const char *files[], unsigned number)
+CSound *RegisterSound(const std::vector<std::string> &files)
 {
-	unsigned i;
-	CSound *id;
+	CSound *id = new CSound;
+	size_t number = files.size();
 
-	id = new CSound;
 	if (number > 1) { // load a sound group
 		id->Sound.OneGroup = new CSample *[number];
 		memset(id->Sound.OneGroup, 0, sizeof(CSample *) * number);
 		id->Number = number;
-		for (i = 0; i < number; ++i) {
+		for (unsigned int i = 0; i < number; ++i) {
 			id->Sound.OneGroup[i] = LoadSample(files[i]);
 			if (!id->Sound.OneGroup[i]) {
 				//delete[] id->Sound.OneGroup;
@@ -460,12 +444,10 @@ CSound *RegisterSound(const char *files[], unsigned number)
 */
 CSound *RegisterTwoGroups(CSound *first, CSound *second)
 {
-	CSound *id;
-
 	if (first == NO_SOUND || second == NO_SOUND) {
 		return NO_SOUND;
 	}
-	id = new CSound;
+	CSound *id = new CSound;
 	id->Number = TWO_GROUPS;
 	id->Sound.TwoGroups.First = first;
 	id->Sound.TwoGroups.Second = second;
@@ -558,6 +540,5 @@ CSound::~CSound()
 		delete[] this->Sound.OneGroup;
 	}
 }
-
 
 //@}

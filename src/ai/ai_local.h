@@ -38,8 +38,9 @@
 
 #include <vector>
 
-#include "upgrade_structs.h"
-#include "unit.h"
+#include "upgrade_structs.h" // MaxCost
+#include "unit_cache.h"
+#include "vec2i.h"
 
 /*----------------------------------------------------------------------------
 --  Declarations
@@ -101,9 +102,12 @@ enum AiForceAttackingState {
 	AiForceAttackingState_Free = -1,
 	AiForceAttackingState_Waiting = 0,
 	AiForceAttackingState_Boarding,
+	AiForceAttackingState_GoingToRallyPoint,
 	AiForceAttackingState_AttackingWithTransporter,
 	AiForceAttackingState_Attacking,
 };
+
+#define AI_WAIT_ON_RALLY_POINT 60          /// Max seconds AI units will wait on rally point
 
 /**
 **  Define an AI force.
@@ -116,7 +120,8 @@ class AiForce
 public:
 	AiForce() :
 		Completed(false), Defending(false), Attacking(false),
-		Role(AiForceRoleDefault), State(AiForceAttackingState_Free) {
+		Role(AiForceRoleDefault), State(AiForceAttackingState_Free),
+		WaitOnRallyPoint(AI_WAIT_ON_RALLY_POINT) {
 		HomePos.x = HomePos.y = GoalPos.x = GoalPos.y = -1;
 	}
 
@@ -133,6 +138,7 @@ public:
 		Completed = false;
 		Defending = false;
 		Attacking = false;
+		WaitOnRallyPoint = AI_WAIT_ON_RALLY_POINT;
 		if (types) {
 			UnitTypes.clear();
 			State = AiForceAttackingState_Free;
@@ -151,20 +157,17 @@ public:
 	void RemoveDeadUnit();
 	int PlanAttack();
 
+	void ReturnToHome();
+	bool NewRallyPoint(const Vec2i &startPos, Vec2i *resultPos);
+
 private:
 	void CountTypes(unsigned int *counter, const size_t len);
-	bool IsBelongsTo(const CUnitType *type);
-	void Insert(CUnit &unit) {
-		Units.Insert(&unit);
-		unit.RefsIncrease();
-	}
+	bool IsBelongsTo(const CUnitType &type);
+	void Insert(CUnit &unit);
 
 	void Update();
 
-	static void InternalRemoveUnit(CUnit *unit) {
-		unit->GroupId = 0;
-		unit->RefsDecrease();
-	}
+	static void InternalRemoveUnit(CUnit *unit);
 
 public:
 	bool Completed;    /// Flag saying force is complete build
@@ -179,6 +182,7 @@ public:
 	AiForceAttackingState State; /// Attack state
 	Vec2i GoalPos; /// Attack point tile map position
 	Vec2i HomePos; /// Return after attack tile map position
+	int WaitOnRallyPoint; /// Counter for waiting on rally point
 };
 
 // forces
@@ -272,7 +276,6 @@ public:
 		memset(Used, 0, sizeof(Used));
 		memset(Needed, 0, sizeof(Needed));
 		memset(Collect, 0, sizeof(Collect));
-		memset(TriedRepairWorkers, 0, sizeof(TriedRepairWorkers));
 	}
 
 public:
@@ -301,7 +304,6 @@ public:
 	std::vector<CUpgrade *> ResearchRequests;     /// Upgrades requested and priority list
 	std::vector<AiBuildQueue> UnitTypeBuilt;      /// What the resource manager should build
 	int LastRepairBuilding;                       /// Last building checked for repair in this turn
-	unsigned int TriedRepairWorkers[UnitMax];     /// No. workers that failed trying to repair a building
 };
 
 /**
@@ -391,7 +393,7 @@ extern void AiResourceManager();
 /// Ask the ai to explore around pos
 extern void AiExplore(const Vec2i &pos, int exploreMask);
 /// Make two unittypes be considered equals
-extern void AiNewUnitTypeEquiv(CUnitType *a, CUnitType *b);
+extern void AiNewUnitTypeEquiv(const CUnitType &a, const CUnitType &b);
 /// Remove any equivalence between unittypes
 extern void AiResetUnitTypeEquiv();
 /// Finds all equivalents units to a given one
@@ -401,12 +403,13 @@ extern int AiFindAvailableUnitTypeEquiv(const CUnitType &type, int *result);
 extern int AiGetBuildRequestsCount(const PlayerAi &pai, int (&counter)[UnitTypeMax]);
 
 extern void AiNewDepotRequest(CUnit &worker);
+extern bool AiRequestChangeDepot(CUnit &worker);
 
 //
 // Buildings
 //
 /// Find nice building place
-extern int AiFindBuildingPlace(const CUnit &worker, const CUnitType &type, const Vec2i &nearPos, Vec2i *dpos);
+extern bool AiFindBuildingPlace(const CUnit &worker, const CUnitType &type, const Vec2i &nearPos, Vec2i *resultPos);
 
 //
 // Forces

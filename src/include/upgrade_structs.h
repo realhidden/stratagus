@@ -73,16 +73,7 @@ enum CostType {
 #define FoodCost MaxCosts
 #define ScoreCost (MaxCosts + 1)
 #define ManaResCost (MaxCosts + 2)
-
-/**
-**  Speed factor for harvesting resources
-*/
-extern int SpeedResourcesHarvest[MaxCosts];
-
-/**
-**  Speed factor for returning resources
-*/
-extern int SpeedResourcesReturn[MaxCosts];
+#define FreeWorkersCount (MaxCosts + 3)
 
 /**
 **  Default resources for a new player.
@@ -169,6 +160,7 @@ public:
 	void SetIcon(CIcon *icon);
 
 	std::string Ident;                /// identifier
+	std::string Name;                 /// upgrade label
 	int   ID;                         /// numerical id
 	int   Costs[MaxCosts];            /// costs for the upgrade
 	// TODO: not used by buttons
@@ -187,15 +179,19 @@ public:
 class CUpgradeModifier
 {
 public:
-	CUpgradeModifier() : UpgradeId(0), ConvertTo(NULL) {
+	CUpgradeModifier() : UpgradeId(0), ModifyPercent(NULL), ConvertTo(NULL) {
 		memset(ChangeUnits, 0, sizeof(ChangeUnits));
 		memset(ChangeUpgrades, 0, sizeof(ChangeUpgrades));
 		memset(ApplyTo, 0, sizeof(ApplyTo));
 	}
+	~CUpgradeModifier() {
+		delete [] this->ModifyPercent;
+	}
 
 	int UpgradeId;                      /// used to filter required modifier
 
-	CUnitStats Modifier;                 /// modifier of unit stats.
+	CUnitStats Modifier;                /// modifier of unit stats.
+	int *ModifyPercent;                /// use for percent modifiers
 
 	// allow/forbid bitmaps -- used as chars for example:
 	// `?' -- leave as is, `F' -- forbid, `A' -- allow
@@ -206,7 +202,6 @@ public:
 	char ApplyTo[UnitTypeMax];          /// which unit types are affected
 
 	CUnitType *ConvertTo;               /// convert to this unit-type.
-
 };
 
 /**

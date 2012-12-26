@@ -33,14 +33,12 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "action/action_still.h"
 
 #include "animation.h"
+#include "commands.h"
 #include "iolib.h"
 #include "map.h"
 #include "missile.h"
@@ -49,7 +47,9 @@
 #include "spells.h"
 #include "tileset.h"
 #include "unit.h"
+#include "unit_find.h"
 #include "unittype.h"
+#include "video.h"
 
 enum {
 	SUB_STILL_STANDBY = 0,
@@ -147,7 +147,7 @@ private:
 		this->AutoTarget = NULL;
 		return;
 	}
-	const Vec2i invalidPos = { -1, -1};
+	const Vec2i invalidPos(-1, -1);
 
 	FireMissile(unit, AutoTarget, invalidPos);
 	UnHideUnit(unit);
@@ -217,7 +217,7 @@ bool AutoCast(CUnit &unit)
 		for (unsigned int i = 0; i < SpellTypeTable.size(); ++i) {
 			if (unit.AutoCastSpell[i]
 				&& (SpellTypeTable[i]->AutoCast || SpellTypeTable[i]->AICast)
-				&& AutoCastSpell(unit, SpellTypeTable[i])) {
+				&& AutoCastSpell(unit, *SpellTypeTable[i])) {
 				return true;
 			}
 		}
@@ -246,15 +246,15 @@ private:
 **  @param unit   unit which can repair.
 **  @param range  range to find a repairable unit.
 **
-**  @return       unit to repair if found, NoUnitP otherwise
+**  @return       unit to repair if found, NULL otherwise
 **
 **  @todo         FIXME: find the best unit (most damaged, ...).
 */
 static CUnit *UnitToRepairInRange(const CUnit &unit, int range)
 {
-	const Vec2i offset = {range, range};
+	const Vec2i offset(range, range);
 
-	return Map.Find_If(unit.tilePos - offset, unit.tilePos + offset, IsAReparableUnitBy(unit));
+	return FindUnit_If(unit.tilePos - offset, unit.tilePos + offset, IsAReparableUnitBy(unit));
 }
 
 /**
@@ -274,14 +274,16 @@ bool AutoRepair(CUnit &unit)
 	if (repairedUnit == NULL) {
 		return false;
 	}
-	const Vec2i invalidPos = { -1, -1};
-	COrder *savedOrder = unit.CurrentOrder()->Clone();
+	const Vec2i invalidPos(-1, -1);
+	COrder *savedOrder = NULL;
+	if (unit.CanStoreOrder(unit.CurrentOrder())) {
+		savedOrder = unit.CurrentOrder()->Clone();
+	}
 
 	//Command* will clear unit.SavedOrder
 	CommandRepair(unit, invalidPos, repairedUnit, FlushCommands);
-	if (unit.StoreOrder(savedOrder) == false) {
-		delete savedOrder;
-		savedOrder = NULL;
+	if (savedOrder != NULL) {
+		unit.SavedOrder = savedOrder;
 	}
 	return true;
 }
@@ -298,7 +300,6 @@ bool COrder_Still::AutoAttackStand(CUnit &unit)
 		return false;
 	}
 	this->State = SUB_STILL_ATTACK; // Mark attacking.
-	this->SetGoal(this->AutoTarget);
 	UnitHeadingFromDeltaXY(unit, this->AutoTarget->tilePos + this->AutoTarget->Type->GetHalfTileSize() - unit.tilePos);
 	return true;
 }
@@ -309,7 +310,7 @@ bool COrder_Still::AutoCastStand(CUnit &unit)
 		for (unsigned int i = 0; i < SpellTypeTable.size(); ++i) {
 			if (unit.AutoCastSpell[i]
 				&& (SpellTypeTable[i]->AutoCast || SpellTypeTable[i]->AICast)
-				&& AutoCastSpell(unit, SpellTypeTable[i])) {
+				&& AutoCastSpell(unit, *SpellTypeTable[i])) {
 				return true;
 			}
 		}
@@ -332,20 +333,18 @@ bool AutoAttack(CUnit &unit)
 	if (goal == NULL) {
 		return false;
 	}
-	COrder *savedOrder;
+	COrder *savedOrder = NULL;
 
-	if (unit.SavedOrder != NULL) {
-		savedOrder = unit.SavedOrder->Clone();
-	} else if (unit.CurrentAction() == UnitActionStill) {
+	if (unit.CurrentAction() == UnitActionStill) {
 		savedOrder = COrder::NewActionAttack(unit, unit.tilePos);
-	} else {
+	} else if (unit.CanStoreOrder(unit.CurrentOrder())) {
 		savedOrder = unit.CurrentOrder()->Clone();
 	}
 	// Weak goal, can choose other unit, come back after attack
 	CommandAttack(unit, goal->tilePos, NULL, FlushCommands);
 
-	if (unit.StoreOrder(savedOrder) == false) {
-		delete savedOrder;
+	if (savedOrder != NULL) {
+		unit.SavedOrder = savedOrder;
 	}
 	return true;
 }
@@ -381,8 +380,7 @@ bool AutoAttack(CUnit &unit)
 			this->AutoAttackStand(unit);
 		}
 	} else {
-		if ((unit.IsAgressive() && AutoAttack(unit))
-			|| AutoCast(unit)
+		if (AutoCast(unit) || (unit.IsAgressive() && AutoAttack(unit))
 			|| AutoRepair(unit)
 			|| MoveRandomly(unit)) {
 		}

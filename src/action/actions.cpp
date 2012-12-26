@@ -33,10 +33,9 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#ifdef DEBUG_LOG
 #include <time.h>
+#endif
 
 #include "stratagus.h"
 
@@ -61,12 +60,15 @@
 
 #include "animation/animation_die.h"
 #include "commands.h"
+#include "luacallback.h"
 #include "map.h"
 #include "missile.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "script.h"
 #include "unit.h"
+#include "unit_find.h"
+#include "unit_manager.h"
 #include "unittype.h"
 
 /*----------------------------------------------------------------------------
@@ -102,7 +104,7 @@ void COrder::UpdatePathFinderData_NotCalled(PathFinderInput &input)
 	// Don't move
 	input.SetMinRange(0);
 	input.SetMaxRange(0);
-	const Vec2i tileSize = {0, 0};
+	const Vec2i tileSize(0, 0);
 	input.SetGoal(input.GetUnit()->tilePos, tileSize);
 
 }
@@ -151,7 +153,7 @@ void COrder::UpdatePathFinderData_NotCalled(PathFinderInput &input)
 	CUnit *goal = AttackUnitsInRange(unit);
 
 	if (goal != NULL) {
-		const Vec2i invalidPos = { -1, -1};
+		const Vec2i invalidPos(-1, -1);
 
 		FireMissile(unit, goal, invalidPos);
 		UnHideUnit(unit); // unit is invisible until attacks
@@ -281,6 +283,7 @@ static void HandleBuffs(CUnit &unit, int amount)
 		unit.Variable[HP_INDEX].Value -= amount;
 		if (unit.Variable[HP_INDEX].Value <= 0) {
 			LetUnitDie(unit);
+			return;
 		}
 	}
 
@@ -332,7 +335,6 @@ static void HandleUnitAction(CUnit &unit)
 
 			delete unit.Orders[0];
 			unit.Orders[0] = COrder::NewActionStill();
-			unit.State = 0;
 			if (IsOnlySelected(unit)) { // update display for new action
 				SelectedUnitChanged();
 			}
@@ -342,23 +344,15 @@ static void HandleUnitAction(CUnit &unit)
 		// o Or the order queue should be flushed.
 		if ((unit.Orders[0]->Action == UnitActionStandGround || unit.Orders[0]->Finished)
 			&& unit.Orders.size() > 1) {
-			if (unit.Removed) { // FIXME: johns I see this as an error
+			if (unit.Removed && unit.Orders[0]->Action != UnitActionBoard) { // FIXME: johns I see this as an error
 				DebugPrint("Flushing removed unit\n");
 				// This happens, if building with ALT+SHIFT.
 				return;
 			}
 
-			do {
-				delete unit.Orders[0];
-				unit.Orders.erase(unit.Orders.begin());
-			} while (unit.Orders[0]->IsValid() == false && unit.Orders.size() > 1);
+			delete unit.Orders[0];
+			unit.Orders.erase(unit.Orders.begin());
 
-			if (unit.Orders[0]->IsValid() == false && unit.Orders.size() == 1) {
-				delete unit.Orders[0];
-				unit.Orders[0] = COrder::NewActionStill();
-			}
-
-			unit.State = 0;
 			unit.Wait = 0;
 			if (IsOnlySelected(unit)) { // update display for new action
 				SelectedUnitChanged();
@@ -376,6 +370,13 @@ static void UnitActionsEachSecond(UNITP_ITERATOR begin, UNITP_ITERATOR end)
 
 		if (unit.Destroyed) {
 			continue;
+		}
+
+		// OnEachSecond callback
+		if (unit.Type->OnEachSecond  && unit.IsUnusable(false) == false) {
+			unit.Type->OnEachSecond->pushPreamble();
+			unit.Type->OnEachSecond->pushInteger(UnitNumber(unit));
+			unit.Type->OnEachSecond->run();
 		}
 
 		// 1) Blink flag.
@@ -437,6 +438,14 @@ static void UnitActionsEachCycle(UNITP_ITERATOR begin, UNITP_ITERATOR end)
 		if (unit.Destroyed) {
 			continue;
 		}
+
+		// OnEachCycle callback
+		if (unit.Type->OnEachCycle && unit.IsUnusable(false) == false) {
+			unit.Type->OnEachCycle->pushPreamble();
+			unit.Type->OnEachCycle->pushInteger(UnitNumber(unit));
+			unit.Type->OnEachCycle->run();
+		}
+
 		try {
 			HandleUnitAction(unit);
 		} catch (AnimationDie_Exception &) {
@@ -448,7 +457,6 @@ static void UnitActionsEachCycle(UNITP_ITERATOR begin, UNITP_ITERATOR end)
 		// Calculate some hash.
 		SyncHash = (SyncHash << 5) | (SyncHash >> 27);
 		SyncHash ^= unit.Orders.empty() == false ? unit.CurrentAction() << 18 : 0;
-		SyncHash ^= unit.State << 12;
 		SyncHash ^= unit.Refs << 3;
 	}
 }
@@ -460,10 +468,8 @@ static void UnitActionsEachCycle(UNITP_ITERATOR begin, UNITP_ITERATOR end)
 void UnitActions()
 {
 	const bool isASecondCycle = !(GameCycle % CYCLES_PER_SECOND);
-	std::vector<CUnit *> table;
-
-	// Units may be modified during loop...
-	table.insert(table.begin(), Units, Units + NumUnits);
+	// Unit list may be modified during loop... so make a copy
+	std::vector<CUnit *> table(UnitManager.begin(), UnitManager.end());
 
 	// Check for things that only happen every second
 	if (isASecondCycle) {

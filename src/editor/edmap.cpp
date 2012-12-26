@@ -33,11 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <limits.h>
-
 #include "stratagus.h"
 #include "editor.h"
 #include "map.h"
@@ -45,6 +40,7 @@
 #include "ui.h"
 #include "player.h"
 #include "unit.h"
+#include "unit_manager.h"
 #include "unittype.h"
 
 /*----------------------------------------------------------------------------
@@ -397,7 +393,8 @@ void ChangeTile(const Vec2i &pos, int tile)
 	Assert(tile >= 0 && tile < Map.Tileset.NumTiles);
 
 	CMapField *mf = Map.Field(pos);
-	mf->Tile = mf->SeenTile = Map.Tileset.Table[tile];
+	mf->Tile = Map.Tileset.Table[tile];
+	mf->playerInfo.SeenTile = mf->Tile;
 }
 
 #define DIR_UP     8 /// Go up allowed
@@ -437,8 +434,7 @@ static void EditorChangeTile(const Vec2i &pos, int tile, int d)
 /**
 **  Update surroundings for tile changes.
 **
-**  @param pos  Map X tile position of change.
-**  @param y  Map Y tile position of change.
+**  @param pos  Map tile position of change.
 **  @param d  Fix direction flag 8 up, 4 down, 2 left, 1 right.
 */
 static void EditorTileChanged2(const Vec2i &pos, int d)
@@ -465,7 +461,7 @@ static void EditorTileChanged2(const Vec2i &pos, int d)
 	//  EditorChangeTile again.
 	//
 	if (d & DIR_UP && pos.y) {
-		const Vec2i offset = {0, -1};
+		const Vec2i offset(0, -1);
 		//
 		// Insert into the bottom the new tile.
 		//
@@ -477,7 +473,7 @@ static void EditorTileChanged2(const Vec2i &pos, int d)
 		}
 	}
 	if (d & DIR_DOWN && pos.y < Map.Info.MapHeight - 1) {
-		const Vec2i offset = {0, 1};
+		const Vec2i offset(0, 1);
 		//
 		// Insert into the top the new tile.
 		//
@@ -489,7 +485,7 @@ static void EditorTileChanged2(const Vec2i &pos, int d)
 		}
 	}
 	if (d & DIR_LEFT && pos.x) {
-		const Vec2i offset = { -1, 0};
+		const Vec2i offset(-1, 0);
 		//
 		// Insert into the left the new tile.
 		//
@@ -501,7 +497,7 @@ static void EditorTileChanged2(const Vec2i &pos, int d)
 		}
 	}
 	if (d & DIR_RIGHT && pos.x < Map.Info.MapWidth - 1) {
-		const Vec2i offset = {1, 0};
+		const Vec2i offset(1, 0);
 		//
 		// Insert into the right the new tile.
 		//
@@ -533,7 +529,6 @@ void EditorTileChanged(const Vec2i &pos)
 **  TileFill
 **
 **  @param pos   map tile coordinate for area center.
-**  @param y     Y map tile coordinate for area center.
 **  @param tile  Tile type to edit.
 **  @param size  Size of surrounding rectangle.
 **
@@ -542,7 +537,7 @@ void EditorTileChanged(const Vec2i &pos)
 */
 static void TileFill(const Vec2i &pos, int tile, int size)
 {
-	const Vec2i diag = {size / 2, size / 2};
+	const Vec2i diag(size / 2, size / 2);
 	Vec2i ipos = pos - diag;
 	Vec2i apos = pos + diag;
 
@@ -571,13 +566,13 @@ static void TileFill(const Vec2i &pos, int tile, int size)
 */
 static void EditorRandomizeTile(int tile, int count, int max_size)
 {
-	const Vec2i mpos = { Map.Info.MapWidth - 1, Map.Info.MapHeight - 1};
+	const Vec2i mpos(Map.Info.MapWidth - 1, Map.Info.MapHeight - 1);
 
 	for (int i = 0; i < count; ++i) {
-		const Vec2i rpos = {rand() % ((1 + mpos.x) / 2), rand() % ((1 + mpos.y) / 2)};
+		const Vec2i rpos(rand() % ((1 + mpos.x) / 2), rand() % ((1 + mpos.y) / 2));
 		const Vec2i mirror = mpos - rpos;
-		const Vec2i mirrorh = {rpos.x, mirror.y};
-		const Vec2i mirrorv = {mirror.x, rpos.y};
+		const Vec2i mirrorh(rpos.x, mirror.y);
+		const Vec2i mirrorv(mirror.x, rpos.y);
 		const int rz = rand() % max_size + 1;
 
 		TileFill(rpos, tile, rz);
@@ -596,23 +591,23 @@ static void EditorRandomizeTile(int tile, int count, int max_size)
 */
 static void EditorRandomizeUnit(const char *unit_type, int count, int value)
 {
-	const Vec2i mpos = {Map.Info.MapWidth, Map.Info.MapHeight};
+	const Vec2i mpos(Map.Info.MapWidth, Map.Info.MapHeight);
 	CUnitType *typeptr = UnitTypeByIdent(unit_type);
 
 	if (!typeptr) { // Error
 		return;
 	}
 	CUnitType &type = *typeptr;
-	const Vec2i tpos = {type.TileWidth, type.TileHeight};
+	const Vec2i tpos(type.TileWidth, type.TileHeight);
 
 	for (int i = 0; i < count; ++i) {
-		const Vec2i rpos = {rand() % (mpos.x / 2 - tpos.x + 1), rand() % (mpos.y / 2 - tpos.y + 1)};
-		const Vec2i mirror = {mpos.x - rpos.x - 1, mpos.y - rpos.y - 1};
-		const Vec2i mirrorh = {rpos.x, mirror.y};
-		const Vec2i mirrorv = {mirror.x, rpos.y};
-		const Vec2i tmirror = {mpos.x - rpos.x - tpos.x, mpos.y - rpos.y - tpos.y};
-		const Vec2i tmirrorh = {rpos.x, tmirror.y};
-		const Vec2i tmirrorv = {tmirror.x, rpos.y};
+		const Vec2i rpos(rand() % (mpos.x / 2 - tpos.x + 1), rand() % (mpos.y / 2 - tpos.y + 1));
+		const Vec2i mirror(mpos.x - rpos.x - 1, mpos.y - rpos.y - 1);
+		const Vec2i mirrorh(rpos.x, mirror.y);
+		const Vec2i mirrorv(mirror.x, rpos.y);
+		const Vec2i tmirror(mpos.x - rpos.x - tpos.x, mpos.y - rpos.y - tpos.y);
+		const Vec2i tmirrorh(rpos.x, tmirror.y);
+		const Vec2i tmirrorv(tmirror.x, rpos.y);
 		int tile = GRASS_TILE;
 		const int z = type.TileHeight;
 
@@ -625,28 +620,28 @@ static void EditorRandomizeUnit(const char *unit_type, int count, int value)
 
 		// FIXME: can overlap units
 		CUnit *unit = MakeUnitAndPlace(rpos, type, &Players[PlayerNumNeutral]);
-		if (unit != NoUnitP) {
+		if (unit == NULL) {
 			DebugPrint("Unable to allocate Unit");
 		} else {
 			unit->ResourcesHeld = value;
 		}
 
 		unit = MakeUnitAndPlace(tmirrorh, type, &Players[PlayerNumNeutral]);
-		if (unit != NoUnitP) {
+		if (unit == NULL) {
 			DebugPrint("Unable to allocate Unit");
 		} else {
 			unit->ResourcesHeld = value;
 		}
 
 		unit = MakeUnitAndPlace(tmirrorv, type, &Players[PlayerNumNeutral]);
-		if (unit != NoUnitP) {
+		if (unit == NULL) {
 			DebugPrint("Unable to allocate Unit");
 		} else {
 			unit->ResourcesHeld = value;
 		}
 
 		unit = MakeUnitAndPlace(tmirror, type, &Players[PlayerNumNeutral]);
-		if (unit != NoUnitP) {
+		if (unit == NULL) {
 			DebugPrint("Unable to allocate Unit");
 		} else {
 			unit->ResourcesHeld = value;
@@ -659,8 +654,8 @@ static void EditorRandomizeUnit(const char *unit_type, int count, int value)
 */
 static void EditorDestroyAllUnits()
 {
-	while (NumUnits != 0) {
-		CUnit &unit = *Units[0];
+	while (UnitManager.empty() == false) {
+		CUnit &unit = **UnitManager.begin();
 
 		unit.Remove(NULL);
 		UnitLost(unit);
@@ -679,7 +674,7 @@ void CEditor::CreateRandomMap() const
 	mz = Map.Info.MapWidth > Map.Info.MapHeight ? Map.Info.MapWidth : Map.Info.MapHeight;
 
 	// make water-base
-	const Vec2i zeros = {0, 0};
+	const Vec2i zeros(0, 0);
 	TileFill(zeros, WATER_TILE, mz * 3);
 	// remove all units
 	EditorDestroyAllUnits();

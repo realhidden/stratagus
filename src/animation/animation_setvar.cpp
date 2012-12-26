@@ -39,6 +39,9 @@
 
 #include "actions.h"
 #include "unit.h"
+#include "unit_manager.h"
+
+#include <stdio.h>
 
 //Modify types
 #define MOD_ADD 1
@@ -54,26 +57,12 @@
 
 	char arg1[128];
 	CUnit *goal = &unit;
-
 	strcpy(arg1, this->varStr.c_str());
-	const int rop = ParseAnimInt(&unit, this->valueStr.c_str());
 
-	char *next = strchr(arg1, '.');
-	if (next == NULL) {
-		fprintf(stderr, "Need also specify the variable '%s' tag \n" _C_ arg1);
-		Exit(1);
-	} else {
-		*next = '\0';
-	}
-	const int index = UnitTypeVar.VariableNameLookup[arg1];// User variables
-	if (index == -1) {
-		fprintf(stderr, "Bad variable name '%s'\n" _C_ arg1);
-		Exit(1);
-	}
 	if (this->unitSlotStr.empty() == false) {
 		switch (this->unitSlotStr[0]) {
 			case 'l': // last created unit
-				goal = Units[NumUnits - 1];
+				goal = UnitManager.lastCreatedUnit();
 				break;
 			case 't': // target unit
 				goal = unit.CurrentOrder()->GetGoal();
@@ -86,6 +75,34 @@
 	if (!goal) {
 		return;
 	}
+
+	char *next = strchr(arg1, '.');
+	if (next == NULL) {
+		// Special case for non-CVariable variables
+		if (!strcmp(arg1, "DamageType")) {
+			int death = ExtraDeathIndex(this->valueStr.c_str());
+			if (death == ANIMATIONS_DEATHTYPES) {
+				fprintf(stderr, "Incorrect death type : %s \n" _C_ this->valueStr.c_str());
+				Exit(1);
+				return;
+			}
+			goal->Type->DamageType = this->valueStr;
+			return;
+		}
+		fprintf(stderr, "Need also specify the variable '%s' tag \n" _C_ arg1);
+		Exit(1);
+		return;
+	} else {
+		*next = '\0';
+	}
+	const int index = UnitTypeVar.VariableNameLookup[arg1];// User variables
+	if (index == -1) {
+		fprintf(stderr, "Bad variable name '%s'\n" _C_ arg1);
+		Exit(1);
+		return;
+	}
+
+	const int rop = ParseAnimInt(&unit, this->valueStr.c_str());
 	int value = 0;
 	if (!strcmp(next + 1, "Value")) {
 		value = goal->Variable[index].Value;
@@ -110,6 +127,7 @@
 			if (!rop) {
 				fprintf(stderr, "Division by zero in AnimationSetVar\n");
 				Exit(1);
+				return;
 			}
 			value /= rop;
 			break;
@@ -117,6 +135,7 @@
 			if (!rop) {
 				fprintf(stderr, "Division by zero in AnimationSetVar\n");
 				Exit(1);
+				return;
 			}
 			value %= rop;
 			break;

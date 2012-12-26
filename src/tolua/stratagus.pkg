@@ -1,18 +1,21 @@
 $#include "stratagus.h"
-$#include "ui.h"
-$#include "minimap.h"
-$#include "player.h"
-$#include "unittype.h"
-$#include "unit.h"
-$#include "video.h"
+
+$#include "ai.h"
 $#include "font.h"
-$#include "widgets.h"
+$#include "game.h"
+$#include "iolib.h"
+$#include "map.h"
+$#include "minimap.h"
+$#include "movie.h"
+$#include "netconnect.h"
+$#include "player.h"
 $#include "sound.h"
 $#include "sound_server.h"
-$#include "netconnect.h"
-$#include "map.h"
-$#include "ai.h"
-$#include "movie.h"
+$#include "ui.h"
+$#include "unit.h"
+$#include "unittype.h"
+$#include "video.h"
+$#include "widgets.h"
 
 $#ifdef _MSC_VER
 $#pragma warning(disable:4800)
@@ -47,10 +50,10 @@ $]
 #define FoodCost MaxCosts
 #define ScoreCost MaxCosts + 1
 #define ManaResCost MaxCosts + 2
-#define MaxResourceInfo MaxCosts + 3
+#define FreeWorkersCount MaxCosts + 3
+#define MaxResourceInfo MaxCosts + 4
 #define PlayerMax 16
 #define PlayerNumNeutral (PlayerMax - 1)
-#define UnitMax 65536
 
 #define NoButton 0
 #define LeftButton 2
@@ -59,30 +62,27 @@ $]
 #define UpButton 16
 #define DownButton 32
 
-$pfile "minimap.pkg"
-$pfile "ui.pkg"
-$pfile "network.pkg"
-$pfile "video.pkg"
-$pfile "font.pkg"
-$pfile "upgrade.pkg"
-$pfile "player.pkg"
-$pfile "unittype.pkg"
-$pfile "unit.pkg"
-$pfile "sound.pkg"
+$using std::string;
+$using std::vector;
+
+$pfile "ai.pkg"
 $pfile "editor.pkg"
+$pfile "font.pkg"
 $pfile "game.pkg"
 $pfile "map.pkg"
-$pfile "ai.pkg"
-$pfile "pathfinder.pkg"
-$pfile "trigger.pkg"
+$pfile "minimap.pkg"
+$pfile "network.pkg"
 $pfile "particle.pkg"
-
-extern const char *Translate(const char *str);
-extern void AddTranslation(const char *str1, const char *str2);
-extern void LoadPO(const char *file);
-extern void SetTranslationsFiles(const char *stratagusfile, const char *gamefile);
-extern std::string StratagusTranslation;
-extern std::string GameTranslation;
+$pfile "pathfinder.pkg"
+$pfile "player.pkg"
+$pfile "sound.pkg"
+$pfile "translate.pkg"
+$pfile "trigger.pkg"
+$pfile "ui.pkg"
+$pfile "unit.pkg"
+$pfile "unittype.pkg"
+$pfile "upgrade.pkg"
+$pfile "video.pkg"
 
 extern int SaveGame(const std::string filename);
 extern void DeleteSaveGame(const std::string filename);

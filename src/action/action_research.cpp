@@ -33,9 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "action/action_research.h"
@@ -46,6 +43,7 @@
 #include "script.h"
 #include "sound.h"
 #include "player.h"
+#include "translate.h"
 #include "unit.h"
 #include "unitsound.h"
 #include "unittype.h"
@@ -135,7 +133,7 @@
 	}
 #endif
 	CPlayer &player = *unit.Player;
-	player.UpgradeTimers.Upgrades[upgrade.ID] += SpeedResearch;
+	player.UpgradeTimers.Upgrades[upgrade.ID] += player.SpeedResearch / SPEEDUP_FACTOR;
 	if (player.UpgradeTimers.Upgrades[upgrade.ID] >= upgrade.Costs[TimeCost]) {
 		player.Notify(NotifyGreen, unit.tilePos, _("%s: research complete"), type.Name.c_str());
 		if (&player == ThisPlayer) {

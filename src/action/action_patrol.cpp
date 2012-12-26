@@ -33,9 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "action/action_patrol.h"
@@ -47,6 +44,7 @@
 #include "ui.h"
 #include "unit.h"
 #include "unittype.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -131,7 +129,7 @@
 {
 	input.SetMinRange(0);
 	input.SetMaxRange(this->Range);
-	const Vec2i tileSize = {0, 0};
+	const Vec2i tileSize(0, 0);
 	input.SetGoal(this->goalPos, tileSize);
 }
 

@@ -33,9 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "action/action_repair.h"
@@ -48,9 +45,11 @@
 #include "player.h"
 #include "script.h"
 #include "sound.h"
+#include "translate.h"
 #include "unit.h"
 #include "ui.h"
 #include "unittype.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -272,7 +271,6 @@ static void AnimateActionRepair(CUnit &unit)
 				// Have reached target? FIXME: could use return value
 				if (goal && unit.MapDistanceTo(*goal) <= unit.Type->RepairRange
 					&& goal->Variable[HP_INDEX].Value < goal->Variable[HP_INDEX].Max) {
-					unit.State = 0;
 					this->State = 2;
 					this->RepairCycle = 0;
 					const Vec2i dir = goal->tilePos + goal->Type->GetHalfTileSize() - unit.tilePos;
@@ -310,7 +308,6 @@ static void AnimateActionRepair(CUnit &unit)
 						}
 					} else if (dist > unit.Type->RepairRange) {
 						// If goal has move, chase after it
-						unit.State = 0;
 						this->State = 0;
 					}
 				}

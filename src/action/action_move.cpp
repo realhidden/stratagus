@@ -33,9 +33,6 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include "action/action_move.h"
@@ -51,6 +48,7 @@
 #include "ui.h"
 #include "unit.h"
 #include "unittype.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -116,7 +114,7 @@
 {
 	input.SetMinRange(0);
 	input.SetMaxRange(this->Range);
-	const Vec2i tileSize = {0, 0};
+	const Vec2i tileSize(0, 0);
 
 	input.SetGoal(this->goalPos, tileSize);
 }
@@ -133,7 +131,6 @@ int DoActionMove(CUnit &unit)
 {
 	Vec2i posd; // movement in tile.
 	int d;
-	Vec2i pos;
 
 	Assert(unit.CanMove());
 
@@ -170,23 +167,22 @@ int DoActionMove(CUnit &unit)
 				unit.Moving = 1;
 				break;
 		}
-		pos = unit.tilePos;
-		int off = unit.Offset;
-		//
-		// Transporter (un)docking?
-		//
-		// FIXME: This is an ugly hack
-		if (unit.Type->CanTransport()
-			&& ((Map.WaterOnMap(off) && Map.CoastOnMap(pos + posd))
-				|| (Map.CoastOnMap(off) && Map.WaterOnMap(pos + posd)))) {
-			PlayUnitSound(unit, VoiceDocking);
-		}
 
-		pos = unit.tilePos + posd;
+		if (unit.Type->UnitType == UnitTypeNaval) { // Boat (un)docking?
+			const CMapField &mf_cur = *Map.Field(unit.Offset);
+			const CMapField &mf_next = *Map.Field(unit.tilePos + posd);
+
+			if (mf_cur.WaterOnMap() && mf_next.CoastOnMap()) {
+				PlayUnitSound(unit, VoiceDocking);
+			} else if (mf_cur.CoastOnMap() && mf_next.WaterOnMap()) {
+				PlayUnitSound(unit, VoiceDocking); // undocking
+			}
+		}
+		Vec2i pos = unit.tilePos + posd;
 		unit.MoveToXY(pos);
 
 		// Remove unit from the current selection
-		if (unit.Selected && !Map.IsFieldVisible(*ThisPlayer, pos)) {
+		if (unit.Selected && !Map.Field(pos)->playerInfo.IsTeamVisible(*ThisPlayer)) {
 			if (NumSelected == 1) { //  Remove building cursor
 				CancelBuildingMode();
 			}

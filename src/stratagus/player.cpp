@@ -33,26 +33,25 @@
 -- Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <stdarg.h>
 
 #include "stratagus.h"
-#include "video.h"
-#include "sound.h"
-#include "unitsound.h"
-#include "unittype.h"
+
 #include "player.h"
-#include "unit.h"
-#include "map.h"
+
+#include "actions.h"
 #include "ai.h"
+#include "iolib.h"
+#include "map.h"
 #include "network.h"
 #include "netconnect.h"
-#include "interface.h"
-#include "iolib.h"
+#include "sound.h"
+#include "translate.h"
+#include "unitsound.h"
+#include "unittype.h"
+#include "unit.h"
 #include "ui.h"
-#include "actions.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Documentation
@@ -317,8 +316,8 @@ bool NoRescueCheck;               /// Disable rescue check
 /**
 **  Colors used for minimap.
 */
-SDL_Color *PlayerColorsRGB[PlayerMax];
-Uint32 *PlayerColors[PlayerMax];
+std::vector<CColor> PlayerColorsRGB[PlayerMax];
+std::vector<IntColor> PlayerColors[PlayerMax];
 
 std::string PlayerColorNames[PlayerMax];
 
@@ -333,6 +332,30 @@ int PlayerColorIndexCount;
 ----------------------------------------------------------------------------*/
 
 /**
+**  Clean up the PlayerRaces names.
+*/
+void PlayerRace::Clean()
+{
+	for (unsigned int i = 0; i != this->Count; ++i) {
+		this->Name[i].clear();
+		this->Display[i].clear();
+		this->Visible[i] = false;
+	}
+	this->Count = 0;
+}
+
+int PlayerRace::GetRaceIndexByName(const char *raceName) const
+{
+	for (unsigned int i = 0; i != this->Count; ++i) {
+		if (this->Name[i].compare(raceName) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+
+/**
 **  Init players.
 */
 void InitPlayers()
@@ -343,9 +366,7 @@ void InitPlayers()
 			Players[p].Type = PlayerNobody;
 		}
 		for (int x = 0; x < PlayerColorIndexCount; ++x) {
-			PlayerColors[p][x] = Video.MapRGB(TheScreen->format,
-											  PlayerColorsRGB[p][x].r,
-											  PlayerColorsRGB[p][x].g, PlayerColorsRGB[p][x].b);
+			PlayerColors[p][x] = Video.MapRGB(TheScreen->format, PlayerColorsRGB[p][x]);
 		}
 	}
 }
@@ -367,26 +388,12 @@ void CleanPlayers()
 void FreePlayerColors()
 {
 	for (int i = 0; i < PlayerMax; ++i) {
-		delete[] Players[i].UnitColors.Colors;
-		delete[] PlayerColorsRGB[i];
-		PlayerColorsRGB[i] = NULL;
-		delete[] PlayerColors[i];
-		PlayerColors[i] = NULL;
+		Players[i].UnitColors.Colors.clear();
+		PlayerColorsRGB[i].clear();
+		PlayerColors[i].clear();
 	}
 }
 #endif
-
-/**
-**  Clean up the PlayerRaces names.
-*/
-void CleanRaces()
-{
-	for (unsigned int i = 0; i < PlayerRaces.Count; ++i) {
-		PlayerRaces.Name[i].clear();
-		PlayerRaces.Display[i].clear();
-	}
-	PlayerRaces.Count = 0;
-}
 
 /**
 **  Save state of players to file.
@@ -515,6 +522,27 @@ void CPlayer::Save(CFile &file) const
 	file.printf("\n  \"total-razings\", %d,", p.TotalRazings);
 	file.printf("\n  \"total-kills\", %d,", p.TotalKills);
 
+	file.printf("\n  \"speed-resource-harvest\", {");
+	for (int j = 0; j < MaxCosts; ++j) {
+		if (j) {
+			file.printf(" ");
+		}
+		file.printf("%d,", p.SpeedResourcesHarvest[j]);
+	}
+	file.printf("},");
+	file.printf("\n  \"speed-resource-return\", {");
+	for (int j = 0; j < MaxCosts; ++j) {
+		if (j) {
+			file.printf(" ");
+		}
+		file.printf("%d,", p.SpeedResourcesReturn[j]);
+	}
+	file.printf("},");
+	file.printf("\n  \"speed-build\", %d,", p.SpeedBuild);
+	file.printf("\n  \"speed-train\", %d,", p.SpeedTrain);
+	file.printf("\n  \"speed-upgrade\", %d,", p.SpeedUpgrade);
+	file.printf("\n  \"speed-research\", %d,", p.SpeedResearch);
+
 	Uint8 r, g, b;
 
 	SDL_GetRGB(p.Color, TheScreen->format, &r, &g, &b);
@@ -556,6 +584,7 @@ void CreatePlayer(int type)
 void CPlayer::Init(/* PlayerTypes */ int type)
 {
 	this->Units.resize(0);
+	this->FreeWorkers.resize(0);
 
 	//  Take first slot for person on this computer,
 	//  fill other with computer players.
@@ -727,6 +756,7 @@ void CPlayer::Clear()
 	AiEnabled = false;
 	Ai = 0;
 	this->Units.resize(0);
+	this->FreeWorkers.resize(0);
 	NumBuildings = 0;
 	Supply = 0;
 	Demand = 0;
@@ -742,6 +772,14 @@ void CPlayer::Clear()
 	TotalKills = 0;
 	Color = 0;
 	UpgradeTimers.Clear();
+	for (int i = 0; i < MaxCosts; ++i) {
+		SpeedResourcesHarvest[i] = SPEEDUP_FACTOR;
+		SpeedResourcesReturn[i] = SPEEDUP_FACTOR;
+	}
+	SpeedBuild = SPEEDUP_FACTOR;
+	SpeedTrain = SPEEDUP_FACTOR;
+	SpeedUpgrade = SPEEDUP_FACTOR;
+	SpeedResearch = SPEEDUP_FACTOR;
 }
 
 
@@ -770,6 +808,20 @@ void CPlayer::RemoveUnit(CUnit &unit)
 	Assert(last == &unit || this->Units[last->PlayerSlot] == last);
 }
 
+void CPlayer::UpdateFreeWorkers()
+{
+	FreeWorkers.clear();
+	const int nunits = this->GetUnitCount();
+
+	for (int i = 0; i < nunits; ++i) {
+		CUnit &unit = this->GetUnit(i);
+		if (unit.Type->Harvester && unit.Type->ResInfo && !unit.Removed) {
+			if (unit.CurrentAction() == UnitActionStill) {
+				FreeWorkers.push_back(&unit);
+			}
+		}
+	}
+}
 
 
 std::vector<CUnit *>::const_iterator CPlayer::UnitBegin() const
@@ -812,18 +864,18 @@ int CPlayer::GetUnitCount() const
 **  Gets the player resource.
 **
 **  @param resource  Resource to get.
-**  @param store     Resource type to get
+**  @param type      Storing type
 **
-**  @note Resource types: 0 - overall store, 1 - store buildings, 2 - both
+**  @note Storing types: 0 - overall store, 1 - store buildings, 2 - both
 */
-int CPlayer::GetResource(int resource, int type)
+int CPlayer::GetResource(const int resource, const int type)
 {
 	switch (type) {
-		case 0:
+		case STORE_OVERALL:
 			return this->Resources[resource];
-		case 1:
+		case STORE_BUILDING:
 			return this->StoredResources[resource];
-		case 2:
+		case STORE_BOTH:
 			return this->Resources[resource] + this->StoredResources[resource];
 		default:
 			DebugPrint("Wrong resource type\n");
@@ -838,12 +890,15 @@ int CPlayer::GetResource(int resource, int type)
 **  @param value     How many of this resource (can be negative).
 **  @param store     If true, sets the building store resources, else the overall resources.
 */
-void CPlayer::ChangeResource(int resource, int value, bool store)
+void CPlayer::ChangeResource(const int resource, const int value, const bool store)
 {
 	if (value < 0) {
-		int fromStore = std::min(this->StoredResources[resource], abs(value));
+		const int fromStore = std::min(this->StoredResources[resource], abs(value));
 		this->StoredResources[resource] -= fromStore;
 		this->Resources[resource] -= abs(value) - fromStore;
+		if (this->Resources[resource] < 0) {
+			this->Resources[resource] = 0;
+		}
 	} else {
 		if (store && this->MaxResources[resource] != -1) {
 			this->StoredResources[resource] += std::min(value, this->MaxResources[resource] - this->StoredResources[resource]);
@@ -858,13 +913,21 @@ void CPlayer::ChangeResource(int resource, int value, bool store)
 **
 **  @param resource  Resource to change.
 **  @param value     How many of this resource.
-**  @param store     If true, sets the building store resources, else the overall resources.
+**  @param type      Resource types: 0 - overall store, 1 - store buildings, 2 - both
 */
-void CPlayer::SetResource(int resource, int value, bool store)
+void CPlayer::SetResource(const int resource, const int value, const int type)
 {
-	if (store && this->MaxResources[resource] != -1) {
+	if (type == STORE_BOTH) {
+		if (this->MaxResources[resource] != -1) {
+			const int toRes = std::max(0, value - this->StoredResources[resource]);
+			this->Resources[resource] = std::max(0, toRes);
+			this->StoredResources[resource] = std::min(value - toRes, this->MaxResources[resource]);
+		} else {
+			this->Resources[resource] = value;
+		}
+	} else if (type == STORE_BUILDING && this->MaxResources[resource] != -1) {
 		this->StoredResources[resource] = std::min(value, this->MaxResources[resource]);
-	} else {
+	} else if (type == STORE_OVERALL) {
 		this->Resources[resource] = value;
 	}
 }
@@ -875,7 +938,7 @@ void CPlayer::SetResource(int resource, int value, bool store)
 **  @param resource  Resource to change.
 **  @param value     How many of this resource.
 */
-bool CPlayer::CheckResource(int resource, int value)
+bool CPlayer::CheckResource(const int resource, const int value)
 {
 	int result = this->Resources[resource];
 	if (this->MaxResources[resource] != -1) {
@@ -896,35 +959,27 @@ bool CPlayer::CheckResource(int resource, int value)
 int CPlayer::CheckLimits(const CUnitType &type) const
 {
 	//  Check game limits.
-	if (NumUnits < UnitMax) {
-		if (type.Building && NumBuildings >= BuildingLimit) {
-			Notify("%s", _("Building Limit Reached"));
-			return -1;
-		}
-		if (!type.Building && (this->GetUnitCount() - NumBuildings) >= UnitLimit) {
-			Notify("%s", _("Unit Limit Reached"));
-			return -2;
-		}
-		if (this->Demand + type.Demand > this->Supply && type.Demand) {
-			Notify("%s", _("Insufficient Supply, increase Supply."));
-			return -3;
-		}
-		if (this->GetUnitCount() >= TotalUnitLimit) {
-			Notify("%s", _("Total Unit Limit Reached"));
-			return -4;
-		}
-		if (UnitTypesCount[type.Slot] >=  Allow.Units[type.Slot]) {
-			Notify(_("Limit of %d reached for this unit type"), Allow.Units[type.Slot]);
-			return -6;
-		}
-		return 1;
-	} else {
-		Notify("%s", _("Cannot create more units."));
-		if (AiEnabled) {
-			// AiNoMoreUnits(player, type);
-		}
-		return -5;
+	if (type.Building && NumBuildings >= BuildingLimit) {
+		Notify("%s", _("Building Limit Reached"));
+		return -1;
 	}
+	if (!type.Building && (this->GetUnitCount() - NumBuildings) >= UnitLimit) {
+		Notify("%s", _("Unit Limit Reached"));
+		return -2;
+	}
+	if (this->Demand + type.Demand > this->Supply && type.Demand) {
+		Notify("%s", _("Insufficient Supply, increase Supply."));
+		return -3;
+	}
+	if (this->GetUnitCount() >= TotalUnitLimit) {
+		Notify("%s", _("Total Unit Limit Reached"));
+		return -4;
+	}
+	if (UnitTypesCount[type.Slot] >=  Allow.Units[type.Slot]) {
+		Notify(_("Limit of %d reached for this unit type"), Allow.Units[type.Slot]);
+		return -6;
+	}
+	return 1;
 }
 
 /**
@@ -949,7 +1004,7 @@ int CPlayer::CheckCosts(const int *costs) const
 		Notify(_("Not enough %s...%s more %s."), name, actionName, name);
 
 		err |= 1 << i;
-		if (GameSounds.NotEnoughRes[this->Race][i].Sound) {
+		if (this == ThisPlayer && GameSounds.NotEnoughRes[this->Race][i].Sound) {
 			PlayGameSound(GameSounds.NotEnoughRes[this->Race][i].Sound, MaxSampleVolume);
 		}
 	}
@@ -1109,6 +1164,8 @@ void PlayersEachSecond(int playerIdx)
 	if (player.AiEnabled) {
 		AiEachSecond(player);
 	}
+
+	player.UpdateFreeWorkers();
 }
 
 /**
@@ -1124,9 +1181,10 @@ void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite)
 	Assert(PlayerColorIndexCount);
 
 	SDL_LockSurface(sprite.Surface);
-	SDL_SetColors(sprite.Surface, player.UnitColors.Colors, PlayerColorIndexStart, PlayerColorIndexCount);
+	std::vector<SDL_Color> sdlColors(player.UnitColors.Colors.begin(), player.UnitColors.Colors.end());
+	SDL_SetColors(sprite.Surface, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
 	if (sprite.SurfaceFlip) {
-		SDL_SetColors(sprite.SurfaceFlip, player.UnitColors.Colors, PlayerColorIndexStart, PlayerColorIndexCount);
+		SDL_SetColors(sprite.SurfaceFlip, &sdlColors[0], PlayerColorIndexStart, PlayerColorIndexCount);
 	}
 	SDL_UnlockSurface(sprite.Surface);
 }
@@ -1139,9 +1197,7 @@ void GraphicPlayerPixels(CPlayer &player, const CGraphic &sprite)
 void SetPlayersPalette()
 {
 	for (int i = 0; i < PlayerMax; ++i) {
-		delete[] Players[i].UnitColors.Colors;
-		Players[i].UnitColors.Colors = new SDL_Color[PlayerColorIndexCount];
-		memcpy(Players[i].UnitColors.Colors, PlayerColorsRGB[i], sizeof(SDL_Color) * PlayerColorIndexCount);
+		Players[i].UnitColors.Colors = PlayerColorsRGB[i];
 	}
 }
 

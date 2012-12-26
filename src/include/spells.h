@@ -56,69 +56,6 @@ class MissileType;
 ----------------------------------------------------------------------------*/
 
 /**
-**  Different targets.
-*/
-enum TargetType {
-	TargetSelf,
-	TargetPosition,
-	TargetUnit
-};
-
-/**
-**  Different targets.
-*/
-enum LocBaseType {
-	LocBaseCaster,
-	LocBaseTarget
-};
-
-/**
-**  This struct is used for defining a missile start/stop location.
-**
-**  It's evaluated like this, and should be more or less flexible.:
-**  base coordinates(caster or target) + (AddX,AddY) + (rand()%AddRandX,rand()%AddRandY)
-*/
-class SpellActionMissileLocation
-{
-public:
-	SpellActionMissileLocation(LocBaseType base) : Base(base), AddX(0), AddY(0),
-		AddRandX(0), AddRandY(0) {} ;
-
-	LocBaseType Base;   /// The base for the location (caster/target)
-	int AddX;           /// Add to the X coordinate
-	int AddY;           /// Add to the X coordinate
-	int AddRandX;       /// Random add to the X coordinate
-	int AddRandY;       /// Random add to the X coordinate
-};
-
-class SpellActionTypeAdjustVariable
-{
-public:
-	SpellActionTypeAdjustVariable() : Enable(0), Value(0), Max(0), Increase(0),
-		ModifEnable(0), ModifValue(0), ModifMax(0), ModifIncrease(0),
-		InvertEnable(0), AddValue(0), AddMax(0), AddIncrease(0), IncreaseTime(0),
-		TargetIsCaster(0) {};
-
-	int Enable;                 /// Value to affect to this field.
-	int Value;                  /// Value to affect to this field.
-	int Max;                    /// Value to affect to this field.
-	int Increase;               /// Value to affect to this field.
-
-	char ModifEnable;           /// true if we modify this field.
-	char ModifValue;            /// true if we modify this field.
-	char ModifMax;              /// true if we modify this field.
-	char ModifIncrease;         /// true if we modify this field.
-
-	char InvertEnable;          /// true if we invert this field.
-	int AddValue;               /// Add this value to this field.
-	int AddMax;                 /// Add this value to this field.
-	int AddIncrease;            /// Add this value to this field.
-	int IncreaseTime;           /// How many time increase the Value field.
-	char TargetIsCaster;        /// true if the target is the caster.
-};
-
-
-/**
 **  Generic spell action virtual class.
 **  Spells are sub class of this one
 */
@@ -128,141 +65,21 @@ public:
 	SpellActionType(int mod = 0) : ModifyManaCaster(mod) {};
 	virtual ~SpellActionType() {};
 
-	virtual int Cast(CUnit &caster, const SpellType *spell,
+	virtual int Cast(CUnit &caster, const SpellType &spell,
 					 CUnit *target, const Vec2i &goalPos) = 0;
+	virtual void Parse(lua_State *l, int startIndex, int endIndex) = 0;
 
 	const int ModifyManaCaster;
 };
 
-//
-//  Specific spells.
-//
 
-class AreaAdjustVitals : public SpellActionType
-{
-public:
-	AreaAdjustVitals() : HP(0), Mana(0) {};
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	int HP;         /// Target HP gain.(can be negative)
-	int Mana;       /// Target Mana gain.(can be negative)
-} ;
-
-class SpawnMissile : public SpellActionType
-{
-public:
-	SpawnMissile() : Damage(0), TTL(-1), Delay(0), UseUnitVar(false),
-		StartPoint(LocBaseCaster), EndPoint(LocBaseTarget), Missile(0) {}
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	int Damage;                             /// Missile damage.
-	int TTL;                                /// Missile TTL.
-	int Delay;                              /// Missile original delay.
-	bool UseUnitVar;                        /// Use the caster's damage parameters
-	SpellActionMissileLocation StartPoint;  /// Start point description.
-	SpellActionMissileLocation EndPoint;    /// Start point description.
-	MissileType *Missile;                   /// Missile fired on cast
-};
-
-class Demolish : public SpellActionType
-{
-public:
-	Demolish() : Damage(0), Range(0) {};
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	int Damage; /// Damage for every unit in range.
-	int Range;  /// Range of the explosion.
-};
-
-class AreaBombardment : public SpellActionType
-{
-public:
-	AreaBombardment() : Fields(0), Shards(0), Damage(0),
-		StartOffsetX(0), StartOffsetY(0), Missile(NULL) {};
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	int Fields;             /// The size of the affected square.
-	int Shards;             /// Number of shards thrown.
-	int Damage;             /// Damage for every shard.
-	int StartOffsetX;       /// The offset of the missile start point to the hit location.
-	int StartOffsetY;       /// The offset of the missile start point to the hit location.
-	MissileType *Missile;   /// Missile fired on cast
-};
-
-class SpawnPortal : public SpellActionType
-{
-public:
-	SpawnPortal() : PortalType(0) {};
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	CUnitType *PortalType;   /// The unit type spawned
-};
-
-class AdjustVariable : public SpellActionType
-{
-public:
-	AdjustVariable() : Var(NULL) {};
-	~AdjustVariable() { delete [](this->Var); };
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	SpellActionTypeAdjustVariable *Var;
-};
-
-class AdjustVitals : public SpellActionType
-{
-public:
-	AdjustVitals() : SpellActionType(1), HP(0), Mana(0), MaxMultiCast(0) {};
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	int HP;         /// Target HP gain.(can be negative)
-	int Mana;       /// Target Mana gain.(can be negative)
-	/// This spell is designed to be used wit very small amounts. The spell
-	/// can scale up to MaxMultiCast times. Use 0 for infinite.
-	int MaxMultiCast;
-};
-
-class Polymorph : public SpellActionType
-{
-public:
-	Polymorph() : SpellActionType(1), NewForm(NULL), PlayerNeutral(0) {};
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	CUnitType *NewForm;         /// The new form
-	int PlayerNeutral;          /// Convert the unit to the neutral player, or to the caster's player.
-	// TODO: temporary polymorphs would be awesome, but hard to implement
-};
-
-class Summon : public SpellActionType
-{
-public:
-	Summon() : SpellActionType(1), UnitType(NULL), TTL(0), RequireCorpse(0) {};
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	CUnitType *UnitType;    /// Type of unit to be summoned.
-	int TTL;                /// Time to live for summoned unit. 0 means infinite
-	int RequireCorpse;      /// Corpse consumed while summoning.
-};
-
-class Capture : public SpellActionType
-{
-public:
-	Capture() : SacrificeEnable(0), Damage(0), DamagePercent(0) {};
-	virtual int Cast(CUnit &caster, const SpellType *spell,
-					 CUnit *target, const Vec2i &goalPos);
-
-	char SacrificeEnable; /// true if the caster dies after casting.
-	int Damage;           /// damage the spell does if unable to caputre
-	int DamagePercent;    /// percent the target must be damaged for a
-	/// capture to suceed.
+/**
+**  Different targets.
+*/
+enum TargetType {
+	TargetSelf,
+	TargetPosition,
+	TargetUnit
 };
 
 /*
@@ -428,15 +245,15 @@ extern void CleanSpells();
 extern bool SpellIsAvailable(const CPlayer &player, int SpellId);
 
 /// returns true if spell can be casted (enough mana, valid target)
-extern bool CanCastSpell(const CUnit &caster, const SpellType *spell,
+extern bool CanCastSpell(const CUnit &caster, const SpellType &spell,
 						 const CUnit *target, const Vec2i &goalPos);
 
 /// cast spell on target unit or place at x,y
-extern int SpellCast(CUnit &caster, const SpellType *spell,
+extern int SpellCast(CUnit &caster, const SpellType &spell,
 					 CUnit *target, const Vec2i &goalPos);
 
 /// auto cast the spell if possible
-extern int AutoCastSpell(CUnit &caster, const SpellType *spell);
+extern int AutoCastSpell(CUnit &caster, const SpellType &spell);
 
 /// return spell type by ident string
 extern SpellType *SpellTypeByIdent(const std::string &ident);

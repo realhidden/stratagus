@@ -34,50 +34,178 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
-
-#ifndef _MSC_VER
-#include <fcntl.h>
-#endif
-
 #include "stratagus.h"
+
+#include "iolib.h"
+
+#include "game.h"
 #include "iocompat.h"
 #include "map.h"
 #include "util.h"
-#include "iolib.h"
 
+#include <stdarg.h>
+#include <stdio.h>
+
+#ifdef USE_ZLIB
 #include <zlib.h>
+#endif
 
-/*----------------------------------------------------------------------------
---  Defines
-----------------------------------------------------------------------------*/
+#ifdef USE_BZ2LIB
+#include <bzlib.h>
+#endif
+
+class CFile::PImpl
+{
+public:
+	PImpl();
+	~PImpl();
+
+	int open(const char *name, long flags);
+	int close();
+	void flush();
+	int read(void *buf, size_t len);
+	int seek(long offset, int whence);
+	long tell();
+	int write(const void *buf, size_t len);
+
+private:
+	PImpl(const PImpl &rhs); // No implementation
+	const PImpl &operator = (const PImpl &rhs); // No implementation
+
+private:
+	int   cl_type;   /// type of CFile
+	FILE *cl_plain;  /// standard file pointer
+#ifdef USE_ZLIB
+	gzFile cl_gz;    /// gzip file pointer
+#endif // !USE_ZLIB
+#ifdef USE_BZ2LIB
+	BZFILE *cl_bz;   /// bzip2 file pointer
+#endif // !USE_BZ2LIB
+};
+
+CFile::CFile() : pimpl(new CFile::PImpl)
+{
+}
+
+CFile::~CFile()
+{
+	delete pimpl;
+}
 
 
-/*----------------------------------------------------------------------------
---  Variables
-----------------------------------------------------------------------------*/
+/**
+**  CLopen Library file open
+**
+**  @param name       File name.
+**  @param openflags  Open read, or write and compression options
+**
+**  @return File Pointer
+*/
+int CFile::open(const char *name, long flags)
+{
+	return pimpl->open(name, flags);
+}
 
+/**
+**  CLclose Library file close
+*/
+int CFile::close()
+{
+	return pimpl->close();
+}
 
-/*----------------------------------------------------------------------------
---  Functions
-----------------------------------------------------------------------------*/
+void CFile::flush()
+{
+	pimpl->flush();
+}
 
+/**
+**  CLread Library file read
+**
+**  @param buf  Pointer to read the data to.
+**  @param len  number of bytes to read.
+*/
+int CFile::read(void *buf, size_t len)
+{
+	return pimpl->read(buf, len);
+}
 
-CFile::CFile()
+/**
+**  CLseek Library file seek
+**
+**  @param offset  Seek position
+**  @param whence  How to seek
+*/
+int CFile::seek(long offset, int whence)
+{
+	return pimpl->seek(offset, whence);
+}
+
+/**
+**  CLtell Library file tell
+*/
+long CFile::tell()
+{
+	return pimpl->tell();
+}
+
+/**
+**  CLprintf Library file write
+**
+**  @param format  String Format.
+**  @param ...     Parameter List.
+*/
+int CFile::printf(const char *format, ...)
+{
+	int size = 500;
+	char *p = new char[size];
+	if (p == NULL) {
+		return -1;
+	}
+	while (1) {
+		// Try to print in the allocated space.
+		va_list ap;
+		va_start(ap, format);
+		const int n = vsnprintf(p, size, format, ap);
+		va_end(ap);
+		// If that worked, string was processed.
+		if (n > -1 && n < size) {
+			break;
+		}
+		// Else try again with more space.
+		if (n > -1) { // glibc 2.1
+			size = n + 1; // precisely what is needed
+		} else {    /* glibc 2.0, vc++ */
+			size *= 2;  // twice the old size
+		}
+		delete[] p;
+		p = new char[size];
+		if (p == NULL) {
+			return -1;
+		}
+	}
+	size = strlen(p);
+	int ret = pimpl->write(p, size);
+	delete[] p;
+	return ret;
+}
+
+//
+//  Implementation.
+//
+
+CFile::PImpl::PImpl()
 {
 	cl_type = CLF_TYPE_INVALID;
 }
 
-CFile::~CFile()
+CFile::PImpl::~PImpl()
 {
 	if (cl_type != CLF_TYPE_INVALID) {
 		DebugPrint("File wasn't closed\n");
 		close();
 	}
 }
-
 
 #ifdef USE_ZLIB
 
@@ -127,17 +255,7 @@ static void bzseek(BZFILE *file, unsigned offset, int)
 
 #endif // USE_BZ2LIB
 
-#if defined(USE_ZLIB) || defined(USE_BZ2LIB)
-
-/**
-**  CLopen Library file open
-**
-**  @param name       File name.
-**  @param openflags  Open read, or write and compression options
-**
-**  @return File Pointer
-*/
-int CFile::open(const char *name, long openflags)
+int CFile::PImpl::open(const char *name, long openflags)
 {
 	char buf[512];
 	const char *openstring;
@@ -228,17 +346,12 @@ int CFile::open(const char *name, long openflags)
 	return 0;
 }
 
-/**
-**  CLclose Library file close
-*/
-int CFile::close()
+int CFile::PImpl::close()
 {
-	int tp;
-	int ret;
+	int ret = EOF;
+	int tp = cl_type;
 
-	ret = EOF;
-
-	if ((tp = cl_type) != CLF_TYPE_INVALID) {
+	if (tp != CLF_TYPE_INVALID) {
 		if (tp == CLF_TYPE_PLAIN) {
 			ret = fclose(cl_plain);
 		}
@@ -260,17 +373,9 @@ int CFile::close()
 	return ret;
 }
 
-/**
-**  CLread Library file read
-**
-**  @param buf  Pointer to read the data to.
-**  @param len  number of bytes to read.
-*/
-int CFile::read(void *buf, size_t len)
+int CFile::PImpl::read(void *buf, size_t len)
 {
-	int ret;
-
-	ret = 0;
+	int ret = 0;
 
 	if (cl_type != CLF_TYPE_INVALID) {
 		if (cl_type == CLF_TYPE_PLAIN) {
@@ -292,7 +397,7 @@ int CFile::read(void *buf, size_t len)
 	return ret;
 }
 
-void CFile::flush()
+void CFile::PImpl::flush()
 {
 	if (cl_type != CLF_TYPE_INVALID) {
 		if (cl_type == CLF_TYPE_PLAIN) {
@@ -313,92 +418,37 @@ void CFile::flush()
 	}
 }
 
-
-/**
-**  CLprintf Library file write
-**
-**  @param format  String Format.
-**  @param ...     Parameter List.
-*/
-int CFile::printf(const char *format, ...)
+int CFile::PImpl::write(const void *buf, size_t size)
 {
-	int n;
-	int size;
-	int ret;
-	int tp;
-	char *p;
-	va_list ap;
-	char *newp;
-	int oldsize;
+	int tp = cl_type;
+	int ret = -1;
 
-	size = 500;
-	ret = -1;
-	if ((p = new char[size]) == NULL) {
-		return -1;
-	}
-	while (1) {
-		// Try to print in the allocated space.
-		va_start(ap, format);
-		n = vsnprintf(p, size, format, ap);
-		va_end(ap);
-		// If that worked, string was processed.
-		if (n > -1 && n < size) {
-			break;
-		}
-		// Else try again with more space.
-		oldsize = size;
-		if (n > -1) { // glibc 2.1
-			size = n + 1; // precisely what is needed
-		} else {    /* glibc 2.0, vc++ */
-			size *= 2;  // twice the old size
-		}
-		if ((newp = new char[size]) == NULL) {
-			delete[] p;
-			return -1;
-		}
-		memcpy(newp, p, oldsize);
-		delete[] p;
-		p = newp;
-	}
-
-	// Allocate the correct size
-	size = strlen(p);
-
-	if ((tp = cl_type) != CLF_TYPE_INVALID) {
+	if (tp != CLF_TYPE_INVALID) {
 		if (tp == CLF_TYPE_PLAIN) {
-			ret = fwrite(p, size, 1, cl_plain);
+			ret = fwrite(buf, size, 1, cl_plain);
 		}
 #ifdef USE_ZLIB
 		if (tp == CLF_TYPE_GZIP) {
-			ret = gzwrite(cl_gz, p, size);
+			ret = gzwrite(cl_gz, buf, size);
 		}
 #endif // USE_ZLIB
 #ifdef USE_BZ2LIB
 		if (tp == CLF_TYPE_BZIP2) {
-			ret = BZ2_bzwrite(cl_bz, p, size);
+			ret = BZ2_bzwrite(cl_bz, const_cast<void *>(buf), size);
 		}
 #endif // USE_BZ2LIB
 	} else {
 		errno = EBADF;
 	}
-	delete[] p;
 	return ret;
 }
 
-/**
-**  CLseek Library file seek
-**
-**  @param offset  Seek position
-**  @param whence  How to seek
-*/
-int CFile::seek(long offset, int whence)
+int CFile::PImpl::seek(long offset, int whence)
 {
-	int tp;
-	int ret;
+	int ret = -1;
+	int tp = cl_type;
 
-	ret = -1;
-
-	if ((tp = cl_type) != CLF_TYPE_INVALID) {
+	if (tp != CLF_TYPE_INVALID) {
 		if (tp == CLF_TYPE_PLAIN) {
 			ret = fseek(cl_plain, offset, whence);
 		}
@@ -419,17 +469,12 @@ int CFile::seek(long offset, int whence)
 	return ret;
 }
 
-/**
-**  CLtell Library file tell
-*/
-long CFile::tell()
+long CFile::PImpl::tell()
 {
-	int tp;
-	int ret;
+	int ret = -1;
+	int tp = cl_type;
 
-	ret = -1;
-
-	if ((tp = cl_type) != CLF_TYPE_INVALID) {
+	if (tp != CLF_TYPE_INVALID) {
 		if (tp == CLF_TYPE_PLAIN) {
 			ret = ftell(cl_plain);
 		}
@@ -450,7 +495,6 @@ long CFile::tell()
 	return ret;
 }
 
-#endif // USE_ZLIB || USE_BZ2LIB
 
 /**
 **  Find a file with its correct extension ("", ".gz" or ".bz2")
@@ -459,31 +503,30 @@ long CFile::tell()
 **                   is replaced by the full filename witht he correct extension.
 **  @param filesize  Size of the file buffer
 **
-**  @return 1 if the file has been found.
+**  @return true if the file has been found.
 */
-static int FindFileWithExtension(char *file, size_t filesize)
+static bool FindFileWithExtension(char *file, size_t filesize)
 {
 	char buf[PATH_MAX];
 
 	if (!access(file, R_OK)) {
-		return 1;
+		return true;
 	}
 #ifdef USE_ZLIB // gzip or bzip2 in global shared directory
 	sprintf(buf, "%s.gz", file);
 	if (!access(buf, R_OK)) {
 		strcpy_s(file, filesize, buf);
-		return 1;
+		return true;
 	}
 #endif
 #ifdef USE_BZ2LIB
 	sprintf(buf, "%s.bz2", file);
 	if (!access(buf, R_OK)) {
 		strcpy_s(file, filesize, buf);
-		return 1;
+		return true;
 	}
 #endif
-
-	return 0;
+	return false;
 }
 
 /**
@@ -500,8 +543,6 @@ static int FindFileWithExtension(char *file, size_t filesize)
 */
 char *LibraryFileName(const char *file, char *buffer, size_t buffersize)
 {
-	char *s;
-
 	// Absolute path or in current directory.
 	strcpy_s(buffer, buffersize, file);
 	if (*buffer == '/') {
@@ -515,7 +556,8 @@ char *LibraryFileName(const char *file, char *buffer, size_t buffersize)
 	if (*CurrentMapPath) {
 		if (*CurrentMapPath == '.' || *CurrentMapPath == '/') {
 			strcpy_s(buffer, buffersize, CurrentMapPath);
-			if ((s = strrchr(buffer, '/'))) {
+			char *s = strrchr(buffer, '/');
+			if (s) {
 				s[1] = '\0';
 			}
 			strcat_s(buffer, buffersize, file);
@@ -525,7 +567,8 @@ char *LibraryFileName(const char *file, char *buffer, size_t buffersize)
 				strcat_s(buffer, buffersize, "/");
 			}
 			strcat_s(buffer, buffersize, CurrentMapPath);
-			if ((s = strrchr(buffer, '/'))) {
+			char *s = strrchr(buffer, '/');
+			if (s) {
 				s[1] = '\0';
 			}
 			strcat_s(buffer, buffersize, file);
@@ -578,93 +621,74 @@ char *LibraryFileName(const char *file, char *buffer, size_t buffersize)
 	return buffer;
 }
 
+bool CanAccessFile(const char *filename)
+{
+	if (filename && filename[0] != '\0') {
+		char name[PATH_MAX];
+		name[0] = '\0';
+		LibraryFileName(filename, name, sizeof(name));
+		return (name[0] != '\0' && 0 == access(name, R_OK));
+	}
+	return false;
+}
+
 /**
 **  Generate a list of files within a specified directory
 **
 **  @param dirname  Directory to read.
-**  @param filter   Optional xdata-filter function.
 **  @param fl       Filelist pointer.
 **
 **  @return the number of entries added to FileList.
 */
-int ReadDataDirectory(const char *dirname, int (*filter)(char *, FileList *),
-					  std::vector<FileList> &fl)
+int ReadDataDirectory(const char *dirname, std::vector<FileList> &fl)
 {
-#ifndef _MSC_VER
-	DIR *dirp;
-	struct dirent *dp;
-#endif
 	struct stat st;
-#ifdef _MSC_VER
-	struct _finddata_t fileinfo;
-	long hFile;
-#endif
-	int n;
-	int isdir = 0; // silence gcc..
-	char *np;
 	char buffer[PATH_MAX];
 	char *filename;
 
 	strcpy_s(buffer, sizeof(buffer), dirname);
-	n = strlen(buffer);
+	int n = strlen(buffer);
 	if (!n || buffer[n - 1] != '/') {
 		buffer[n++] = '/';
 		buffer[n] = 0;
 	}
-	np = buffer + n;
+	char *np = buffer + n;
 
 #ifndef _MSC_VER
-	dirp = opendir(dirname);
-#endif
+	DIR *dirp = opendir(dirname);
+	struct dirent *dp;
 
-#ifndef _MSC_VER
 	if (dirp) {
 		while ((dp = readdir(dirp)) != NULL) {
 			filename = dp->d_name;
 #else
 	strcat_s(buffer, sizeof(buffer), "*.*");
-	hFile = _findfirst(buffer, &fileinfo);
+	struct _finddata_t fileinfo;
+	long hFile = _findfirst(buffer, &fileinfo);
 	if (hFile != -1L) {
 		do {
 			filename = fileinfo.name;
 #endif
-
 			if (strcmp(filename, ".") == 0) {
 				continue;
 			}
 			if (strcmp(filename, "..") == 0) {
 				continue;
 			}
-
 			strcpy_s(np, sizeof(buffer) - (np - buffer), filename);
 			if (stat(buffer, &st) == 0) {
-				isdir = S_ISDIR(st.st_mode);
+				int isdir = S_ISDIR(st.st_mode);
 				if (isdir || S_ISREG(st.st_mode)) {
 					FileList nfl;
-					int i;
+
 					if (isdir) {
-						nfl.name = new_strdup(np);
+						nfl.name = np;
 					} else {
-						nfl.type = -1;
-						if (filter == NULL) {
-							nfl.name = new_strdup(np);
-							nfl.type = 1;
-						} else if ((*filter)(buffer, &nfl) == 0) {
-							continue;
-						}
+						nfl.name = np;
+						nfl.type = 1;
 					}
-					for (i = 0; i < (int)fl.size(); ++i) {
-						if (nfl.type == fl[i].type) {
-							if (strcmp(nfl.name, fl[i].name) < 0) {
-								break;
-							}
-						} else {
-							if (fl[i].type - nfl.type > 0) {
-								break;
-							}
-						}
-					}
-					fl.insert(fl.begin() + i, nfl);
+					// sorted instertion
+					fl.insert(std::lower_bound(fl.begin(), fl.end(), nfl), nfl);
 				}
 			}
 #ifndef _MSC_VER
@@ -677,8 +701,6 @@ int ReadDataDirectory(const char *dirname, int (*filter)(char *, FileList *),
 	}
 	return fl.size();
 }
-
-
 
 void FileWriter::printf(const char *format, ...)
 {

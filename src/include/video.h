@@ -40,9 +40,10 @@
 #else
 #include "SDL_opengl.h"
 #endif
+
 #include "guichan.h"
 
-
+#include "color.h"
 #include "vec2i.h"
 
 class CFont;
@@ -177,47 +178,20 @@ public:
 };
 #endif
 
-/// A platform independent color
-class CColor
-{
-public:
-	CColor(unsigned char r = 0, unsigned char g = 0, unsigned char b = 0,
-		   unsigned char a = 0) : R(r), G(g), B(b), A(a) {}
-
-	/// Cast to a SDL_Color
-	operator SDL_Color() const {
-		SDL_Color c = { R, G, B, A };
-		return c;
-	};
-
-	unsigned char R;       /// Red
-	unsigned char G;       /// Green
-	unsigned char B;       /// Blue
-	unsigned char A;       /// Alpha
-};
-
-class CUnitColors
-{
-public:
-	CUnitColors() : Colors(NULL) {}
-
-	SDL_Color *Colors;
-};
-
 /**
 **  Event call back.
 **
 **  This is placed in the video part, because it depends on the video
 **  hardware driver.
 */
-typedef struct _event_callback_ {
+struct EventCallback {
 
 	/// Callback for mouse button press
 	void (*ButtonPressed)(unsigned buttons);
 	/// Callback for mouse button release
 	void (*ButtonReleased)(unsigned buttons);
 	/// Callback for mouse move
-	void (*MouseMoved)(int x, int y);
+	void (*MouseMoved)(const PixelPos &screenPos);
 	/// Callback for mouse exit of game window
 	void (*MouseExit)();
 
@@ -231,7 +205,7 @@ typedef struct _event_callback_ {
 	/// Callback for network event
 	void (*NetworkEvent)();
 
-} EventCallback;
+};
 
 #if SDL_BYTEORDER == SDL_LIL_ENDIAN
 #define RSHIFT  0
@@ -263,7 +237,7 @@ public:
 	void UnlockScreen();
 
 	void ClearScreen();
-	bool ResizeScreen(int x, int y);
+	bool ResizeScreen(int width, int height);
 
 	void DrawPixelClip(Uint32 color, int x, int y);
 	void DrawTransPixelClip(Uint32 color, int x, int y, unsigned char alpha);
@@ -310,12 +284,18 @@ public:
 			return MapRGBA(f, r, g, b, 0xFF);
 		}
 	}
+	inline Uint32 MapRGB(SDL_PixelFormat *f, const CColor &color) {
+		return MapRGB(f, color.R, color.G, color.B);
+	}
 	inline Uint32 MapRGBA(SDL_PixelFormat *f, Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
 		if (!UseOpenGL) {
 			return SDL_MapRGBA(f, r, g, b, a);
 		} else {
 			return ((r << RSHIFT) | (g << GSHIFT) | (b << BSHIFT) | (a << ASHIFT));
 		}
+	}
+	inline Uint32 MapRGBA(SDL_PixelFormat *f, const CColor &color) {
+		return MapRGBA(f, color.R, color.G, color.B, color.A);
 	}
 	inline void GetRGB(Uint32 c, SDL_PixelFormat *f, Uint8 *r, Uint8 *g, Uint8 *b) {
 		if (!UseOpenGL) {
@@ -383,6 +363,9 @@ extern GLint GLMaxTextureSizeOverride;
 extern bool GLTextureCompressionSupported;
 /// Use OpenGL texture compression
 extern bool UseGLTextureCompression;
+
+/// register lua function
+extern void VideoCclRegister();
 
 /// initialize the video part
 extern void InitVideo();
@@ -503,6 +486,7 @@ extern void VideoPaletteListRemove(SDL_Surface *surface);
 extern void ClearAllColorCyclingRange();
 extern void AddColorCyclingRange(unsigned int begin, unsigned int end);
 extern void SetColorCycleAll(bool value);
+extern void RestoreColorCyclingSurface();
 
 /// Does ColorCycling..
 extern void ColorCycle();

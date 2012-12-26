@@ -158,7 +158,9 @@
 #ifndef WIN32
 #include <unistd.h>
 #include <X11/Xlib.h>
+#ifndef __APPLE__
 #include <gtk/gtk.h>
+#endif
 #endif
 
 #ifdef MAEMO
@@ -184,7 +186,7 @@ int ConsoleMode = 0;
 #endif
 
 static void error(char * title, char * text) {
-
+#ifndef __APPLE__
 #ifdef WIN32
 	MessageBox(NULL, text, title, MB_OK | MB_ICONERROR);
 #else
@@ -198,7 +200,7 @@ static void error(char * title, char * text) {
 		gtk_widget_show(window);
 #endif
 
-		dialog = gtk_message_dialog_new(GTK_WINDOW(window), GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, text, NULL);
+		dialog = gtk_message_dialog_new(GTK_WINDOW(window), GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "%s", text);
 		gtk_window_set_title(GTK_WINDOW(dialog), title);
 		gtk_window_set_skip_pager_hint(GTK_WINDOW(dialog), 0);
 		gtk_window_set_skip_taskbar_hint(GTK_WINDOW(dialog), 0);
@@ -212,6 +214,7 @@ static void error(char * title, char * text) {
 	} else {
 		fprintf(stderr, "%s -- Error: %s\n", title, text);
 	}
+#endif
 #endif
 	exit(1);
 }
@@ -231,7 +234,9 @@ int main(int argc, char * argv[]) {
 		}
 #endif
 	} else {
+#ifndef __APPLE__
 		gtk_init(&argc, &argv);
+#endif
 #ifdef MAEMO
 		hildon_init();
 #endif
@@ -286,7 +291,7 @@ int main(int argc, char * argv[]) {
 	if ( chdir(stratagus_path) != 0 ) {
 		error(TITLE, STRATAGUS_NOT_FOUND);
 	}
-	strcpy(scripts_path, data_path);
+	sprintf(scripts_path, "\"%s\"", data_path);
 	sprintf(stratagus_bin, "%s\\stratagus.exe", stratagus_path);
 #else
 	strcpy(data_path, DATA_PATH);

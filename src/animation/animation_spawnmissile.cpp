@@ -37,9 +37,13 @@
 
 #include "animation/animation_spawnmissile.h"
 
+#include "action/action_attack.h"
+#include "action/action_spellcast.h"
+
 #include "actions.h"
 #include "map.h"
 #include "missile.h"
+#include "pathfinder.h"
 #include "unit.h"
 
 //SpawnMissile flags
@@ -48,6 +52,7 @@
 #define ANIM_SM_PIXEL 4
 #define ANIM_SM_RELTARGET 8
 #define ANIM_SM_RANGED 16
+#define ANIM_SM_SETDIRECTION 32
 
 /**
 **  Parse flags list in animation frame.
@@ -82,6 +87,8 @@ static int ParseAnimFlags(CUnit &unit, const char *parseflag)
 				flags |= ANIM_SM_RELTARGET;
 			} else if (!strcmp(cur, "ranged")) {
 				flags |= ANIM_SM_RANGED;
+			}  else if (!strcmp(cur, "setdirection")) {
+				flags |= ANIM_SM_SETDIRECTION;
 			}
 		}
 		cur = next;
@@ -99,51 +106,81 @@ static int ParseAnimFlags(CUnit &unit, const char *parseflag)
 	const int destx = ParseAnimInt(&unit, this->destXStr.c_str());
 	const int desty = ParseAnimInt(&unit, this->destYStr.c_str());
 	const int flags = ParseAnimFlags(unit, this->flagsStr.c_str());
+	const int offsetnum = ParseAnimInt(&unit, this->offsetNumStr.c_str());
 	const CUnit *goal = flags & ANIM_SM_RELTARGET ? unit.CurrentOrder()->GetGoal() : &unit;
+	const int dir = ((goal->Direction + NextDirection / 2) & 0xFF) / NextDirection;
+	const PixelPos moff = goal->Type->MissileOffsets[dir][!offsetnum ? 0 : offsetnum - 1];
 	PixelPos start;
 	PixelPos dest;
+	MissileType *mtype = MissileTypeByIdent(this->missileTypeStr);
+	if (mtype == NULL) {
+		return;
+	}
 
-	if (!goal || goal->Destroyed || goal->Removed) {
+	if (!goal || goal->Destroyed) {
 		return;
 	}
 	if ((flags & ANIM_SM_PIXEL)) {
-		start.x = goal->tilePos.x * PixelTileSize.x + goal->IX + startx;
-		start.y = goal->tilePos.y * PixelTileSize.y + goal->IY + starty;
+		start.x = goal->tilePos.x * PixelTileSize.x + goal->IX + moff.x + startx;
+		start.y = goal->tilePos.y * PixelTileSize.y + goal->IY + moff.y + starty;
 	} else {
-		start.x = (goal->tilePos.x + startx) * PixelTileSize.x + PixelTileSize.x / 2;
-		start.y = (goal->tilePos.y + starty) * PixelTileSize.y + PixelTileSize.y / 2;
+		start.x = (goal->tilePos.x + startx) * PixelTileSize.x + PixelTileSize.x / 2 + moff.x;
+		start.y = (goal->tilePos.y + starty) * PixelTileSize.y + PixelTileSize.y / 2 + moff.y;
 	}
 	if ((flags & ANIM_SM_TOTARGET)) {
 		CUnit *target = goal->CurrentOrder()->GetGoal();
-		if (!target  || target->Destroyed || target->Removed) {
-			Assert(!unit.Type->Missile.Missile->AlwaysFire || unit.Type->Missile.Missile->Range);
-			if (!target || !unit.Type->Missile.Missile->AlwaysFire) {
+		if (!target || target->Destroyed) {
+			Assert(!mtype->AlwaysFire || mtype->Range);
+			if (!target && mtype->AlwaysFire == false) {
 				return;
 			}
 		}
-		if (flags & ANIM_SM_PIXEL) {
-			dest.x = target->tilePos.x * PixelTileSize.x + target->IX + destx;
-			dest.y = target->tilePos.y * PixelTileSize.y + target->IY + desty;
+		if (!target) {
+			if (goal->CurrentAction() == UnitActionAttack || goal->CurrentAction() == UnitActionAttackGround) {
+				COrder_Attack &order = *static_cast<COrder_Attack *>(goal->CurrentOrder());
+				dest = Map.TilePosToMapPixelPos_Center(order.GetGoalPos());
+			} else if (goal->CurrentAction() == UnitActionSpellCast) {
+				COrder_SpellCast &order = *static_cast<COrder_SpellCast *>(goal->CurrentOrder());
+				dest = Map.TilePosToMapPixelPos_Center(order.GetGoalPos());
+			}
+			if (flags & ANIM_SM_PIXEL) {
+				dest.x += destx;
+				dest.y += desty;
+			} else {
+				dest.x += destx * PixelTileSize.x;
+				dest.y += desty * PixelTileSize.y;
+			}
+		} else if (flags & ANIM_SM_PIXEL) {
+			dest.x = target->GetMapPixelPosCenter().x + destx;
+			dest.y = target->GetMapPixelPosCenter().y + desty;
 		} else {
-			dest.x = (target->tilePos.x + destx) * PixelTileSize.x + target->Type->TileWidth * PixelTileSize.x / 2;
-			dest.y = (target->tilePos.y + desty) * PixelTileSize.y + target->Type->TileHeight * PixelTileSize.y / 2;
+			dest.x = (target->tilePos.x + destx) * PixelTileSize.x;
+			dest.y = (target->tilePos.y + desty) * PixelTileSize.y;
+			dest += target->Type->GetPixelSize() / 2;
 		}
 	} else {
 		if ((flags & ANIM_SM_PIXEL)) {
-			dest.x = goal->tilePos.x * PixelTileSize.x + goal->IX + destx;
-			dest.y = goal->tilePos.y * PixelTileSize.y + goal->IY + desty;
+			dest.x = goal->GetMapPixelPosCenter().x + destx;
+			dest.y = goal->GetMapPixelPosCenter().y + desty;
 		} else {
-			dest.x = (goal->tilePos.x + destx) * PixelTileSize.x + goal->Type->TileWidth * PixelTileSize.x / 2;
-			dest.y = (goal->tilePos.y + desty) * PixelTileSize.y + goal->Type->TileHeight * PixelTileSize.y / 2;
+			dest.x = (goal->tilePos.x + destx) * PixelTileSize.x;
+			dest.y = (goal->tilePos.y + desty) * PixelTileSize.y;
+			dest += goal->Type->GetPixelSize() / 2;
 		}
 	}
-	Vec2i destTilePos = {dest.x / PixelTileSize.x, dest.y / PixelTileSize.y};
+	Vec2i destTilePos = Map.MapPixelPosToTilePos(dest);
 	const int dist = goal->MapDistanceTo(destTilePos);
 	if ((flags & ANIM_SM_RANGED) && !(flags & ANIM_SM_PIXEL)
 		&& dist > goal->Stats->Variables[ATTACKRANGE_INDEX].Max
 		&& dist < goal->Type->MinAttackRange) {
 	} else {
-		Missile *missile = MakeMissile(*MissileTypeByIdent(this->missileTypeStr.c_str()), start, dest);
+		Missile *missile = MakeMissile(*mtype, start, dest);
+		if (flags & ANIM_SM_SETDIRECTION) {
+			PixelPos posd;
+			posd.x = Heading2X[goal->Direction / NextDirection];
+			posd.y = Heading2Y[goal->Direction / NextDirection];
+			missile->MissileNewHeadingFromXY(posd);
+		}
 		if (flags & ANIM_SM_DAMAGE) {
 			missile->SourceUnit = &unit;
 		}
@@ -154,7 +191,7 @@ static int ParseAnimFlags(CUnit &unit, const char *parseflag)
 }
 
 /*
-**  s = "missileType startX startY destX destY [flag1[.flagN]]"
+**  s = "missileType startX startY destX destY [flag1[.flagN]] [missileoffset]"
 */
 /* virtual */ void CAnimation_SpawnMissile::Init(const char *s)
 {
@@ -184,6 +221,10 @@ static int ParseAnimFlags(CUnit &unit, const char *parseflag)
 	begin = std::min(len, str.find_first_not_of(' ', end));
 	end = std::min(len, str.find(' ', begin));
 	this->flagsStr.assign(str, begin, end - begin);
+
+	begin = std::min(len, str.find_first_not_of(' ', end));
+	end = std::min(len, str.find(' ', begin));
+	this->offsetNumStr.assign(str, begin, end - begin);
 }
 
 //@}

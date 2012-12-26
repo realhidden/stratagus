@@ -33,39 +33,37 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
-#include "icons.h"
-#include "cursor.h"
-#include "construct.h"
-#include "unittype.h"
-#include "upgrade.h"
-#include "depend.h"
-#include "interface.h"
-#include "missile.h"
-#include "tileset.h"
-#include "map.h"
-#include "script.h"
-#include "ui.h"
-#include "ai.h"
-#include "results.h"
-#include "trigger.h"
+
 #include "actions.h"
-#include "minimap.h"
+#include "ai.h"
 #include "commands.h"
+#include "construct.h"
+#include "depend.h"
+#include "font.h"
+#include "map.h"
+#include "minimap.h"
+#include "missile.h"
+#include "particle.h"
+#include "pathfinder.h"
+#include "replay.h"
+#include "script.h"
 #include "sound.h"
 #include "sound_server.h"
-#include "font.h"
-#include "pathfinder.h"
 #include "spells.h"
-#include "replay.h"
-#include "particle.h"
+#include "trigger.h"
+#include "ui.h"
+#include "unit.h"
+#include "unit_manager.h"
+#include "unittype.h"
+#include "upgrade.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Variables
 ----------------------------------------------------------------------------*/
+
+bool SaveGameLoading;                 /// If a Saved Game is Loading
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -88,7 +86,7 @@ void CleanModules()
 	CleanFonts();
 	CleanTriggers();
 	FreeAi();
-	CleanRaces();
+	PlayerRaces.Clean();
 	CleanConstructions();
 	CleanDecorations();
 	CleanMissiles();
@@ -125,7 +123,6 @@ void InitModules()
 
 	CallbackMusicOn();
 	InitSyncRand();
-	InitIcons();
 	InitVideoCursors();
 	InitUserInterface();
 	InitPlayers();
@@ -185,10 +182,11 @@ void LoadModules()
 
 static void PlaceUnits()
 {
-	for (int i = 0; i < NumUnits; ++i) {
-		if (!Units[i]->Removed) {
-			Units[i]->Removed = 1;
-			Units[i]->Place(Units[i]->tilePos);
+	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+		CUnit &unit = **it;
+		if (!unit.Removed) {
+			unit.Removed = 1;
+			unit.Place(unit.tilePos);
 		}
 	}
 }
@@ -200,10 +198,6 @@ static void PlaceUnits()
 */
 void LoadGame(const std::string &filename)
 {
-	unsigned long game_cycle;
-	unsigned syncrand;
-	unsigned synchash;
-
 	// log will be enabled if found in the save game
 	CommandLogDisabled = true;
 	SaveGameLoading = true;
@@ -218,9 +212,9 @@ void LoadGame(const std::string &filename)
 
 	PlaceUnits();
 
-	game_cycle = GameCycle;
-	syncrand = SyncRandSeed;
-	synchash = SyncHash;
+	const unsigned long game_cycle = GameCycle;
+	const unsigned syncrand = SyncRandSeed;
+	const unsigned synchash = SyncHash;
 
 	InitModules();
 	LoadModules();

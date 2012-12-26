@@ -33,21 +33,16 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
-#include "video.h"
-#include "tileset.h"
+
+#include "missile.h"
+
+#include "luacallback.h"
+#include "script.h"
 #include "unittype.h"
 #include "unit.h"
-#include "missile.h"
-#include "script_sound.h"
-#include "script.h"
 #include "unit_manager.h"
-#include "particle.h"
-#include "luacallback.h"
+#include "video.h"
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -73,6 +68,7 @@ static const char *MissileClassNames[] = {
 	"missile-class-death-coil",
 	"missile-class-tracer",
 	"missile-class-clip-to-target",
+	"missile-class-continious",
 	NULL
 };
 
@@ -95,15 +91,7 @@ void MissileType::Load(lua_State *l)
 		if (!strcmp(value, "File")) {
 			file = LuaToString(l, -1);
 		} else if (!strcmp(value, "Size")) {
-			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 2) {
-				LuaError(l, "incorrect argument");
-			}
-			lua_rawgeti(l, -1, 1);
-			this->size.x = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			this->size.y = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			CclGetPos(l, &this->size.x, &this->size.y);
 		} else if (!strcmp(value, "Frames")) {
 			this->SpriteFrames = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Flip")) {
@@ -116,6 +104,18 @@ void MissileType::Load(lua_State *l)
 			this->FiredSound.Name = LuaToString(l, -1);
 		} else if (!strcmp(value, "ImpactSound")) {
 			this->ImpactSound.Name = LuaToString(l, -1);
+		} else if (!strcmp(value, "ChangeVariable")) {
+			const int index = UnitTypeVar.VariableNameLookup[LuaToString(l, -1)];// User variables
+			if (index == -1) {
+				fprintf(stderr, "Bad variable name '%s'\n", LuaToString(l, -1));
+				Exit(1);
+				return;
+			}
+			this->ChangeVariable = index;
+		} else if (!strcmp(value, "ChangeAmount")) {
+			this->ChangeAmount = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "ChangeMax")) {
+			this->ChangeMax = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "Class")) {
 			const char *className = LuaToString(l, -1);
 			unsigned int i = 0;
@@ -136,20 +136,45 @@ void MissileType::Load(lua_State *l)
 			this->Sleep = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Speed")) {
 			this->Speed = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "TTL")) {
+			this->TTL = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "Damage")) {
+			this->Damage = LuaToNumber(l, -1);
+		} else if (!strcmp(value, "ReduceFactor")) {
+			this->ReduceFactor = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "DrawLevel")) {
 			this->DrawLevel = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "Range")) {
 			this->Range = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "ImpactMissile")) {
-			this->Impact.Name = LuaToString(l, -1);
+			if (!lua_istable(l, -1)) {
+				MissileConfig *mc = new MissileConfig();
+				mc->Name = LuaToString(l, -1);
+				this->Impact.push_back(mc);
+			} else {
+				const int impacts = lua_rawlen(l, -1);
+				for (int i = 0; i < impacts; ++i) {
+					lua_rawgeti(l, -1, i + 1);
+					MissileConfig *mc = new MissileConfig();
+					mc->Name = LuaToString(l, -1);
+					this->Impact.push_back(mc);
+					lua_pop(l, 1);
+				}
+			}
 		} else if (!strcmp(value, "SmokeMissile")) {
 			this->Smoke.Name = LuaToString(l, -1);
 		} else if (!strcmp(value, "ImpactParticle")) {
 			this->ImpactParticle = new LuaCallback(l, -1);
+		} else if (!strcmp(value, "SmokeParticle")) {
+			this->SmokeParticle = new LuaCallback(l, -1);
 		} else if (!strcmp(value, "CanHitOwner")) {
 			this->CanHitOwner = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "AlwaysFire")) {
 			this->AlwaysFire = LuaToBoolean(l, -1);
+		} else if (!strcmp(value, "Pierce")) {
+			this->Pierce = LuaToBoolean(l, -1);
+		} else if (!strcmp(value, "PierceOnce")) {
+			this->PierceOnce = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "FriendlyFire")) {
 			this->FriendlyFire = LuaToBoolean(l, -1);
 		} else if (!strcmp(value, "SplashFactor")) {
@@ -200,9 +225,9 @@ static int CclDefineMissileType(lua_State *l)
 static int CclMissile(lua_State *l)
 {
 	MissileType *type = NULL;
-	PixelPos position = { -1, -1};
-	PixelPos destination = { -1, -1};
-	PixelPos source = { -1, -1};
+	PixelPos position(-1, -1);
+	PixelPos destination(-1, -1);
+	PixelPos source(-1, -1);
 	Missile *missile = NULL;
 
 	DebugPrint("FIXME: not finished\n");
@@ -361,6 +386,65 @@ static int CclDefineBurningBuilding(lua_State *l)
 }
 
 /**
+**  Create a missile on the map
+**
+**  @param l  Lua state.
+**
+*/
+static int CclCreateMissile(lua_State *l)
+{
+	LuaCheckArgs(l, 6);
+
+	const std::string name = LuaToString(l, 1);
+	const MissileType *mtype = MissileTypeByIdent(name);
+	if (!mtype) {
+		LuaError(l, "Bad missile");
+	}
+	PixelPos startpos, endpos;
+	if (!lua_istable(l, 2) || lua_rawlen(l, 2) != 2) {
+		LuaError(l, "incorrect argument !!");
+	}
+	lua_rawgeti(l, 2, 1);
+	startpos.x = LuaToNumber(l, -1);
+	lua_pop(l, 1);
+	lua_rawgeti(l, 2, 2);
+	startpos.y = LuaToNumber(l, -1);
+	lua_pop(l, 1);
+	if (!lua_istable(l, 3) || lua_rawlen(l, 3) != 2) {
+		LuaError(l, "incorrect argument !!");
+	}
+	lua_rawgeti(l, 3, 1);
+	endpos.x = LuaToNumber(l, -1);
+	lua_pop(l, 1);
+	lua_rawgeti(l, 3, 2);
+	endpos.y = LuaToNumber(l, -1);
+	lua_pop(l, 1);
+
+	const int sourceUnitId = LuaToNumber(l, 4);
+	const int destUnitId = LuaToNumber(l, 5);
+	const bool dealDamage = LuaToBoolean(l, 6);
+	CUnit *sourceUnit = sourceUnitId != -1 ? &UnitManager.GetSlotUnit(sourceUnitId) : NULL;
+	CUnit *destUnit = destUnitId != -1 ? &UnitManager.GetSlotUnit(destUnitId) : NULL;
+
+	if (sourceUnit != NULL) {
+		startpos += sourceUnit->GetMapPixelPosTopLeft();
+	}
+	if (destUnit != NULL) {
+		endpos += destUnit->GetMapPixelPosTopLeft();
+	}
+
+	Missile *missile = MakeMissile(*mtype, startpos, endpos);
+	if (!missile) {
+		return 0;
+	}
+	if (dealDamage) {
+		missile->SourceUnit = sourceUnit;
+	}
+	missile->TargetUnit = destUnit;
+	return 0;
+}
+
+/**
 **  Register CCL features for missile-type.
 */
 void MissileCclRegister()
@@ -368,6 +452,7 @@ void MissileCclRegister()
 	lua_register(Lua, "DefineMissileType", CclDefineMissileType);
 	lua_register(Lua, "Missile", CclMissile);
 	lua_register(Lua, "DefineBurningBuilding", CclDefineBurningBuilding);
+	lua_register(Lua, "CreateMissile", CclCreateMissile);
 }
 
 //@}

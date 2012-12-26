@@ -80,23 +80,19 @@
 -- Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-
 #include "stratagus.h"
 
 #include <vector>
-#include <string.h>
 
 #include "video.h"
-#include "font.h"
-#include "ui.h"
+#include "intern_video.h"
+
 #include "cursor.h"
+#include "font.h"
 #include "iolib.h"
 #include "map.h"
+#include "ui.h"
 
-#include "intern_video.h"
 
 #include "SDL.h"
 
@@ -128,7 +124,7 @@ public:
 class CColorCycling
 {
 private:
-	CColorCycling() : ColorCycleAll(false)
+	CColorCycling() : ColorCycleAll(false), cycleCount(0)
 	{}
 
 	static void CreateInstanceIfNeeded() {
@@ -145,7 +141,7 @@ public:
 	std::vector<SDL_Surface *> PaletteList;        /// List of all used palettes.
 	std::vector<ColorIndexRange> ColorIndexRanges; /// List of range of color index for cycling.
 	bool ColorCycleAll;                            /// Flag Color Cycle with all palettes
-
+	unsigned int cycleCount;
 private:
 	static CColorCycling *s_instance;
 };
@@ -320,6 +316,23 @@ void DeInitVideo()
 	CColorCycling::ReleaseInstance();
 }
 
+/**
+**  Set the video sync speed
+**
+**  @param l  Lua state.
+*/
+static int CclSetVideoSyncSpeed(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	VideoSyncSpeed = LuaToNumber(l, 1);
+	return 0;
+}
+
+void VideoCclRegister()
+{
+	lua_register(Lua, "SetVideoSyncSpeed", CclSetVideoSyncSpeed);
+}
+
 #if 1 // color cycling
 
 
@@ -393,6 +406,28 @@ static void ColorCycleSurface(SDL_Surface &surface)
 }
 
 /**
+**  Undo Color Cycle for particular surface
+**  @note function may be optimized.
+*/
+static void ColorCycleSurface_Reverse(SDL_Surface &surface, unsigned int count)
+{
+	for (unsigned int i = 0; i != count; ++i) {
+		SDL_Color *palcolors = surface.format->palette->colors;
+		SDL_Color colors[256];
+		CColorCycling &colorCycling = CColorCycling::GetInstance();
+
+		memcpy(colors, palcolors, sizeof(colors));
+		for (std::vector<ColorIndexRange>::const_iterator it = colorCycling.ColorIndexRanges.begin(); it != colorCycling.ColorIndexRanges.end(); ++it) {
+			const ColorIndexRange &range = *it;
+
+			memcpy(colors + range.begin + 1, palcolors + range.begin, (range.end - range.begin) * sizeof(SDL_Color));
+			colors[range.begin] = palcolors[range.end];
+		}
+		SDL_SetPalette(&surface, SDL_LOGPAL | SDL_PHYSPAL, colors, 0, 256);
+	}
+}
+
+/**
 **  Color cycle.
 */
 // FIXME: cpu intensive to go through the whole PaletteList
@@ -405,15 +440,33 @@ void ColorCycle()
 	}
 	CColorCycling &colorCycling = CColorCycling::GetInstance();
 	if (colorCycling.ColorCycleAll) {
+		++colorCycling.cycleCount;
 		for (std::vector<SDL_Surface *>::iterator it = colorCycling.PaletteList.begin(); it != colorCycling.PaletteList.end(); ++it) {
 			SDL_Surface *surface = (*it);
 
 			ColorCycleSurface(*surface);
 		}
 	} else if (Map.TileGraphic->Surface->format->BytesPerPixel == 1) {
+		++colorCycling.cycleCount;
 		ColorCycleSurface(*Map.TileGraphic->Surface);
 	}
 }
+
+void RestoreColorCyclingSurface()
+{
+	CColorCycling &colorCycling = CColorCycling::GetInstance();
+	if (colorCycling.ColorCycleAll) {
+		for (std::vector<SDL_Surface *>::iterator it = colorCycling.PaletteList.begin(); it != colorCycling.PaletteList.end(); ++it) {
+			SDL_Surface *surface = (*it);
+
+			ColorCycleSurface_Reverse(*surface, colorCycling.cycleCount);
+		}
+	} else if (Map.TileGraphic->Surface->format->BytesPerPixel == 1) {
+		ColorCycleSurface_Reverse(*Map.TileGraphic->Surface, colorCycling.cycleCount);
+	}
+	colorCycling.cycleCount = 0;
+}
+
 
 #endif
 

@@ -33,22 +33,21 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "stratagus.h"
 
 #include "actions.h"
 #include "action/action_train.h"
+#include "commands.h"
 #include "map.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "spells.h"
 #include "tileset.h"
+#include "translate.h"
 #include "upgrade.h"
 #include "ui.h"
 #include "unit.h"
+#include "unit_manager.h"
 #include "unittype.h"
 
 /*----------------------------------------------------------------------------
@@ -415,7 +414,7 @@ void CommandBoard(CUnit &unit, CUnit &dest, int flush)
 **
 **  @param unit   pointer to unit.
 **  @param pos    map position to unload.
-**  @param what   unit to be unloaded, NoUnitP all.
+**  @param what   unit to be unloaded, NULL for all.
 **  @param flush  if true, flush command queue.
 */
 void CommandUnload(CUnit &unit, const Vec2i &pos, CUnit *what, int flush)
@@ -546,10 +545,10 @@ void CommandResource(CUnit &unit, CUnit &dest, int flush)
 **  Let unit returning goods.
 **
 **  @param unit   pointer to unit.
-**  @param goal   bring goods to this depot.
+**  @param depot  bring goods to this depot.
 **  @param flush  if true, flush command queue.
 */
-void CommandReturnGoods(CUnit &unit, CUnit *goal, int flush)
+void CommandReturnGoods(CUnit &unit, CUnit *depot, int flush)
 {
 	if (IsUnitValidForNetwork(unit) == false) {
 		return ;
@@ -570,7 +569,7 @@ void CommandReturnGoods(CUnit &unit, CUnit *goal, int flush)
 			return;
 		}
 	}
-	*order = COrder::NewActionReturnGoods(unit, goal);
+	*order = COrder::NewActionReturnGoods(unit, depot);
 	ClearSavedAction(unit);
 }
 
@@ -720,20 +719,20 @@ void CommandCancelUpgradeTo(CUnit &unit)
 **  @param what   what to research.
 **  @param flush  if true, flush command queue.
 */
-void CommandResearch(CUnit &unit, CUpgrade *what, int flush)
+void CommandResearch(CUnit &unit, CUpgrade &what, int flush)
 {
 	if (IsUnitValidForNetwork(unit) == false) {
 		return ;
 	}
 	// Check if enough resources remains? (NETWORK!)
-	if (unit.Player->CheckCosts(what->Costs)) {
+	if (unit.Player->CheckCosts(what.Costs)) {
 		return;
 	}
 	COrderPtr *order = GetNextOrder(unit, flush);
 	if (order == NULL) {
 		return;
 	}
-	*order = COrder::NewActionResearch(unit, *what);
+	*order = COrder::NewActionResearch(unit, what);
 	ClearSavedAction(unit);
 }
 
@@ -764,11 +763,11 @@ void CommandCancelResearch(CUnit &unit)
 **  @param spell  Spell type pointer.
 **  @param flush  If true, flush command queue.
 */
-void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, SpellType *spell, int flush)
+void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, const SpellType &spell, int flush)
 {
 	DebugPrint(": %d casts %s at %d %d on %d\n" _C_
-			   UnitNumber(unit) _C_ spell->Ident.c_str() _C_ pos.x _C_ pos.y _C_ dest ? UnitNumber(*dest) : 0);
-	Assert(unit.Type->CanCastSpell[spell->Slot]);
+			   UnitNumber(unit) _C_ spell.Ident.c_str() _C_ pos.x _C_ pos.y _C_ dest ? UnitNumber(*dest) : 0);
+	Assert(unit.Type->CanCastSpell[spell.Slot]);
 	Assert(Map.Info.IsPointOnMap(pos));
 
 	if (IsUnitValidForNetwork(unit) == false) {
@@ -780,7 +779,7 @@ void CommandSpellCast(CUnit &unit, const Vec2i &pos, CUnit *dest, SpellType *spe
 		return;
 	}
 
-	*order = COrder::NewActionSpellCast(*spell, pos, dest);
+	*order = COrder::NewActionSpellCast(spell, pos, dest);
 	ClearSavedAction(unit);
 }
 
@@ -834,9 +833,10 @@ void CommandDiplomacy(int player, int state, int opponent)
 void CommandSharedVision(int player, bool state, int opponent)
 {
 	// Do a real hardcore seen recount. First we unmark EVERYTHING.
-	for (int i = 0; i < NumUnits; ++i) {
-		if (!Units[i]->Destroyed) {
-			MapUnmarkUnitSight(*Units[i]);
+	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+		CUnit &unit = **it;
+		if (!unit.Destroyed) {
+			MapUnmarkUnitSight(unit);
 		}
 	}
 
@@ -851,31 +851,31 @@ void CommandSharedVision(int player, bool state, int opponent)
 
 	if (before && !after) {
 		// Don't share vision anymore. Give each other explored terrain for good-bye.
-		Vec2i pos;
-		for (pos.x = 0; pos.x < Map.Info.MapWidth; ++pos.x) {
-			for (pos.y = 0; pos.y < Map.Info.MapHeight; ++pos.y) {
-				CMapField &mf = *Map.Field(pos);
 
-				if (mf.Visible[player] && !mf.Visible[opponent]) {
-					mf.Visible[opponent] = 1;
-					if (opponent == ThisPlayer->Index) {
-						Map.MarkSeenTile(pos);
-					}
+		for (int i = 0; i != Map.Info.MapWidth * Map.Info.MapHeight; ++i) {
+			CMapField &mf = *Map.Field(i);
+			CMapFieldPlayerInfo &mfp = mf.playerInfo;
+
+			if (mfp.Visible[player] && !mfp.Visible[opponent]) {
+				mfp.Visible[opponent] = 1;
+				if (opponent == ThisPlayer->Index) {
+					Map.MarkSeenTile(mf);
 				}
-				if (mf.Visible[opponent] && !mf.Visible[player]) {
-					mf.Visible[player] = 1;
-					if (player == ThisPlayer->Index) {
-						Map.MarkSeenTile(pos);
-					}
+			}
+			if (mfp.Visible[opponent] && !mfp.Visible[player]) {
+				mfp.Visible[player] = 1;
+				if (player == ThisPlayer->Index) {
+					Map.MarkSeenTile(mf);
 				}
 			}
 		}
 	}
 
 	// Do a real hardcore seen recount. Now we remark EVERYTHING
-	for (int i = 0; i < NumUnits; ++i) {
-		if (!Units[i]->Destroyed) {
-			MapMarkUnitSight(*Units[i]);
+	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
+		CUnit &unit = **it;
+		if (!unit.Destroyed) {
+			MapMarkUnitSight(unit);
 		}
 	}
 }

@@ -811,6 +811,7 @@ endif()
 
 if(APPLE)
 	add_definitions(-DUSE_MAC)
+	add_definitions(-DMAX_PATH=1024)
 endif()
 
 if(BSD)

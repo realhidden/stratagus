@@ -17,3 +17,5 @@ png2stratagus
 install_manifest.txt
 
 .DS_Store
+
+genversion

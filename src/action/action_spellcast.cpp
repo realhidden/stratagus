@@ -110,19 +110,13 @@
 {
 	if (!strcmp(value, "spell")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Spell = SpellTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Spell = SpellTypeByIdent(LuaToString(l, -1, j + 1));
 	} else if (!strcmp(value, "range")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "state")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -182,16 +176,29 @@
 */
 /* virtual */ void COrder_SpellCast::OnAnimationAttack(CUnit &unit)
 {
+	UnHideUnit(unit); // unit is invisible until attacks
 	CUnit *goal = GetGoal();
 	if (goal && !goal->IsVisibleAsGoal(*unit.Player)) {
 		unit.ReCast = 0;
 	} else {
 		unit.ReCast = SpellCast(unit, *this->Spell, goal, goalPos);
 	}
-	UnHideUnit(unit); // unit is invisible until attacks
 }
 
-
+/**
+**  Get goal position
+*/
+/* virtual */ const Vec2i COrder_SpellCast::GetGoalPos() const
+{
+	const Vec2i invalidPos(-1, -1);
+	if (goalPos != invalidPos) {
+		return goalPos;
+	}
+	if (this->HasGoal()) {
+		return this->GetGoal()->tilePos;
+	}
+	return invalidPos;
+}
 
 /**
 **  Animate unit spell cast
@@ -304,6 +311,14 @@ bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 					unit.Player->Notify(NotifyYellow, unit.tilePos,
 										_("%s: not enough mana for spell: %s"),
 										unit.Type->Name.c_str(), spell.Name.c_str());
+				} else if (unit.SpellCoolDownTimers[spell.Slot]) {
+					unit.Player->Notify(NotifyYellow, unit.tilePos,
+										_("%s: spell is not ready yet: %s"),
+										unit.Type->Name.c_str(), spell.Name.c_str());
+				} else if (unit.Player->CheckCosts(spell.Costs, false)) {
+					unit.Player->Notify(NotifyYellow, unit.tilePos,
+										_("%s: not enough resources to cast spell: %s"),
+										unit.Type->Name.c_str(), spell.Name.c_str());
 				} else {
 					unit.Player->Notify(NotifyYellow, unit.tilePos,
 										_("%s: can't cast spell: %s"),
@@ -313,7 +328,9 @@ bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 				if (unit.Player->AiEnabled) {
 					DebugPrint("FIXME: do we need an AI callback?\n");
 				}
-				this->Finished = true;
+				if (!unit.RestoreOrder()) {
+					this->Finished = true;
+				}
 				return ;
 			}
 			if (CheckForDeadGoal(unit)) {
@@ -326,7 +343,9 @@ bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 		case 1:                         // Move to the target.
 			if (spell.Range && spell.Range != INFINITE_RANGE) {
 				if (SpellMoveToTarget(unit) == true) {
-					this->Finished = true;
+					if (!unit.RestoreOrder()) {
+						this->Finished = true;
+					}
 					return ;
 				}
 				return ;
@@ -335,7 +354,7 @@ bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 			}
 			// FALL THROUGH
 		case 2:                         // Cast spell on the target.
-			if (!spell.IsCasterOnly()) {
+			if (!spell.IsCasterOnly() || spell.ForceUseAnimation) {
 				AnimateActionSpellCast(unit, *this);
 				if (unit.Anim.Unbreakable) {
 					return ;
@@ -361,7 +380,9 @@ bool COrder_SpellCast::SpellMoveToTarget(CUnit &unit)
 				return;
 			}
 			if (!unit.ReCast && unit.CurrentAction() != UnitActionDie) {
-				this->Finished = true;
+				if (!unit.RestoreOrder()) {
+					this->Finished = true;
+				}
 				return ;
 			}
 			break;

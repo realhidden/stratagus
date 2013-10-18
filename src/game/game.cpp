@@ -34,6 +34,8 @@
 --  Includes
 ----------------------------------------------------------------------------*/
 
+#include <png.h>
+
 #include "stratagus.h"
 
 #include "game.h"
@@ -54,6 +56,7 @@
 #include "missile.h"
 #include "netconnect.h"
 #include "network.h"
+#include "parameters.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "replay.h"
@@ -62,6 +65,8 @@
 #include "sound.h"
 #include "sound_server.h"
 #include "spells.h"
+#include "tileset.h"
+#include "translate.h"
 #include "trigger.h"
 #include "ui.h"
 #include "unit.h"
@@ -71,7 +76,8 @@
 #include "version.h"
 #include "video.h"
 
-#include <png.h>
+
+extern void CleanGame();
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -84,12 +90,90 @@ GameResults GameResult;                      /// Outcome of the game
 std::string GameName;
 std::string FullGameName;
 
-bool UseHPForXp = false;              /// true if gain XP by dealing damage, false if by killing.
+unsigned long GameCycle;             /// Game simulation cycle counter
+unsigned long FastForwardCycle;      /// Cycle to fastforward to in a replay
 
+bool UseHPForXp = false;              /// true if gain XP by dealing damage, false if by killing.
 
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
+
+extern gcn::Gui *Gui;
+static std::vector<gcn::Container *> Containers;
+
+/**
+**  Save game settings.
+**
+**  @param file  Save file handle
+*/
+void SaveGameSettings(CFile &file)
+{
+	file.printf("\nGameSettings.NetGameType = %d\n", GameSettings.NetGameType);
+	for (int i = 0; i < PlayerMax - 1; ++i) {
+		file.printf("GameSettings.Presets[%d].Race = %d\n", i, GameSettings.Presets[i].Race);
+		file.printf("GameSettings.Presets[%d].Team = %d\n", i, GameSettings.Presets[i].Team);
+		file.printf("GameSettings.Presets[%d].Type = %d\n", i, GameSettings.Presets[i].Type);
+	}
+	file.printf("GameSettings.Resources = %d\n", GameSettings.Resources);
+	file.printf("GameSettings.Difficulty = %d\n", GameSettings.Difficulty);
+	file.printf("GameSettings.NumUnits = %d\n", GameSettings.NumUnits);
+	file.printf("GameSettings.Opponents = %d\n", GameSettings.Opponents);
+	file.printf("GameSettings.GameType = %d\n", GameSettings.GameType);
+	file.printf("GameSettings.NoFogOfWar = %s\n", GameSettings.NoFogOfWar ? "true" : "false");
+	file.printf("GameSettings.RevealMap = %d\n", GameSettings.RevealMap);
+	file.printf("GameSettings.MapRichness = %d\n", GameSettings.MapRichness);
+	file.printf("\n");
+}
+
+void StartMap(const std::string &filename, bool clean)
+{
+	std::string nc, rc;
+
+	gcn::Widget *oldTop = Gui->getTop();
+	gcn::Container *container = new gcn::Container();
+	Containers.push_back(container);
+	container->setDimension(gcn::Rectangle(0, 0, Video.Width, Video.Height));
+	container->setOpaque(false);
+	Gui->setTop(container);
+
+	NetConnectRunning = 0;
+	InterfaceState = IfaceStateNormal;
+
+	//  Create the game.
+	DebugPrint("Creating game with map: %s\n" _C_ filename.c_str());
+	if (clean) {
+		CleanPlayers();
+	}
+	GetDefaultTextColors(nc, rc);
+
+	CreateGame(filename, &Map);
+
+	UI.StatusLine.Set(NameLine);
+	SetMessage("%s", _("Do it! Do it now!"));
+
+	//  Play the game.
+	GameMainLoop();
+
+	//  Clear screen
+	Video.ClearScreen();
+	Invalidate();
+
+	CleanGame();
+	InterfaceState = IfaceStateMenu;
+	SetDefaultTextColors(nc, rc);
+
+	Gui->setTop(oldTop);
+	Containers.erase(std::find(Containers.begin(), Containers.end(), container));
+	delete container;
+}
+
+void FreeAllContainers()
+{
+	for (size_t i = 0; i != Containers.size(); ++i) {
+		delete Containers[i];
+	}
+}
 
 /*----------------------------------------------------------------------------
 --  Map loading/saving
@@ -210,21 +294,56 @@ static void WriteMapPreview(const char *mapname, CMap &map)
 
 	png_write_info(png_ptr, info_ptr);
 
+	const int rectSize = 5; // size of rectange used for player start spots
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		unsigned char *pixels = new unsigned char[UI.Minimap.W * UI.Minimap.H * 3];
 		if (!pixels) {
 			fprintf(stderr, "Out of memory\n");
 			exit(1);
 		}
-#ifndef USE_GLES
-		glReadBuffer(GL_FRONT);
-#endif
-		glReadPixels(UI.Minimap.X, UI.Minimap.Y, UI.Minimap.W, UI.Minimap.H, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+		// Copy GL map surface to pixel array
 		for (int i = 0; i < UI.Minimap.H; ++i) {
-			png_write_row(png_ptr, pixels + (UI.Minimap.H - 1 - i) * UI.Minimap.W * 3);
+			for (int j = 0; j < UI.Minimap.W; ++j) {
+				Uint32 c = ((Uint32 *)MinimapSurfaceGL)[j + i * UI.Minimap.W];
+				const int offset = (i * UI.Minimap.W + j) * 3;
+				pixels[offset + 0] = ((c & RMASK) >> RSHIFT);
+				pixels[offset + 1] = ((c & GMASK) >> GSHIFT);
+				pixels[offset + 2] = ((c & BMASK) >> BSHIFT);
+			}
+		}
+		// Add player start spots
+		for (int i = 0; i < PlayerMax - 1; ++i) {
+			if (Players[i].Type != PlayerNobody) {
+				for (int j = -rectSize / 2; j <= rectSize / 2; ++j) {
+					for (int k = -rectSize / 2; k <= rectSize / 2; ++k) {
+						const int miniMapX = Players[i].StartPos.x * UI.Minimap.W / map.Info.MapWidth;
+						const int miniMapY = Players[i].StartPos.y * UI.Minimap.H / map.Info.MapHeight;
+						if (miniMapX + j < 0 || miniMapX + j >= UI.Minimap.W) {
+							continue;
+						}
+						if (miniMapY + k < 0 || miniMapY + k >= UI.Minimap.H) {
+							continue;
+						}
+						const int offset = ((miniMapY + k) * UI.Minimap.H + miniMapX + j) * 3;
+						pixels[offset + 0] = ((Players[i].Color & RMASK) >> RSHIFT);
+						pixels[offset + 1] = ((Players[i].Color & GMASK) >> GSHIFT);
+						pixels[offset + 2] = ((Players[i].Color & BMASK) >> BSHIFT);
+					}
+				}
+			}
+		}
+		// Write everything in PNG
+		for (int i = 0; i < UI.Minimap.H; ++i) {
+			unsigned char *row = new unsigned char[UI.Minimap.W * 3];
+			memcpy(row, pixels + i * UI.Minimap.W * 3, UI.Minimap.W * 3);
+			png_write_row(png_ptr, row);
+			delete[] row;
 		}
 		delete[] pixels;
-	} else {
+	} else
+#endif
+	{
 		unsigned char *row = new unsigned char[UI.Minimap.W * 3];
 		const SDL_PixelFormat *fmt = MinimapSurface->format;
 		SDL_Surface *preview = SDL_CreateRGBSurface(SDL_SWSURFACE,
@@ -234,7 +353,6 @@ static void WriteMapPreview(const char *mapname, CMap &map)
 		SDL_LockSurface(preview);
 
 		SDL_Rect rect;
-		const unsigned int rectSize = 5;
 		for (int i = 0; i < PlayerMax - 1; ++i) {
 			if (Players[i].Type != PlayerNobody) {
 				rect.x = Players[i].StartPos.x * UI.Minimap.W / map.Info.MapWidth - rectSize / 2;
@@ -284,11 +402,10 @@ static void WriteMapPreview(const char *mapname, CMap &map)
 
 
 // Write the map presentation file
-static int WriteMapPresentation(const std::string &mapname, CMap &map, char *)
+static int WriteMapPresentation(const std::string &mapname, CMap &map)
 {
 	FileWriter *f = NULL;
 
-	//	char *mapsetupname;
 	const char *type[] = {"", "", "neutral", "nobody",
 						  "computer", "person", "rescue-passive", "rescue-active"
 						 };
@@ -319,11 +436,9 @@ static int WriteMapPresentation(const std::string &mapname, CMap &map, char *)
 				  map.Info.Description.c_str(), numplayers, map.Info.MapWidth, map.Info.MapHeight,
 				  map.Info.MapUID + 1);
 
-		//		mapsetupname = strrchr(mapsetup, '/');
-		//		if (!mapsetupname) {
-		//			mapsetupname = mapsetup;
-		//		}
-		//		f->printf("DefineMapSetup(GetCurrentLuaPath()..\"%s\")\n", mapsetupname);
+		if (map.Info.Filename.find(".sms") == std::string::npos && !map.Info.Filename.empty()) {
+			f->printf("DefineMapSetup(\"%s\")\n", map.Info.Filename.c_str());
+		}
 	} catch (const FileException &) {
 		fprintf(stderr, "ERROR: cannot write the map presentation\n");
 		delete f;
@@ -383,11 +498,10 @@ int WriteMapSetup(const char *mapSetup, CMap &map, int writeTerrain)
 			f->printf("-- Tiles Map\n");
 			for (int i = 0; i < map.Info.MapHeight; ++i) {
 				for (int j = 0; j < map.Info.MapWidth; ++j) {
-					const int tile = map.Fields[j + i * map.Info.MapWidth].Tile;
-					int n;
-					for (n = 0; n < map.Tileset.NumTiles && tile != map.Tileset.Table[n]; ++n) {
-					}
-					const int value = map.Fields[j + i * map.Info.MapWidth].Value;
+					const CMapField &mf = map.Fields[j + i * map.Info.MapWidth];
+					const int tile = mf.getGraphicTile();
+					const int n = map.Tileset->findTileIndexByTile(tile);
+					const int value = mf.Value;
 					f->printf("SetTile(%3d, %d, %d, %d)\n", n, j, i, value);
 				}
 			}
@@ -446,7 +560,7 @@ int SaveStratagusMap(const std::string &mapName, CMap &map, int writeTerrain)
 	WriteMapPreview(previewName, map);
 
 	memcpy(setupExtension, ".sms", 4 * sizeof(char));
-	if (WriteMapPresentation(mapName, map, mapSetup) == -1) {
+	if (WriteMapPresentation(mapName, map) == -1) {
 		return -1;
 	}
 
@@ -639,7 +753,7 @@ static void GameTypeManVsMachine()
 }
 
 /**
-**  Man vs Machine whith Humans on a Team
+**  Man vs Machine with Humans on a Team
 */
 static void GameTypeManTeamVsMachine()
 {
@@ -691,9 +805,8 @@ void CreateGame(const std::string &filename, CMap *map)
 	InitPlayers();
 
 	if (Map.Info.Filename.empty() && !filename.empty()) {
-		char path[PATH_MAX];
+		const std::string path = LibraryFileName(filename.c_str());
 
-		LibraryFileName(filename.c_str(), path, sizeof(path));
 		if (strcasestr(filename.c_str(), ".smp")) {
 			LuaLoadFile(path);
 		}
@@ -727,8 +840,7 @@ void CreateGame(const std::string &filename, CMap *map)
 	InitSyncRand();
 
 	if (IsNetworkGame()) { // Prepare network play
-		DebugPrint("Client setup: Calling InitNetwork2\n");
-		InitNetwork2();
+		NetworkOnStartGame();
 	} else {
 		const std::string &localPlayerName = Parameters::Instance.LocalPlayerName;
 
@@ -872,7 +984,7 @@ void CreateGame(const std::string &filename, CMap *map)
 	UI.SelectedViewport->Center(Map.TilePosToMapPixelPos_Center(ThisPlayer->StartPos));
 
 	//
-	// Various hacks wich must be done after the map is loaded.
+	// Various hacks which must be done after the map is loaded.
 	//
 	// FIXME: must be done after map is loaded
 	InitPathfinder();
@@ -948,7 +1060,6 @@ void CleanGame()
 	CleanMissiles();
 	CleanUnits();
 	CleanSelections();
-	CleanTilesets();
 	Map.Clean();
 	CleanReplayLog();
 	FreePathfinder();
@@ -1400,7 +1511,6 @@ void LuaRegisterModules()
 	SelectionCclRegister();
 	SoundCclRegister();
 	SpellCclRegister();
-	TilesetCclRegister();
 	TriggerCclRegister();
 	UnitCclRegister();
 	UnitTypeCclRegister();

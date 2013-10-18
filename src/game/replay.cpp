@@ -45,6 +45,7 @@
 #include "map.h"
 #include "netconnect.h"
 #include "network.h"
+#include "parameters.h"
 #include "player.h"
 #include "script.h"
 #include "settings.h"
@@ -540,7 +541,7 @@ static int CclLog(lua_State *l)
 		} else if (!strcmp(value, "Num")) {
 			log->Num = LuaToNumber(l, -1);
 		} else if (!strcmp(value, "SyncRandSeed")) {
-			log->SyncRandSeed = (unsigned)LuaToNumber(l, -1);
+			log->SyncRandSeed = LuaToUnsignedNumber(l, -1);
 		} else {
 			LuaError(l, "Unsupported key: %s" _C_ value);
 		}
@@ -649,28 +650,16 @@ static int CclReplayLog(lua_State *l)
 			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 3) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, -1, 1);
-			replay->Engine[0] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			replay->Engine[1] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 3);
-			replay->Engine[2] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			replay->Engine[0] = LuaToNumber(l, -1, 1);
+			replay->Engine[1] = LuaToNumber(l, -1, 2);
+			replay->Engine[2] = LuaToNumber(l, -1, 3);
 		} else if (!strcmp(value, "Network")) {
 			if (!lua_istable(l, -1) || lua_rawlen(l, -1) != 3) {
 				LuaError(l, "incorrect argument");
 			}
-			lua_rawgeti(l, -1, 1);
-			replay->Network[0] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 2);
-			replay->Network[1] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
-			lua_rawgeti(l, -1, 3);
-			replay->Network[2] = LuaToNumber(l, -1);
-			lua_pop(l, 1);
+			replay->Network[0] = LuaToNumber(l, -1, 1);
+			replay->Network[1] = LuaToNumber(l, -1, 2);
+			replay->Network[2] = LuaToNumber(l, -1, 3);
 		} else {
 			LuaError(l, "Unsupported key: %s" _C_ value);
 		}
@@ -819,6 +808,8 @@ static void DoNextReplay()
 		SendCommandStopUnit(*unit);
 	} else if (!strcmp(action, "stand-ground")) {
 		SendCommandStandGround(*unit, flags);
+	} else if (!strcmp(action, "defend")) {
+		SendCommandDefend(*unit, *dunit, flags);
 	} else if (!strcmp(action, "follow")) {
 		SendCommandFollow(*unit, *dunit, flags);
 	} else if (!strcmp(action, "move")) {

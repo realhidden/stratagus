@@ -497,7 +497,7 @@
 **
 **  ResourceInfo::FinalResource
 **
-**    The resource is converted to this at the depot. Usefull for
+**    The resource is converted to this at the depot. Useful for
 **    a fisherman who harvests fish, but it all turns to food at the
 **    depot.
 **
@@ -611,14 +611,15 @@ CUnitType::CUnitType() :
 	Slot(0), Width(0), Height(0), OffsetX(0), OffsetY(0), DrawLevel(0),
 	ShadowWidth(0), ShadowHeight(0), ShadowOffsetX(0), ShadowOffsetY(0),
 	Animations(NULL), StillFrame(0),
-	DeathExplosion(NULL), OnHit(NULL), OnEachCycle(NULL), OnEachSecond(NULL),
+	DeathExplosion(NULL), OnHit(NULL), OnEachCycle(NULL), OnEachSecond(NULL), OnInit(NULL),
+	TeleportCost(0),
 	CorpseType(NULL), Construction(NULL), RepairHP(0), TileWidth(0), TileHeight(0),
 	BoxWidth(0), BoxHeight(0), BoxOffsetX(0), BoxOffsetY(0), NumDirections(0),
 	MinAttackRange(0), ReactRangeComputer(0), ReactRangePerson(0), Priority(0),
 	BurnPercent(0), BurnDamageRate(0), RepairRange(0),
 	CanCastSpell(NULL), AutoCastActive(NULL),
 	AutoBuildRate(0), RandomMovementProbability(0), ClicksToExplode(0),
-	MaxOnBoard(0), StartingResources(0),
+	MaxOnBoard(0), BoardSize(1), ButtonLevelForTransporter(0), StartingResources(0),
 	UnitType(UnitTypeLand), DecayRate(0), AnnoyComputerFactor(0), AiAdjacentRange(-1),
 	MouseAction(0), CanTarget(0),
 	Flip(0), Revealer(0), LandUnit(0), AirUnit(0), SeaUnit(0),
@@ -628,9 +629,9 @@ CUnitType::CUnitType() :
 	Vanishes(0), GroundAttack(0), ShoreBuilding(0), CanAttack(0),
 	BuilderOutside(0), BuilderLost(0), CanHarvest(0), Harvester(0),
 	Neutral(0), SelectableByRectangle(0), IsNotSelectable(0), Decoration(0),
-	Indestructible(0), Teleporter(0), ShieldPiercing(0), SaveCargo(0),
+	Indestructible(0), Teleporter(0), SaveCargo(0),
 	NonSolid(0), Wall(0), NoRandomPlacing(0),
-	GivesResource(0), Supply(0), Demand(0), FieldFlags(0), MovementMask(0),
+	GivesResource(0), Supply(0), Demand(0), PoisonDrain(0), FieldFlags(0), MovementMask(0),
 	Sprite(NULL), ShadowSprite(NULL)
 {
 #ifdef USE_MNG
@@ -649,6 +650,7 @@ CUnitType::~CUnitType()
 	delete OnHit;
 	delete OnEachCycle;
 	delete OnEachSecond;
+	delete OnInit;
 
 	BoolFlag.clear();
 
@@ -729,6 +731,107 @@ bool CUnitType::CanSelect(GroupSelectionMode mode) const
 	return false;
 }
 
+void UpdateUnitStats(CUnitType &type, int reset)
+{
+	if (reset) {
+		for (int player = 0; player < PlayerMax; ++player) {
+			type.Stats[player] = type.DefaultStat;
+		}
+	}
+
+	// Non-solid units can always be entered and they don't block anything
+	if (type.NonSolid) {
+		if (type.Building) {
+			type.MovementMask = MapFieldLandUnit |
+								MapFieldSeaUnit |
+								MapFieldBuilding |
+								MapFieldCoastAllowed |
+								MapFieldWaterAllowed |
+								MapFieldNoBuilding |
+								MapFieldUnpassable;
+			type.FieldFlags = MapFieldNoBuilding;
+		} else {
+			type.MovementMask = 0;
+			type.FieldFlags = 0;
+		}
+		return;
+	}
+
+	//  As side effect we calculate the movement flags/mask here.
+	switch (type.UnitType) {
+		case UnitTypeLand:                              // on land
+			type.MovementMask =
+				MapFieldLandUnit |
+				MapFieldSeaUnit |
+				MapFieldBuilding | // already occuppied
+				MapFieldCoastAllowed |
+				MapFieldWaterAllowed | // can't move on this
+				MapFieldUnpassable;
+			break;
+		case UnitTypeFly:                               // in air
+			type.MovementMask = MapFieldAirUnit; // already occuppied
+			break;
+		case UnitTypeNaval:                             // on water
+			if (type.CanTransport()) {
+				type.MovementMask =
+					MapFieldLandUnit |
+					MapFieldSeaUnit |
+					MapFieldBuilding | // already occuppied
+					MapFieldLandAllowed; // can't move on this
+				// Johns: MapFieldUnpassable only for land units?
+			} else {
+				type.MovementMask =
+					MapFieldLandUnit |
+					MapFieldSeaUnit |
+					MapFieldBuilding | // already occuppied
+					MapFieldCoastAllowed |
+					MapFieldLandAllowed | // can't move on this
+					MapFieldUnpassable;
+			}
+			break;
+		default:
+			DebugPrint("Where moves this unit?\n");
+			type.MovementMask = 0;
+			break;
+	}
+	if (type.Building || type.ShoreBuilding) {
+		// Shore building is something special.
+		if (type.ShoreBuilding) {
+			type.MovementMask =
+				MapFieldLandUnit |
+				MapFieldSeaUnit |
+				MapFieldBuilding | // already occuppied
+				MapFieldLandAllowed; // can't build on this
+		}
+		type.MovementMask |= MapFieldNoBuilding;
+		//
+		// A little chaos, buildings without HP can be entered.
+		// The oil-patch is a very special case.
+		//
+		if (type.DefaultStat.Variables[HP_INDEX].Max) {
+			type.FieldFlags = MapFieldBuilding;
+		} else {
+			type.FieldFlags = MapFieldNoBuilding;
+		}
+	} else {
+		switch (type.UnitType) {
+			case UnitTypeLand: // on land
+				type.FieldFlags = MapFieldLandUnit;
+				break;
+			case UnitTypeFly: // in air
+				type.FieldFlags = MapFieldAirUnit;
+				break;
+			case UnitTypeNaval: // on water
+				type.FieldFlags = MapFieldSeaUnit;
+				break;
+			default:
+				DebugPrint("Where moves this unit?\n");
+				type.FieldFlags = 0;
+				break;
+		}
+	}
+}
+
 
 /**
 **  Update the player stats for changed unit types.
@@ -739,103 +842,7 @@ void UpdateStats(int reset)
 	// Update players stats
 	for (std::vector<CUnitType *>::size_type j = 0; j < UnitTypes.size(); ++j) {
 		CUnitType &type = *UnitTypes[j];
-		if (reset) {
-			for (int player = 0; player < PlayerMax; ++player) {
-				type.Stats[player] = type.DefaultStat;
-			}
-		}
-
-		// Non-solid units can always be entered and they don't block anything
-		if (type.NonSolid) {
-			if (type.Building) {
-				type.MovementMask = MapFieldLandUnit |
-									MapFieldSeaUnit |
-									MapFieldBuilding |
-									MapFieldCoastAllowed |
-									MapFieldWaterAllowed |
-									MapFieldNoBuilding |
-									MapFieldUnpassable;
-				type.FieldFlags = MapFieldNoBuilding;
-			} else {
-				type.MovementMask = 0;
-				type.FieldFlags = 0;
-			}
-			continue;
-		}
-
-		//  As side effect we calculate the movement flags/mask here.
-		switch (type.UnitType) {
-			case UnitTypeLand:                              // on land
-				type.MovementMask =
-					MapFieldLandUnit |
-					MapFieldSeaUnit |
-					MapFieldBuilding | // already occuppied
-					MapFieldCoastAllowed |
-					MapFieldWaterAllowed | // can't move on this
-					MapFieldUnpassable;
-				break;
-			case UnitTypeFly:                               // in air
-				type.MovementMask = MapFieldAirUnit; // already occuppied
-				break;
-			case UnitTypeNaval:                             // on water
-				if (type.CanTransport()) {
-					type.MovementMask =
-						MapFieldLandUnit |
-						MapFieldSeaUnit |
-						MapFieldBuilding | // already occuppied
-						MapFieldLandAllowed; // can't move on this
-					// Johns: MapFieldUnpassable only for land units?
-				} else {
-					type.MovementMask =
-						MapFieldLandUnit |
-						MapFieldSeaUnit |
-						MapFieldBuilding | // already occuppied
-						MapFieldCoastAllowed |
-						MapFieldLandAllowed | // can't move on this
-						MapFieldUnpassable;
-				}
-				break;
-			default:
-				DebugPrint("Where moves this unit?\n");
-				type.MovementMask = 0;
-				break;
-		}
-		if (type.Building || type.ShoreBuilding) {
-			// Shore building is something special.
-			if (type.ShoreBuilding) {
-				type.MovementMask =
-					MapFieldLandUnit |
-					MapFieldSeaUnit |
-					MapFieldBuilding | // already occuppied
-					MapFieldLandAllowed; // can't build on this
-			}
-			type.MovementMask |= MapFieldNoBuilding;
-			//
-			// A little chaos, buildings without HP can be entered.
-			// The oil-patch is a very special case.
-			//
-			if (type.DefaultStat.Variables[HP_INDEX].Max) {
-				type.FieldFlags = MapFieldBuilding;
-			} else {
-				type.FieldFlags = MapFieldNoBuilding;
-			}
-		} else {
-			switch (type.UnitType) {
-				case UnitTypeLand: // on land
-					type.FieldFlags = MapFieldLandUnit;
-					break;
-				case UnitTypeFly: // in air
-					type.FieldFlags = MapFieldAirUnit;
-					break;
-				case UnitTypeNaval: // on water
-					type.FieldFlags = MapFieldSeaUnit;
-					break;
-				default:
-					DebugPrint("Where moves this unit?\n");
-					type.FieldFlags = 0;
-					break;
-			}
-		}
+		UpdateUnitStats(type, reset);
 	}
 }
 
@@ -958,7 +965,7 @@ CUnitType *NewUnitTypeSlot(const std::string &ident)
 **  @param sprite  Sprite to use for drawing
 **  @param player  Player number for color substitution.
 **  @param frame   Animation frame of unit-type.
-**  @param screenPos  Screen pixel (top left) postion to draw unit-type.
+**  @param screenPos  Screen pixel (top left) position to draw unit-type.
 **
 **  @todo  Do screen position caculation in high level.
 **         Better way to handle in x mirrored sprites.
@@ -1123,6 +1130,7 @@ void LoadUnitTypes()
 		// Lookup missiles.
 		type.Missile.MapMissile();
 		type.Explosion.MapMissile();
+		type.TeleportEffect.MapMissile();
 
 		// Lookup impacts
 		for (int i = 0; i < ANIMATIONS_DEATHTYPES + 2; ++i) {
@@ -1135,7 +1143,7 @@ void LoadUnitTypes()
 #ifndef DYNAMIC_LOAD
 		// Load Sprite
 		if (!type.Sprite) {
-			ShowLoadProgress("Unit \"%s\"", type.Name.c_str());
+			ShowLoadProgress(_("Unit \"%s\""), type.Name.c_str());
 			LoadUnitTypeSprite(type);
 		}
 #endif

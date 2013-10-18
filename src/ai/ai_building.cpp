@@ -40,6 +40,7 @@
 #include "map.h"
 #include "pathfinder.h"
 #include "player.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unittype.h"
@@ -329,7 +330,10 @@ static bool AiFindHallPlace(const CUnit &worker,
 
 	HallPlaceFinder hallPlaceFinder(worker, type, resource, resultPos);
 
-	return terrainTraversal.Run(hallPlaceFinder);
+	if (terrainTraversal.Run(hallPlaceFinder)) {
+		return true;
+	}
+	return AiFindBuildingPlace2(worker, type, startPos, NULL, true, resultPos);
 }
 
 class LumberMillPlaceFinder
@@ -358,7 +362,7 @@ VisitResult LumberMillPlaceFinder::Visit(TerrainTraversal &terrainTraversal, con
 	}
 #endif
 	if (Map.Field(pos)->IsTerrainResourceOnMap(resource)) {
-		if (AiFindBuildingPlace2(worker, type, pos, NULL, true, resultPos)) {
+		if (AiFindBuildingPlace2(worker, type, from, NULL, true, resultPos)) {
 			return VisitResult_Finished;
 		}
 	}

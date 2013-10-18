@@ -47,7 +47,6 @@
 #include "replay.h"
 #include "sound.h"
 #include "sound_server.h"
-#include "tileset.h"
 #include "translate.h"
 #include "ui.h"
 #include "unit.h"
@@ -87,6 +86,7 @@ char BigMapMode;                     /// Show only the map
 enum _iface_state_ InterfaceState;   /// Current interface state
 bool GodMode;                        /// Invincibility cheat
 enum _key_state_ KeyState;           /// current key state
+CUnit *LastIdleWorker;               /// Last called idle worker
 
 /*----------------------------------------------------------------------------
 --  Functions
@@ -425,7 +425,7 @@ static void UiRecallMapPosition(unsigned position)
 /**
 **  Toggle terrain display on/off.
 */
-static void UiToggleTerrain()
+void UiToggleTerrain()
 {
 	UI.Minimap.WithTerrain ^= 1;
 	if (UI.Minimap.WithTerrain) {
@@ -438,14 +438,24 @@ static void UiToggleTerrain()
 /**
 **  Find the next idle worker, select it, and center on it
 */
-static void UiFindIdleWorker()
+void UiFindIdleWorker()
 {
 	if (ThisPlayer->FreeWorkers.empty()) {
 		return;
 	}
 	CUnit *unit = ThisPlayer->FreeWorkers[0];
+	if (LastIdleWorker) {
+		std::vector<CUnit *>::const_iterator it = std::find(ThisPlayer->FreeWorkers.begin(),
+															ThisPlayer->FreeWorkers.end(), LastIdleWorker);
+		if (it != ThisPlayer->FreeWorkers.end()) {
+			if (*it != ThisPlayer->FreeWorkers.back()) {
+				unit = *(++it);
+			}
+		}
+	}
 
 	if (unit != NULL) {
+		LastIdleWorker = unit;
 		SelectSingleUnit(*unit);
 		UI.StatusLine.Clear();
 		ClearCosts();
@@ -469,7 +479,7 @@ static void UiToggleGrabMouse()
 /**
 **  Track unit, the viewport follows the unit.
 */
-static void UiTrackUnit()
+void UiTrackUnit()
 {
 	//Check if player has selected at least 1 unit
 	if (!Selected[0]) {
@@ -800,7 +810,6 @@ int HandleCheats(const std::string &input)
 */
 static int InputKey(int key)
 {
-	char ChatMessage[sizeof(Input) + 40];
 	int i;
 	char *namestart;
 	char *p;
@@ -808,7 +817,7 @@ static int InputKey(int key)
 
 	switch (key) {
 		case SDLK_RETURN:
-		case SDLK_KP_ENTER: // RETURN
+		case SDLK_KP_ENTER: { // RETURN
 			// Replace ~~ with ~
 			for (p = q = Input; *p;) {
 				if (*p == '~') {
@@ -855,18 +864,23 @@ static int InputKey(int key)
 						++p;
 					}
 				}
-				snprintf(ChatMessage, sizeof(ChatMessage), "~%s~<%s>~> %s",
+				char chatMessage[sizeof(Input) + 40];
+				snprintf(chatMessage, sizeof(chatMessage), "~%s~<%s>~> %s",
 						 PlayerColorNames[ThisPlayer->Index].c_str(),
 						 ThisPlayer->Name.c_str(), Input);
 				// FIXME: only to selected players ...
-				NetworkChatMessage(ChatMessage);
+				NetworkSendChatMessage(chatMessage);
 			}
-			// FALL THROUGH
+		}
+		// FALL THROUGH
 		case SDLK_ESCAPE:
 			KeyState = KeyStateCommand;
 			UI.StatusLine.Clear();
 			return 1;
 
+#ifdef USE_MAC
+		case SDLK_DELETE:
+#endif
 		case SDLK_BACKSPACE:
 			if (InputIndex) {
 				if (Input[InputIndex - 1] == '~') {
@@ -1353,6 +1367,13 @@ void InputMouseMove(const EventCallback &callbacks,
 		|| ((y - buff) <= MouseY && MouseY <= (y + buff)) == 0) {
 		MouseState = InitialMouseState;
 		LastMouseTicks = ticks;
+		// Reset rectangle select cursor state if we moved by a lot
+		// - rectangle select should be a drag, not a tap
+		if (CursorState == CursorStateRectangle
+			&& (((x - buff * 2) <= MouseX && MouseX <= (x + buff * 2)) == 0
+				|| ((y - buff * 2) <= MouseY && MouseY <= (y + buff * 2)) == 0)) {
+			CursorState = CursorStatePoint;
+		}
 	}
 	if (MouseX != x || MouseY != y) {
 		MouseX = x;

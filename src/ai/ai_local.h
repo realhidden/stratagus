@@ -159,11 +159,11 @@ public:
 
 	void ReturnToHome();
 	bool NewRallyPoint(const Vec2i &startPos, Vec2i *resultPos);
+	void Insert(CUnit &unit);
 
 private:
 	void CountTypes(unsigned int *counter, const size_t len);
 	bool IsBelongsTo(const CUnitType &type);
-	void Insert(CUnit &unit);
 
 	void Update();
 
@@ -186,7 +186,8 @@ public:
 };
 
 // forces
-#define AI_MAX_FORCES 50                    /// How many forces are supported
+#define AI_MAX_FORCES 50                           /// How many forces are supported
+#define AI_MAX_FORCE_INTERNAL (AI_MAX_FORCES / 2)  /// The forces after AI_MAX_FORCE_INTERNAL are for internal use
 
 /**
 **  AI force manager.
@@ -219,10 +220,11 @@ public:
 		return script[index];
 	}
 
+	int GetForce(const CUnit &unit);
 	void RemoveDeadUnit();
 	bool Assign(CUnit &unit);
 	void Update();
-	unsigned int FindFreeForce(AiForceRole role = AiForceRoleDefault);
+	unsigned int FindFreeForce(AiForceRole role = AiForceRoleDefault, int begin = 0);
 	void CheckUnits(int *counter);
 private:
 	std::vector<AiForce> forces;
@@ -398,12 +400,12 @@ extern void AiNewUnitTypeEquiv(const CUnitType &a, const CUnitType &b);
 extern void AiResetUnitTypeEquiv();
 /// Finds all equivalents units to a given one
 extern int AiFindUnitTypeEquiv(const CUnitType &type, int *result);
-/// Finds all available equivalents units to a given one, in the prefered order
+/// Finds all available equivalents units to a given one, in the preferred order
 extern int AiFindAvailableUnitTypeEquiv(const CUnitType &type, int *result);
 extern int AiGetBuildRequestsCount(const PlayerAi &pai, int (&counter)[UnitTypeMax]);
 
 extern void AiNewDepotRequest(CUnit &worker);
-extern bool AiRequestChangeDepot(CUnit &worker);
+extern CUnit *AiGetSuitableDepot(const CUnit &worker, const CUnit &oldDepot, CUnit **resUnit);
 
 //
 // Buildings

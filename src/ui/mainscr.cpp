@@ -49,9 +49,9 @@
 #include "player.h"
 #include "sound.h"
 #include "spells.h"
-#include "tileset.h"
 #include "translate.h"
 #include "trigger.h"
+#include "ui/contenttype.h"
 #include "ui.h"
 #include "unit.h"
 #include "unitsound.h"
@@ -66,7 +66,7 @@
 #include <sstream>
 
 /*----------------------------------------------------------------------------
---  MENU BUTTON
+--  UI BUTTONS
 ----------------------------------------------------------------------------*/
 
 /**
@@ -76,29 +76,45 @@ void DrawMenuButtonArea()
 {
 	if (!IsNetworkGame()) {
 		if (UI.MenuButton.X != -1) {
-			DrawMenuButton(UI.MenuButton.Style,
-						   (ButtonAreaUnderCursor == ButtonAreaMenu
-							&& ButtonUnderCursor == ButtonUnderMenu ? MI_FLAGS_ACTIVE : 0) |
-						   (GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
-						   UI.MenuButton.X, UI.MenuButton.Y,
-						   UI.MenuButton.Text);
+			DrawUIButton(UI.MenuButton.Style,
+						 (ButtonAreaUnderCursor == ButtonAreaMenu
+						  && ButtonUnderCursor == ButtonUnderMenu ? MI_FLAGS_ACTIVE : 0) |
+						 (GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
+						 UI.MenuButton.X, UI.MenuButton.Y,
+						 UI.MenuButton.Text);
 		}
 	} else {
 		if (UI.NetworkMenuButton.X != -1) {
-			DrawMenuButton(UI.NetworkMenuButton.Style,
-						   (ButtonAreaUnderCursor == ButtonAreaMenu
-							&& ButtonUnderCursor == ButtonUnderNetworkMenu ? MI_FLAGS_ACTIVE : 0) |
-						   (GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
-						   UI.NetworkMenuButton.X, UI.NetworkMenuButton.Y,
-						   UI.NetworkMenuButton.Text);
+			DrawUIButton(UI.NetworkMenuButton.Style,
+						 (ButtonAreaUnderCursor == ButtonAreaMenu
+						  && ButtonUnderCursor == ButtonUnderNetworkMenu ? MI_FLAGS_ACTIVE : 0) |
+						 (GameMenuButtonClicked ? MI_FLAGS_CLICKED : 0),
+						 UI.NetworkMenuButton.X, UI.NetworkMenuButton.Y,
+						 UI.NetworkMenuButton.Text);
 		}
 		if (UI.NetworkDiplomacyButton.X != -1) {
-			DrawMenuButton(UI.NetworkDiplomacyButton.Style,
-						   (ButtonAreaUnderCursor == ButtonAreaMenu
-							&& ButtonUnderCursor == ButtonUnderNetworkDiplomacy ? MI_FLAGS_ACTIVE : 0) |
-						   (GameDiplomacyButtonClicked ? MI_FLAGS_CLICKED : 0),
-						   UI.NetworkDiplomacyButton.X, UI.NetworkDiplomacyButton.Y,
-						   UI.NetworkDiplomacyButton.Text);
+			DrawUIButton(UI.NetworkDiplomacyButton.Style,
+						 (ButtonAreaUnderCursor == ButtonAreaMenu
+						  && ButtonUnderCursor == ButtonUnderNetworkDiplomacy ? MI_FLAGS_ACTIVE : 0) |
+						 (GameDiplomacyButtonClicked ? MI_FLAGS_CLICKED : 0),
+						 UI.NetworkDiplomacyButton.X, UI.NetworkDiplomacyButton.Y,
+						 UI.NetworkDiplomacyButton.Text);
+		}
+	}
+}
+
+void DrawUserDefinedButtons()
+{
+	for (size_t i = 0; i < UI.UserButtons.size(); ++i) {
+		const CUIUserButton &button = UI.UserButtons[i];
+
+		if (button.Button.X != -1) {
+			DrawUIButton(button.Button.Style,
+						 (ButtonAreaUnderCursor == ButtonAreaUser
+						  && size_t(ButtonUnderCursor) == i ? MI_FLAGS_ACTIVE : 0) |
+						 (button.Clicked ? MI_FLAGS_CLICKED : 0),
+						 button.Button.X, button.Button.Y,
+						 button.Button.Text);
 		}
 	}
 }
@@ -112,8 +128,8 @@ void DrawMenuButtonArea()
 **  Placed under icons on top-panel.
 **
 **  @param unit  Pointer to unit.
-**  @param x     Screen X postion of icon
-**  @param y     Screen Y postion of icon
+**  @param x     Screen X position of icon
+**  @param y     Screen Y position of icon
 */
 static void UiDrawLifeBar(const CUnit &unit, int x, int y)
 {
@@ -137,7 +153,7 @@ static void UiDrawLifeBar(const CUnit &unit, int x, int y)
 		}
 
 		f = (f * (unit.Type->Icon.Icon->G->Width)) / 100;
-		Video.FillRectangleClip(color, x + 1, y + 1, f, 5);
+		Video.FillRectangleClip(color, x + 1, y + 1, f > 1 ? f - 2 : 0, 5);
 	}
 }
 
@@ -146,8 +162,8 @@ static void UiDrawLifeBar(const CUnit &unit, int x, int y)
 **  Placed under icons on top-panel.
 **
 **  @param unit  Pointer to unit.
-**  @param x     Screen X postion of icon
-**  @param y     Screen Y postion of icon
+**  @param x     Screen X position of icon
+**  @param y     Screen Y position of icon
 */
 static void UiDrawManaBar(const CUnit &unit, int x, int y)
 {
@@ -198,13 +214,13 @@ static bool CanShowContent(const ConditionPanel *condition, const CUnit &unit)
 	return true;
 }
 
-typedef enum {
+enum  UStrIntType{
 	USTRINT_STR, USTRINT_INT
-} UStrIntType;
-typedef struct {
+};
+struct UStrInt {
 	union {const char *s; int i;};
 	UStrIntType type;
-} UStrInt;
+};
 
 /**
 **  Return the value corresponding.
@@ -317,311 +333,6 @@ UStrInt GetComponent(const CUnitType &type, int index, EnumVariable e)
 			break;
 	}
 	return val;
-}
-
-/**
-**  Get unit from a unit depending of the relation.
-**
-**  @param unit  unit reference.
-**  @param e     relation with unit.
-**
-**  @return      The desired unit.
-*/
-static const CUnit *GetUnitRef(const CUnit &unit, EnumUnit e)
-{
-	switch (e) {
-		case UnitRefItSelf:
-			return &unit;
-		case UnitRefInside:
-			return unit.UnitInside;
-		case UnitRefContainer:
-			return unit.Container;
-		case UnitRefWorker :
-			if (unit.CurrentAction() == UnitActionBuilt) {
-				COrder_Built &order = *static_cast<COrder_Built *>(unit.CurrentOrder());
-
-				return order.GetWorkerPtr();
-			} else {
-				return NULL;
-			}
-		case UnitRefGoal:
-			return unit.Goal;
-		default:
-			Assert(0);
-	}
-	return NULL;
-}
-
-
-/**
-**  Draw text with variable.
-**
-**  @param unit         unit with variable to show.
-**  @param defaultfont  default font if no specific font in extra data.
-*/
-void CContentTypeText::Draw(const CUnit &unit, CFont *defaultfont) const
-{
-	std::string text;       // Optional text to display.
-	int x = this->PosX;
-	int y = this->PosY;
-	CFont &font = this->Font ? *this->Font : *defaultfont;
-
-	Assert(&font);
-	Assert(this->Index == -1 || ((unsigned int) this->Index < UnitTypeVar.GetNumberVariable()));
-
-	CLabel label(font);
-
-	if (this->Text) {
-		text = EvalString(this->Text);
-		if (this->Centered) {
-			x += (label.DrawCentered(x, y, text) * 2);
-		} else {
-			x += label.Draw(x, y, text);
-		}
-	}
-
-	if (this->ShowName) {
-		label.DrawCentered(x, y, unit.Type->Name);
-		return;
-	}
-
-	if (this->Index != -1) {
-		if (!this->Stat) {
-			EnumVariable component = this->Component;
-			switch (component) {
-				case VariableValue:
-				case VariableMax:
-				case VariableIncrease:
-				case VariableDiff:
-				case VariablePercent:
-					label.Draw(x, y, GetComponent(unit, this->Index, component, 0).i);
-					break;
-				case VariableName:
-					label.Draw(x, y, GetComponent(unit, this->Index, component, 0).s);
-					break;
-				default:
-					Assert(0);
-			}
-		} else {
-			int value = unit.Type->DefaultStat.Variables[this->Index].Value;
-			int diff = unit.Stats->Variables[this->Index].Value - value;
-
-			if (!diff) {
-				label.Draw(x, y, value);
-			} else {
-				char buf[64];
-				snprintf(buf, sizeof(buf), diff > 0 ? "%d~<+%d~>" : "%d~<-%d~>", value, diff);
-				label.Draw(x, y, buf);
-			}
-		}
-	}
-}
-
-/**
-**  Draw formatted text with variable value.
-**
-**  @param unit         unit with variable to show.
-**  @param defaultfont  default font if no specific font in extra data.
-**
-**  @note text is limited to 256 chars. (enough?)
-**  @note text must have exactly 1 %d.
-**  @bug if text format is incorrect.
-*/
-void CContentTypeFormattedText::Draw(const CUnit &unit, CFont *defaultfont) const
-{
-	char buf[256];
-	UStrInt usi1;
-
-	CFont &font = this->Font ? *this->Font : *defaultfont;
-	Assert(&font);
-
-	CLabel label(font);
-
-	Assert((unsigned int) this->Index < UnitTypeVar.GetNumberVariable());
-	usi1 = GetComponent(unit, this->Index, this->Component, 0);
-	if (usi1.type == USTRINT_STR) {
-		snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.s);
-	} else {
-		snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.i);
-	}
-
-	if (this->Centered) {
-		label.DrawCentered(this->PosX, this->PosY, buf);
-	} else {
-		label.Draw(this->PosX, this->PosY, buf);
-	}
-}
-
-/**
-**  Draw formatted text with variable value.
-**
-**  @param unit         unit with variable to show.
-**  @param defaultfont  default font if no specific font in extra data.
-**
-**  @note text is limited to 256 chars. (enough?)
-**  @note text must have exactly 2 %d.
-**  @bug if text format is incorrect.
-*/
-void CContentTypeFormattedText2::Draw(const CUnit &unit, CFont *defaultfont) const
-{
-	char buf[256];
-	UStrInt usi1, usi2;
-
-	CFont &font = this->Font ? *this->Font : *defaultfont;
-	Assert(&font);
-	CLabel label(font);
-
-	usi1 = GetComponent(unit, this->Index1, this->Component1, 0);
-	usi2 = GetComponent(unit, this->Index2, this->Component2, 0);
-	if (usi1.type == USTRINT_STR) {
-		if (usi2.type == USTRINT_STR) {
-			snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.s, usi2.s);
-		} else {
-			snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.s, usi2.i);
-		}
-	} else {
-		if (usi2.type == USTRINT_STR) {
-			snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.i, usi2.s);
-		} else {
-			snprintf(buf, sizeof(buf), this->Format.c_str(), usi1.i, usi2.i);
-		}
-	}
-	if (this->Centered) {
-		label.DrawCentered(this->PosX, this->PosY, buf);
-	} else {
-		label.Draw(this->PosX, this->PosY, buf);
-	}
-}
-
-/**
-**  Draw icon for unit.
-**
-**  @param unit         unit with icon to show.
-**  @param defaultfont  unused.
-*/
-void CContentTypeIcon::Draw(const CUnit &unit, CFont *) const
-{
-	const CUnit *unitToDraw = GetUnitRef(unit, this->UnitRef);
-
-	if (unitToDraw && unitToDraw->Type->Icon.Icon) {
-		const PixelPos pos(this->PosX, this->PosY);
-		unitToDraw->Type->Icon.Icon->DrawIcon(*unitToDraw->Player, pos);
-	}
-}
-
-/**
-**  Draw life bar of a unit using selected variable.
-**  Placed under icons on top-panel.
-**
-**  @param unit         Pointer to unit.
-**  @param defaultfont  FIXME: docu
-**
-**  @todo Color and percent value Parametrisation.
-*/
-void CContentTypeLifeBar::Draw(const CUnit &unit, CFont *) const
-{
-	Assert((unsigned int) this->Index < UnitTypeVar.GetNumberVariable());
-	if (!unit.Variable[this->Index].Max) {
-		return;
-	}
-
-	Uint32 color;
-	int f = (100 * unit.Variable[this->Index].Value) / unit.Variable[this->Index].Max;
-
-	if (f > 75) {
-		color = ColorDarkGreen;
-	} else if (f > 50) {
-		color = ColorYellow;
-	} else if (f > 25) {
-		color = ColorOrange;
-	} else {
-		color = ColorRed;
-	}
-
-	// Border
-	Video.FillRectangleClip(ColorBlack, this->PosX - 1, this->PosY - 1,
-							this->Width + 2, this->Height + 2);
-
-	Video.FillRectangleClip(color, this->PosX, this->PosY,
-							(f * this->Width) / 100, this->Height);
-}
-
-/**
-**  Draw life bar of a unit using selected variable.
-**  Placed under icons on top-panel.
-**
-**  @param unit         Pointer to unit.
-**  @param defaultfont  FIXME: docu
-**
-**  @todo Color and percent value Parametrisation.
-*/
-void CContentTypeCompleteBar::Draw(const CUnit &unit, CFont *) const
-{
-	Uint32 color;
-	Assert((unsigned int) this->Index < UnitTypeVar.GetNumberVariable());
-	if (!unit.Variable[this->Index].Max) {
-		return;
-	}
-
-	int x = this->PosX;
-	int y = this->PosY;
-	int w = this->Width;
-	int h = this->Height;
-
-	Assert(w > 0);
-	Assert(h > 4);
-
-	//FIXME: ugly
-	switch (this->Color) {
-		case 1:
-			color = ColorRed;
-			break;
-		case 2:
-			color = ColorYellow;
-			break;
-		case 3:
-			color = ColorGreen;
-			break;
-		case 4:
-			color = ColorGray;
-			break;
-		case 5:
-			color = ColorWhite;
-			break;
-		case 6:
-			color = ColorOrange;
-			break;
-		case 7:
-			color = ColorBlue;
-			break;
-		case 8:
-			color = ColorDarkGreen;
-			break;
-		case 9:
-			color = ColorBlack;
-			break;
-		default:
-			color = UI.CompletedBarColor;
-			break;
-	}
-
-	int f = (100 * unit.Variable[this->Index].Value) / unit.Variable[this->Index].Max;
-	if (!this->Border) {
-		Video.FillRectangleClip(color, x, y, f * w / 100, h);
-		if (UI.CompletedBarShadow) {
-			// Shadow
-			Video.DrawVLine(ColorGray, x + f * w / 100, y, h);
-			Video.DrawHLine(ColorGray, x, y + h, f * w / 100);
-
-			// |~  Light
-			Video.DrawVLine(ColorWhite, x, y, h);
-			Video.DrawHLine(ColorWhite, x, y, f * w / 100);
-		}
-	} else {
-		Video.DrawRectangleClip(ColorGray,  x,     y,     w + 4, h);
-		Video.DrawRectangleClip(ColorBlack, x + 1, y + 1, w + 2, h - 2);
-		Video.FillRectangleClip(color, x + 2, y + 2, f * w / 100, h - 4);
-	}
 }
 
 static void DrawUnitInfo_Training(const CUnit &unit)
@@ -757,7 +468,7 @@ static void DrawUnitInfo(CUnit &unit)
 	//
 	//  Transporting units.
 	//
-	if (type.CanTransport() && unit.BoardCount) {
+	if (type.CanTransport() && unit.BoardCount && CurrentButtonLevel == unit.Type->ButtonLevelForTransporter) {
 		CUnit *uins = unit.UnitInside;
 		size_t j = 0;
 
@@ -808,7 +519,7 @@ void DrawResources()
 
 			if (ThisPlayer->MaxResources[i] != -1) {
 				const int resAmount = ThisPlayer->StoredResources[i] + ThisPlayer->Resources[i];
-				char tmp[128];
+				char tmp[256];
 				snprintf(tmp, sizeof(tmp), "%d (%d)", resAmount, ThisPlayer->MaxResources[i] - ThisPlayer->StoredResources[i]);
 				label.SetFont(GetSmallFont());
 
@@ -821,7 +532,7 @@ void DrawResources()
 		}
 	}
 	if (UI.Resources[FoodCost].TextX != -1) {
-		char tmp[128];
+		char tmp[256];
 		snprintf(tmp, sizeof(tmp), "%d/%d", ThisPlayer->Demand, ThisPlayer->Supply);
 		label.SetFont(GetGameFont());
 		if (ThisPlayer->Supply < ThisPlayer->Demand) {
@@ -850,7 +561,7 @@ void DrawResources()
 
 #define MESSAGES_MAX  10                         /// How many can be displayed
 
-static char MessagesEvent[MESSAGES_MAX][64];     /// Array of event messages
+static char MessagesEvent[MESSAGES_MAX][256];    /// Array of event messages
 static int  MessagesEventX[MESSAGES_MAX];        /// X coordinate of event
 static int  MessagesEventY[MESSAGES_MAX];        /// Y coordinate of event
 static int  MessagesEventCount;                  /// Number of event messages
@@ -885,7 +596,7 @@ protected:
 	bool CheckRepeatMessage(const char *msg);
 
 private:
-	char Messages[MESSAGES_MAX][128];         /// Array of messages
+	char Messages[MESSAGES_MAX][256];         /// Array of messages
 	int  MessagesCount;                       /// Number of messages
 	int  MessagesSameCount;                   /// Counts same message repeats
 	int  MessagesScrollY;
@@ -1107,7 +818,7 @@ bool MessagesDisplay::CheckRepeatMessage(const char *msg)
 		return true;
 	}
 	if (MessagesSameCount > 0) {
-		char temp[128];
+		char temp[256];
 		int n;
 
 		n = MessagesSameCount;
@@ -1120,7 +831,7 @@ bool MessagesDisplay::CheckRepeatMessage(const char *msg)
 }
 
 /**
-**  Add a new message to display only if it differs from the preceeding one.
+**  Add a new message to display only if it differs from the preceding one.
 */
 void MessagesDisplay::AddUniqueMessage(const char *s)
 {
@@ -1215,7 +926,7 @@ void SetMessageEvent(const Vec2i &pos, const char *fmt, ...)
 {
 	Assert(Map.Info.IsPointOnMap(pos));
 
-	char temp[128];
+	char temp[256];
 	va_list va;
 
 	va_start(va, fmt);
@@ -1263,46 +974,6 @@ void ToggleShowBuilListMessages()
 	allmessages.ToggleShowBuilListMessages();
 }
 #endif
-
-/*----------------------------------------------------------------------------
---  STATUS LINE
-----------------------------------------------------------------------------*/
-
-/**
-**  Draw status line.
-*/
-void CStatusLine::Draw()
-{
-	if (!this->StatusLine.empty()) {
-		PushClipping();
-		SetClipping(this->TextX, this->TextY,
-					this->TextX + this->Width - 1, Video.Height - 1);
-		CLabel(*this->Font).DrawClip(this->TextX, this->TextY, this->StatusLine);
-		PopClipping();
-	}
-}
-
-/**
-**  Change status line to new text.
-**
-**  @param status  New status line information.
-*/
-void CStatusLine::Set(const std::string &status)
-{
-	if (KeyState != KeyStateInput) {
-		this->StatusLine = status;
-	}
-}
-
-/**
-**  Clear status line.
-*/
-void CStatusLine::Clear()
-{
-	if (KeyState != KeyStateInput) {
-		this->StatusLine.clear();
-	}
-}
 
 /*----------------------------------------------------------------------------
 --  COSTS
@@ -1374,8 +1045,8 @@ void ClearCosts()
 /*----------------------------------------------------------------------------
 --  INFO PANEL
 ----------------------------------------------------------------------------*/
-//FIXME rb biger change requre review.
-#if 0
+//FIXME rb biger change require review.
+#if 1
 /**
 **  Draw info panel background.
 **
@@ -1384,7 +1055,7 @@ void ClearCosts()
 static void DrawInfoPanelBackground(unsigned frame)
 {
 	if (UI.InfoPanel.G) {
-		UI.InfoPanel.G->DrawFrameClip(frame, UI.InfoPanel.X, UI.InfoPanel.Y);
+		UI.InfoPanel.G->DrawFrame(frame, UI.InfoPanel.X, UI.InfoPanel.Y);
 	}
 }
 
@@ -1406,10 +1077,12 @@ void CInfoPanel::Draw()
 			//
 			DrawInfoPanelBackground(0);
 			for (int i = 0; i < std::min<int>(NumSelected, UI.SelectedButtons.size()); ++i) {
-				Selected[i]->Type->Icon.Icon->DrawUnitIcon(UI.SelectedButtons[i].Style,
-														   (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == i) ?
-														   (IconActive | (MouseButtons & LeftButton)) : 0,
-														   UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y, "");
+				const CIcon &icon = *Selected[i]->Type->Icon.Icon;
+				const PixelPos pos(UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y);
+				icon.DrawUnitIcon(*UI.SelectedButtons[i].Style,
+								  (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == i) ?
+								  (IconActive | (MouseButtons & LeftButton)) : 0,
+								  pos, "");
 				UiDrawLifeBar(*Selected[i], UI.SelectedButtons[i].X, UI.SelectedButtons[i].Y);
 
 				if (ButtonAreaUnderCursor == ButtonAreaSelected && ButtonUnderCursor == i) {
@@ -1420,7 +1093,7 @@ void CInfoPanel::Draw()
 				char buf[5];
 
 				sprintf(buf, "+%u", static_cast<unsigned int>(NumSelected - UI.SelectedButtons.size()));
-				CLabel(UI.MaxSelectedFont).Draw(UI.MaxSelectedTextX, UI.MaxSelectedTextY, buf);
+				CLabel(*UI.MaxSelectedFont).Draw(UI.MaxSelectedTextX, UI.MaxSelectedTextY, buf);
 			}
 			return;
 		} else {
@@ -1455,7 +1128,8 @@ void CInfoPanel::Draw()
 	//  Nothing selected
 
 	DrawInfoPanelBackground(0);
-	if (UnitUnderCursor && UnitUnderCursor->IsVisible(*ThisPlayer)) {
+	if (UnitUnderCursor && UnitUnderCursor->IsVisible(*ThisPlayer)
+		&& !UnitUnderCursor->Type->BoolFlag[ISNOTSELECTABLE_INDEX].value) {
 		// FIXME: not correct for enemies units
 		DrawUnitInfo(*UnitUnderCursor);
 	} else {
@@ -1467,7 +1141,7 @@ void CInfoPanel::Draw()
 		CLabel label(GetGameFont());
 		label.Draw(x, y, "Stratagus");
 		y += 16;
-		label.Draw(x, y,  "Cycle:");
+		label.Draw(x, y,  _("Cycle:"));
 		label.Draw(x + 48, y, GameCycle);
 		label.Draw(x + 110, y, CYCLES_PER_SECOND * VideoSyncSpeed / 100);
 		y += 20;
@@ -1623,17 +1297,8 @@ void DrawTimer()
 		return;
 	}
 
-	int sec = GameTimer.Cycles / CYCLES_PER_SECOND % 60;
-	int min = (GameTimer.Cycles / CYCLES_PER_SECOND / 60) % 60;
-	int hour = (GameTimer.Cycles / CYCLES_PER_SECOND / 3600);
-	char buf[30];
-
-	if (hour) {
-		snprintf(buf, sizeof(buf), "%d:%02d:%02d", hour, min, sec);
-	} else {
-		snprintf(buf, sizeof(buf), "%d:%02d", min, sec);
-	}
-	CLabel(*UI.Timer.Font).Draw(UI.Timer.X, UI.Timer.Y, buf);
+	int sec = GameTimer.Cycles / CYCLES_PER_SECOND;
+	UI.Timer.Draw(sec);
 }
 
 /**
@@ -1646,9 +1311,7 @@ void UpdateTimer()
 			GameTimer.Cycles += GameCycle - GameTimer.LastUpdate;
 		} else {
 			GameTimer.Cycles -= GameCycle - GameTimer.LastUpdate;
-			if (GameTimer.Cycles < 0) {
-				GameTimer.Cycles = 0;
-			}
+			GameTimer.Cycles = std::max(GameTimer.Cycles, 0l);
 		}
 		GameTimer.LastUpdate = GameCycle;
 	}

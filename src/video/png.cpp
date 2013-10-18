@@ -89,16 +89,13 @@ int LoadGraphicPNG(CGraphic *g)
 	if (g->File.empty()) {
 		return -1;
 	}
-	char name[PATH_MAX];
-
-	name[0] = '\0';
-	LibraryFileName(g->File.c_str(), name, sizeof(name));
-	if (name[0] == '\0') {
+	const std::string name = LibraryFileName(g->File.c_str());
+	if (name.empty()) {
 		return -1;
 	}
 	CFile fp;
 
-	if (fp.open(name, CL_OPEN_READ) == -1) {
+	if (fp.open(name.c_str(), CL_OPEN_READ) == -1) {
 		perror("Can't open file");
 		return -1;
 	}
@@ -235,7 +232,7 @@ int LoadGraphicPNG(CGraphic *g)
 			/* FIXME: Should these be truncated or shifted down? */
 			ckey = SDL_MapRGB(surface->format, (Uint8)transv->red, (Uint8)transv->green, (Uint8)transv->blue);
 		}
-		SDL_SetColorKey(surface, SDL_SRCCOLORKEY | SDL_RLEACCEL, ckey);
+		SDL_SetColorKey(surface, SDL_SRCCOLORKEY, ckey);
 	}
 
 	/* Create the array of pointers to image data */
@@ -328,17 +325,20 @@ void SaveScreenshotPNG(const char *name)
 
 	png_write_info(png_ptr, info_ptr);
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		std::vector<unsigned char> pixels;
 		pixels.resize(Video.Width * Video.Height * 3);
-#ifndef USE_GLES
+#ifdef USE_OPENGL
 		glReadBuffer(GL_FRONT);
 #endif
 		glReadPixels(0, 0, Video.Width, Video.Height, GL_RGB, GL_UNSIGNED_BYTE, &pixels[0]);
 		for (int i = 0; i < Video.Height; ++i) {
 			png_write_row(png_ptr, &pixels[(Video.Height - 1 - i) * Video.Width * 3]);
 		}
-	} else {
+	} else
+#endif
+	{
 		std::vector<unsigned char> row;
 		SDL_PixelFormat *fmt = TheScreen->format;
 

@@ -45,6 +45,7 @@
 #include "pathfinder.h"
 #include "player.h"
 #include "spells.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_manager.h"
 #include "unittype.h"
@@ -309,7 +310,6 @@ public:
 		resinfo(*worker.Type->ResInfo[resource]),
 		deposit(deposit),
 		movemask(worker.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
-		resource(resource),
 		maxRange(maxRange),
 		check_usage(check_usage),
 		res_finder(resource, 1),
@@ -325,12 +325,12 @@ private:
 	public:
 		void SetFrom(const CUnit &mine, const CUnit *deposit, bool check_usage);
 		bool operator < (const ResourceUnitFinder_Cost &rhs) const {
-			if (assigned != rhs.assigned) {
-				return assigned < rhs.assigned;
-			} else if (waiting != rhs.waiting) {
+			if (waiting != rhs.waiting) {
 				return waiting < rhs.waiting;
-			} else {
+			} else if (distance != rhs.distance) {
 				return distance < rhs.distance;
+			} else {
+				return assigned < rhs.assigned;
 			}
 		}
 		void SetToMax() { assigned = waiting = distance = UINT_MAX; }
@@ -347,7 +347,6 @@ private:
 	const ResourceInfo &resinfo;
 	const CUnit *deposit;
 	unsigned int movemask;
-	int resource;
 	int maxRange;
 	bool check_usage;
 	CResourceFinder res_finder;
@@ -447,8 +446,6 @@ CUnit *UnitFindResource(const CUnit &unit, const CUnit &startUnit, int range, in
 **  Find deposit. This will find a deposit for a resource
 **
 **  @param unit        The unit that wants to find a resource.
-**  @param x           Closest to x
-**  @param y           Closest to y
 **  @param range       Maximum distance to the deposit.
 **  @param resource    Resource to find deposit from.
 **
@@ -512,15 +509,16 @@ CUnit *FindIdleWorker(const CPlayer &player, const CUnit *last)
 /**
 **  Find all units of type.
 **
-**  @param type   type of unit requested
-**  @param units  array in which we have to store the units
+**  @param type       type of unit requested
+**  @param units      array in which we have to store the units
+**  @param everybody  if true, include all units
 */
-void FindUnitsByType(const CUnitType &type, std::vector<CUnit *> &units)
+void FindUnitsByType(const CUnitType &type, std::vector<CUnit *> &units, bool everybody)
 {
 	for (CUnitManager::Iterator it = UnitManager.begin(); it != UnitManager.end(); ++it) {
 		CUnit &unit = **it;
 
-		if (unit.Type == &type && !unit.IsUnusable()) {
+		if (unit.Type == &type && !unit.IsUnusable(everybody)) {
 			units.push_back(&unit);
 		}
 	}
@@ -835,10 +833,8 @@ public:
 				cost = HEALTH_FACTOR * (2 * hp_damage_evaluate -
 										dest->Variable[HP_INDEX].Value) /
 					   (dtype.TileWidth * dtype.TileWidth);
-				if (cost < 1) {
-					cost = 1;
-				}
-				cost = (-cost);
+				cost = std::max(cost, 1);
+				cost = -cost;
 			} else {
 				//  Priority 0-255
 				cost += dtype.Priority * PRIORITY_FACTOR;
@@ -862,14 +858,8 @@ public:
 				int effective_hp = (dest->Variable[HP_INDEX].Value - 2 * hp_damage_evaluate);
 
 				// Unit we won't kill are evaluated the same
-				if (effective_hp > 0) {
-					effective_hp = 0;
-				}
-
 				// Unit we are sure to kill are all evaluated the same (except PRIORITY)
-				if (effective_hp < -hp_damage_evaluate) {
-					effective_hp = -hp_damage_evaluate;
-				}
+				clamp(&effective_hp, -hp_damage_evaluate, 0);
 
 				// Here, effective_hp vary from -hp_damage_evaluate (unit will be killed) to 0 (unit can't be killed)
 				// => we prefer killing rather than only hitting...
@@ -882,9 +872,7 @@ public:
 
 				// the cost may be divided accros multiple cells
 				cost = cost / (dtype.TileWidth * dtype.TileWidth);
-				if (cost < 1) {
-					cost = 1;
-				}
+				cost = std::max(cost, 1);
 
 				// Removed Unit's are in bunkers
 				int d;
@@ -959,28 +947,16 @@ private:
 			dest->CacheLock = 0;
 			return;
 		}
-		const CUnitType &type =  *attacker->Type;
+		const CUnitType &type = *attacker->Type;
 		const CUnitType &dtype = *dest->Type;
 		const int missile_range = type.Missile.Missile->Range + range - 1;
-		int x, y;
+		int x = attacker->tilePos.x;
+		int y = attacker->tilePos.y;
 
 		// put in x-y the real point which will be hit...
 		// (only meaningful when dtype->TileWidth > 1)
-		if (attacker->tilePos.x < dest->tilePos.x) {
-			x = dest->tilePos.x;
-		} else if (attacker->tilePos.x > dest->tilePos.x + dtype.TileWidth - 1) {
-			x = dest->tilePos.x + dtype.TileWidth - 1;
-		} else {
-			x = attacker->tilePos.x;
-		}
-
-		if (attacker->tilePos.y < dest->tilePos.y) {
-			y = dest->tilePos.y;
-		} else if (attacker->tilePos.y > dest->tilePos.y + dtype.TileHeight - 1) {
-			y = dest->tilePos.y + dtype.TileHeight - 1;
-		} else {
-			y = attacker->tilePos.y;
-		}
+		clamp<int>(&x, dest->tilePos.x, dest->tilePos.x + dtype.TileWidth - 1);
+		clamp<int>(&y, dest->tilePos.y, dest->tilePos.y + dtype.TileHeight - 1);
 
 		// Make x,y relative to u->x...
 
@@ -1009,9 +985,7 @@ private:
 		}
 
 		// don't consider small damages...
-		if (sgood < 20) {
-			sgood = 20;
-		}
+		sgood = std::max(sgood, 20);
 
 		int cost = sbad / sgood;
 		if (cost > best_cost) {

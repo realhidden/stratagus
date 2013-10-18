@@ -42,16 +42,11 @@
 #include "actions.h"
 #include "minimap.h"
 #include "player.h"
-#include "tileset.h"
 #include "ui.h"
 #include "unit.h"
 #include "unit_manager.h"
 #include "video.h"
 #include "../video/intern_video.h"
-
-/*----------------------------------------------------------------------------
---  Declarations
-----------------------------------------------------------------------------*/
 
 /*----------------------------------------------------------------------------
 --  Variables
@@ -70,7 +65,7 @@ static const int FogTable[16] = {
 	0, 11, 10, 2,  13, 6, 14, 3,  12, 15, 4, 1,  8, 9, 7, 0,
 };
 
-static unsigned short *VisibleTable;
+static std::vector<unsigned short> VisibleTable;
 
 static SDL_Surface *OnlyFogSurface;
 static CGraphic *AlphaFogG;
@@ -78,7 +73,6 @@ static CGraphic *AlphaFogG;
 /*----------------------------------------------------------------------------
 --  Functions
 ----------------------------------------------------------------------------*/
-
 
 class _filter_flags
 {
@@ -101,8 +95,7 @@ private:
 **  Find out what the tile flags are a tile is covered by fog
 **
 **  @param player  player who is doing operation
-**  @param x       X map location
-**  @param y       Y map location
+**  @param index   map location
 **  @param mask    input mask to filter
 **
 **  @return        Filtered mask after taking fog into account
@@ -215,8 +208,7 @@ static void UnitsOnTileUnmarkSeen(const CPlayer &player, CMapField &mf, int cloa
 **  Mark a tile's sight. (Explore and make visible.)
 **
 **  @param player  Player to mark sight.
-**  @param x       X tile to mark.
-**  @param y       Y tile to mark.
+**  @param index   tile to mark.
 */
 void MapMarkTileSight(const CPlayer &player, const unsigned int index)
 {
@@ -243,13 +235,11 @@ void MapMarkTileSight(const CPlayer &player, const Vec2i &pos)
 	MapMarkTileSight(player, Map.getIndex(pos));
 }
 
-
 /**
 **  Unmark a tile's sight. (Explore and make visible.)
 **
 **  @param player  Player to mark sight.
-**  @param x       X tile to mark.
-**  @param y       Y tile to mark.
+**  @param indexx  tile to mark.
 */
 void MapUnmarkTileSight(const CPlayer &player, const unsigned int index)
 {
@@ -281,13 +271,11 @@ void MapUnmarkTileSight(const CPlayer &player, const Vec2i &pos)
 	MapUnmarkTileSight(player, Map.getIndex(pos));
 }
 
-
 /**
 **  Mark a tile for cloak detection.
 **
 **  @param player  Player to mark sight.
-**  @param x       X tile to mark.
-**  @param y       Y tile to mark.
+**  @param index   Tile to mark.
 */
 void MapMarkTileDetectCloak(const CPlayer &player, const unsigned int index)
 {
@@ -305,13 +293,11 @@ void MapMarkTileDetectCloak(const CPlayer &player, const Vec2i &pos)
 	MapMarkTileDetectCloak(player, Map.getIndex(pos));
 }
 
-
 /**
 **  Unmark a tile for cloak detection.
 **
 **  @param player  Player to mark sight.
-**  @param x       X tile to mark.
-**  @param y       Y tile to mark.
+**  @param index   tile to mark.
 */
 void MapUnmarkTileDetectCloak(const CPlayer &player, const unsigned int index)
 {
@@ -436,7 +422,13 @@ void UpdateFogOfWarChange()
 */
 void VideoDrawOnlyFog(int x, int y)
 {
-	if (!UseOpenGL) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (UseOpenGL) {
+		Video.FillRectangleClip(Video.MapRGBA(0, 0, 0, 0, FogOfWarOpacity),
+								x, y, PixelTileSize.x, PixelTileSize.y);
+	} else
+#endif
+	{
 		int oldx;
 		int oldy;
 		SDL_Rect srect;
@@ -457,9 +449,6 @@ void VideoDrawOnlyFog(int x, int y)
 		drect.y = y;
 
 		SDL_BlitSurface(OnlyFogSurface, &srect, TheScreen, &drect);
-	} else {
-		Video.FillRectangleClip(Video.MapRGBA(0, 0, 0, 0, FogOfWarOpacity),
-								x, y, PixelTileSize.x, PixelTileSize.y);
 	}
 }
 
@@ -603,9 +592,12 @@ static void DrawFogOfWarTile(int sx, int sy, int dx, int dy)
 
 	if (IsMapFieldVisibleTable(sx) || ReplayRevealMap) {
 		if (fogTile && fogTile != blackFogTile) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 			if (UseOpenGL) {
 				Map.FogGraphic->DrawFrameClipTrans(fogTile, dx, dy, FogOfWarOpacity);
-			} else {
+			} else
+#endif
+			{
 				AlphaFogG->DrawFrameClip(fogTile, dx, dy);
 			}
 		}
@@ -681,7 +673,10 @@ void CMap::InitFogOfWar()
 
 	FogGraphic->Load();
 
-	if (!UseOpenGL) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (!UseOpenGL)
+#endif
+	{
 		//
 		// Generate Only Fog surface.
 		//
@@ -745,8 +740,8 @@ void CMap::InitFogOfWar()
 		AlphaFogG->UseDisplayFormat();
 	}
 
-	delete[] VisibleTable;
-	VisibleTable = new unsigned short[Info.MapWidth * Info.MapHeight];
+	VisibleTable.clear();
+	VisibleTable.resize(Info.MapWidth * Info.MapHeight);
 }
 
 /**
@@ -754,13 +749,15 @@ void CMap::InitFogOfWar()
 */
 void CMap::CleanFogOfWar()
 {
-	delete[] VisibleTable;
-	VisibleTable = NULL;
+	VisibleTable.clear();
 
 	CGraphic::Free(Map.FogGraphic);
 	FogGraphic = NULL;
 
-	if (!UseOpenGL) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
+	if (!UseOpenGL)
+#endif
+	{
 		if (OnlyFogSurface) {
 			VideoPaletteListRemove(OnlyFogSurface);
 			SDL_FreeSurface(OnlyFogSurface);

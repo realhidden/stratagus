@@ -116,7 +116,8 @@ enum _button_area_ {
 	ButtonAreaResearching,   /// Researching button
 	ButtonAreaTransporting,  /// Transporting button
 	ButtonAreaButton,        /// Button panel button
-	ButtonAreaMenu           /// Menu button
+	ButtonAreaMenu,          /// Menu button
+	ButtonAreaUser           /// User buttons
 };
 
 /// Menu button under cursor
@@ -238,6 +239,8 @@ extern enum _cursor_on_ CursorOn;
 
 /// vladi: used for unit buttons sub-menus etc
 extern int CurrentButtonLevel;
+/// Last drawn popup : used to speed up drawing
+extern ButtonAction *LastDrawnButtonPopup;
 
 /// Time to detect double clicks
 extern int DoubleClickDelay;
@@ -260,7 +263,7 @@ extern void CleanButtons();
 /// Make a new button
 extern int AddButton(int pos, int level, const std::string &IconIdent,
 					 ButtonCmd action, const std::string &value, const ButtonCheckFunc func,
-					 const std::string &arg, const std::string &hint, const std::string &descr,
+					 const std::string &arg, const int key, const std::string &hint, const std::string &descr,
 					 const std::string &sound, const std::string &cursor, const std::string &umask,
 					 const std::string &popup, bool alwaysShow);
 // Check if the button is allowed for the unit.
@@ -326,6 +329,13 @@ extern void SetHoldClickDelay(int delay);
 extern void UiTogglePause();
 /// Toggle big map
 extern void UiToggleBigMap();
+/// Toggle terrain display on/off.
+extern void UiToggleTerrain();
+/// Find the next idle worker
+extern void UiFindIdleWorker();
+/// Track unit, the viewport follows the unit.
+extern void UiTrackUnit();
+
 /// Handle cheats
 extern int HandleCheats(const std::string &input);
 
@@ -340,6 +350,8 @@ extern void CancelBuildingMode();
 
 /// Draw menu button area
 extern void DrawMenuButtonArea();
+/// Draw user defined buttons
+extern void DrawUserDefinedButtons();
 /// Update messages
 extern void UpdateMessages();
 /// Draw messages as overlay over of the map
@@ -373,7 +385,7 @@ extern void UpdateStatusLineForButton(const ButtonAction &button);
 /// Draw the Pie Menu
 extern void DrawPieMenu();
 /// Draw the button popup
-extern void DrawPopup(const ButtonAction &button, const CUIButton &uibutton);
+extern void DrawPopup(const ButtonAction &button, const CUIButton &uibutton, int x = 0, int y = 0);
 
 /// Handle the mouse in scroll area
 extern bool HandleMouseScrollArea(const PixelPos &mousePos);
@@ -393,6 +405,8 @@ extern bool ButtonCheckUnitVariable(const CUnit &unit, const ButtonAction &butto
 extern bool ButtonCheckUnitsOr(const CUnit &unit, const ButtonAction &button);
 /// Check if allowed units exists
 extern bool ButtonCheckUnitsAnd(const CUnit &unit, const ButtonAction &button);
+/// Check if units don't exist
+extern bool ButtonCheckUnitsNot(const CUnit &unit, const ButtonAction &button);
 /// Check if have network play
 extern bool ButtonCheckNetwork(const CUnit &unit, const ButtonAction &button);
 /// Check if don't have network play

@@ -55,7 +55,6 @@
 #include "sound.h"
 #include "sound_server.h"
 #include "spells.h"
-#include "tileset.h"
 #include "translate.h"
 #include "ui.h"
 #include "unit_find.h"
@@ -124,7 +123,7 @@
 **  Pointer to the last unit added inside. Order doesn't really
 **  matter. All units inside are kept in a circular linked list.
 **  This is NULL if there are no units inside. Multiple levels
-**  of inclusion are allowed, though not very usefull right now
+**  of inclusion are allowed, though not very useful right now
 **
 **  CUnit::NextContained, CUnit::PrevContained
 **
@@ -294,7 +293,7 @@
 **
 **  CUnit::Wait
 **
-**  The unit is forced too wait for that many cycles. Be carefull,
+**  The unit is forced too wait for that many cycles. Be careful,
 **  setting this to 0 will lock the unit.
 **
 **  CUnit::State
@@ -373,7 +372,7 @@ extern int ExtraDeathIndex(const char *death);
 */
 void CUnit::RefsIncrease()
 {
-	RefsAssert(Refs && !Destroyed);
+	Assert(Refs && !Destroyed);
 	if (!SaveGameLoading) {
 		++Refs;
 	}
@@ -384,7 +383,7 @@ void CUnit::RefsIncrease()
 */
 void CUnit::RefsDecrease()
 {
-	RefsAssert(Refs);
+	Assert(Refs);
 	if (!SaveGameLoading) {
 		if (Destroyed) {
 			if (!--Refs) {
@@ -392,7 +391,7 @@ void CUnit::RefsDecrease()
 			}
 		} else {
 			--Refs;
-			RefsAssert(Refs);
+			Assert(Refs);
 		}
 	}
 }
@@ -454,6 +453,7 @@ void CUnit::Init()
 	Moving = 0;
 	ReCast = 0;
 	CacheLock = 0;
+	Summoned = 0;
 	memset(&Anim, 0, sizeof(Anim));
 	CurrentResource = 0;
 	Orders.clear();
@@ -464,6 +464,7 @@ void CUnit::Init()
 	delete CriticalOrder;
 	CriticalOrder = NULL;
 	AutoCastSpell = NULL;
+	SpellCoolDownTimers = NULL;
 	AutoRepair = 0;
 	Goal = NULL;
 }
@@ -508,7 +509,7 @@ void CUnit::Release(bool final)
 		}
 	}
 
-	RefsAssert(!Refs);
+	Assert(!Refs);
 
 	//
 	// No more references remaining, but the network could have an order
@@ -520,6 +521,7 @@ void CUnit::Release(bool final)
 
 	delete pathFinderData;
 	delete[] AutoCastSpell;
+	delete[] SpellCoolDownTimers;
 	delete[] Variable;
 	for (std::vector<COrder *>::iterator order = Orders.begin(); order != Orders.end(); ++order) {
 		delete *order;
@@ -598,8 +600,11 @@ void CUnit::Init(const CUnitType &type)
 		UnitUpdateHeading(*this);
 	}
 
+	// Create AutoCastSpell and SpellCoolDownTimers arrays for casters
 	if (type.CanCastSpell) {
 		AutoCastSpell = new char[SpellTypeTable.size()];
+		SpellCoolDownTimers = new int[SpellTypeTable.size()];
+		memset(SpellCoolDownTimers, 0, SpellTypeTable.size() * sizeof(int));
 		if (Type->AutoCastActive) {
 			memcpy(AutoCastSpell, Type->AutoCastActive, SpellTypeTable.size());
 		} else {
@@ -611,8 +616,6 @@ void CUnit::Init(const CUnitType &type)
 
 	// Has StartingResources, Use those
 	this->ResourcesHeld = type.StartingResources;
-
-	Rs = MyRand() % 100; // used for fancy buildings and others
 
 	Assert(Orders.empty());
 
@@ -665,7 +668,7 @@ bool CUnit::CanStoreOrder(COrder *order)
 {
 	Assert(order);
 
-	if (order && order->Finished == true && order->IsValid() == false) {
+	if ((order && order->Finished == true) || order->IsValid() == false) {
 		return false;
 	}
 	if (this->SavedOrder != NULL) {
@@ -687,7 +690,7 @@ void CUnit::AssignToPlayer(CPlayer &player)
 	if (!type.Vanishes && CurrentAction() != UnitActionDie) {
 		player.AddUnit(*this);
 		if (!SaveGameLoading) {
-			// If unit is dieing, it's already been lost by all players
+			// If unit is dying, it's already been lost by all players
 			// don't count again
 			if (type.Building) {
 				// FIXME: support more races
@@ -702,7 +705,7 @@ void CUnit::AssignToPlayer(CPlayer &player)
 		player.Demand += type.Demand; // food needed
 	}
 
-	// Don't Add the building if it's dieing, used to load a save game
+	// Don't Add the building if it's dying, used to load a save game
 	if (type.Building && CurrentAction() != UnitActionDie) {
 		// FIXME: support more races
 		if (!type.Wall && &type != UnitTypeOrcWall && &type != UnitTypeHumanWall) {
@@ -741,13 +744,16 @@ CUnit *MakeUnit(const CUnitType &type, CPlayer *player)
 		unit->AssignToPlayer(*player);
 	}
 
-	if (type.Building) {
-		//
-		//  fancy buildings: mirror buildings (but shadows not correct)
-		//
-		if (FancyBuildings && unit->Type->NoRandomPlacing == false && unit->Rs > 50) {
-			unit->Frame = -unit->Frame - 1;
-		}
+	if (unit->Type->OnInit) {
+		unit->Type->OnInit->pushPreamble();
+		unit->Type->OnInit->pushInteger(UnitNumber(*unit));
+		unit->Type->OnInit->run();
+	}
+
+	//  fancy buildings: mirror buildings (but shadows not correct)
+	if (type.Building && FancyBuildings
+		&& unit->Type->NoRandomPlacing == false && (MyRand() & 1) != 0) {
+		unit->Frame = -unit->Frame - 1;
 	}
 	return unit;
 }
@@ -1300,28 +1306,17 @@ void UpdateForNewUnit(const CUnit &unit, int upgrade)
 **  Find nearest point of unit.
 **
 **  @param unit  Pointer to unit.
-**  @param pos   tile map postion.
-**  @param dpos  Out: nearest point tile map postion to (tx,ty).
+**  @param pos   tile map position.
+**  @param dpos  Out: nearest point tile map position to (tx,ty).
 */
 void NearestOfUnit(const CUnit &unit, const Vec2i &pos, Vec2i *dpos)
 {
-	int x = unit.tilePos.x;
-	int y = unit.tilePos.y;
+	const int x = unit.tilePos.x;
+	const int y = unit.tilePos.y;
 
-	if (pos.x >= x + unit.Type->TileWidth) {
-		dpos->x = x + unit.Type->TileWidth - 1;
-	} else if (pos.x < x) {
-		dpos->x = x;
-	} else {
-		dpos->x = pos.x;
-	}
-	if (pos.y >= y + unit.Type->TileHeight) {
-		dpos->y = y + unit.Type->TileHeight - 1;
-	} else if (pos.y < y) {
-		dpos->y = y;
-	} else {
-		dpos->y = pos.y;
-	}
+	*dpos = pos;
+	clamp<short int>(&dpos->x, x, x + unit.Type->TileWidth - 1);
+	clamp<short int>(&dpos->y, y, y + unit.Type->TileHeight - 1);
 }
 
 /**
@@ -1440,7 +1435,7 @@ void UnitGoesUnderFog(CUnit &unit, const CPlayer &player)
 		// configurations.
 		// A unit does NOT get a reference when it goes under fog if it's
 		// Destroyed. Furthermore, it shouldn't lose a reference if it was
-		// Seen destroyed. That only happend with complex shared vision, and
+		// Seen destroyed. That only happened with complex shared vision, and
 		// it's sort of the whole point of this tracking.
 		//
 		if (unit.Destroyed) {
@@ -1661,6 +1656,11 @@ void CUnit::ChangeOwner(CPlayer &newplayer)
 	// This shouldn't happen
 	if (oldplayer == &newplayer) {
 		DebugPrint("Change the unit owner to the same player???\n");
+		return;
+	}
+
+	// Can't change owner for dead units
+	if (this->IsAlive() == false) {
 		return;
 	}
 
@@ -2073,9 +2073,9 @@ void DropOutNearest(CUnit &unit, const Vec2i &goalPos, const CUnit *container)
 	int bestd = 99999;
 	int addx = 0;
 	int addy = 0;
-	Assert(unit.Removed);
 
 	if (container) {
+		Assert(unit.Removed);
 		pos = container->tilePos;
 		pos.x -= unit.Type->TileWidth - 1;
 		pos.y -= unit.Type->TileHeight - 1;
@@ -2181,6 +2181,9 @@ CUnit *UnitOnScreen(int x, int y)
 			continue;
 		}
 		const CUnitType &type = *unit.Type;
+		if (!type.Sprite) {
+			continue;
+		}
 
 		//
 		// Check if mouse is over the unit.
@@ -2350,8 +2353,9 @@ int ThreatCalculate(const CUnit &unit, const CUnit &dest)
 	const CUnitType &dtype = *dest.Type;
 	int cost = 0;
 
-	// Buildings and non-aggressive units have the lowest priority
-	if (dest.IsAgressive() == false) {
+	// Buildings, non-aggressive and invincible units have the lowest priority
+	if (dest.IsAgressive() == false || dest.Variable[UNHOLYARMOR_INDEX].Value > 0
+		|| dest.Type->Indestructible) {
 		if (dest.Type->CanMove() == false) {
 			return INT_MAX;
 		} else {
@@ -2391,7 +2395,7 @@ int ThreatCalculate(const CUnit &unit, const CUnit &dest)
 	return cost;
 }
 
-static void HitUnit_lastAttack(const CUnit *attacker, CUnit &target)
+static void HitUnit_LastAttack(const CUnit *attacker, CUnit &target)
 {
 	const unsigned long lastattack = target.Attacked;
 
@@ -2432,8 +2436,11 @@ static void HitUnit_lastAttack(const CUnit *attacker, CUnit &target)
 
 static bool HitUnit_IsUnitWillDie(const CUnit *attacker, const CUnit &target, int damage)
 {
-	return (target.Variable[HP_INDEX].Value <= damage && attacker && attacker->Type->ShieldPiercing)
-		   || (target.Variable[HP_INDEX].Value <= damage - target.Variable[SHIELD_INDEX].Value)
+	int shieldDamage = target.Variable[SHIELDPERMEABILITY_INDEX].Value < 100
+					   ? std::min(target.Variable[SHIELD_INDEX].Value, damage * (100 - target.Variable[SHIELDPERMEABILITY_INDEX].Value) / 100)
+					   : 0;
+	return (target.Variable[HP_INDEX].Value <= damage && attacker && attacker->Variable[SHIELDPIERCING_INDEX].Value)
+		   || (target.Variable[HP_INDEX].Value <= damage - shieldDamage)
 		   || (target.Variable[HP_INDEX].Value == 0);
 }
 
@@ -2456,15 +2463,19 @@ static void HitUnit_IncreaseScoreForKill(CUnit &attacker, CUnit &target)
 	attacker.Variable[KILL_INDEX].Enable = 1;
 }
 
-static void HitUnit_applyDamage(CUnit *attacker, CUnit &target, int damage)
+static void HitUnit_ApplyDamage(CUnit *attacker, CUnit &target, int damage)
 {
-	if (attacker && attacker->Type->ShieldPiercing) {
+	if (attacker && attacker->Variable[SHIELDPIERCING_INDEX].Value) {
 		target.Variable[HP_INDEX].Value -= damage;
-	} else if (target.Variable[SHIELD_INDEX].Value >= damage) {
-		target.Variable[SHIELD_INDEX].Value -= damage;
 	} else {
-		target.Variable[HP_INDEX].Value -= damage - target.Variable[SHIELD_INDEX].Value;
-		target.Variable[SHIELD_INDEX].Value = 0;
+		int shieldDamage = target.Variable[SHIELDPERMEABILITY_INDEX].Value < 100
+						   ? std::min(target.Variable[SHIELD_INDEX].Value, damage * (100 - target.Variable[SHIELDPERMEABILITY_INDEX].Value) / 100)
+						   : 0;
+		if (shieldDamage) {
+			target.Variable[SHIELD_INDEX].Value -= shieldDamage;
+			clamp(&target.Variable[SHIELD_INDEX].Value, 0, target.Variable[SHIELD_INDEX].Max);
+		}
+		target.Variable[HP_INDEX].Value -= damage - shieldDamage;
 	}
 	if (UseHPForXp && attacker && target.IsEnemy(*attacker)) {
 		attacker->Variable[XP_INDEX].Value += damage;
@@ -2593,7 +2604,7 @@ static void HitUnit_AttackBack(CUnit &attacker, CUnit &target)
 	}
 	if (best && best != oldgoal && best->Player != target.Player && best->IsAllied(target) == false) {
 		CommandAttack(target, best->tilePos, best, FlushCommands);
-		// Set threshold value only for agressive units
+		// Set threshold value only for aggressive units
 		if (best->IsAgressive()) {
 			target.Threshold = threshold;
 		}
@@ -2638,7 +2649,7 @@ void HitUnit(CUnit *attacker, CUnit &target, int damage, const Missile *missile)
 			damage = 0;
 		}
 	}
-	HitUnit_lastAttack(attacker, target);
+	HitUnit_LastAttack(attacker, target);
 	const CUnitType *type = target.Type;
 	if (attacker) {
 		target.DamagedType = ExtraDeathIndex(attacker->Type->DamageType.c_str());
@@ -2646,6 +2657,31 @@ void HitUnit(CUnit *attacker, CUnit &target, int damage, const Missile *missile)
 
 	if (attacker && !target.Type->Wall && target.Player->AiEnabled) {
 		AiHelpMe(attacker, target);
+	}
+
+	// OnHit callback
+	if (type->OnHit) {
+		const int slot = UnitNumber(target);
+
+		type->OnHit->pushPreamble();
+		type->OnHit->pushInteger(slot);
+		type->OnHit->run();
+	}
+
+	// Increase variables and call OnImpact
+	if (missile && missile->Type) {
+		if (missile->Type->ChangeVariable != -1) {
+			HitUnit_ChangeVariable(target, *missile);
+		}
+		if (missile->Type->OnImpact) {
+			const int attackerSlot = attacker ? UnitNumber(*attacker) : -1;
+			const int targetSlot = UnitNumber(target);
+			missile->Type->OnImpact->pushPreamble();
+			missile->Type->OnImpact->pushInteger(attackerSlot);
+			missile->Type->OnImpact->pushInteger(targetSlot);
+			missile->Type->OnImpact->pushInteger(damage);
+			missile->Type->OnImpact->run();
+		}
 	}
 
 	if (HitUnit_IsUnitWillDie(attacker, target, damage)) { // unit is killed or destroyed
@@ -2660,23 +2696,9 @@ void HitUnit(CUnit *attacker, CUnit &target, int damage, const Missile *missile)
 		return;
 	}
 
-	HitUnit_applyDamage(attacker, target, damage);
+	HitUnit_ApplyDamage(attacker, target, damage);
 	HitUnit_BuildingCapture(attacker, target, damage);
 	HitUnit_ShowDamageMissile(target, damage);
-
-	// OnHit callback
-	if (type->OnHit) {
-		const int slot = UnitNumber(target);
-
-		type->OnHit->pushPreamble();
-		type->OnHit->pushInteger(slot);
-		type->OnHit->run();
-	}
-
-	// Increase variables
-	if (missile && missile->Type->ChangeVariable != -1) {
-		HitUnit_ChangeVariable(target, *missile);
-	}
 
 	HitUnit_ShowImpactMissile(target);
 
@@ -2864,6 +2886,10 @@ int CanTransport(const CUnit &transporter, const CUnit &unit)
 		return 0;
 	}
 	if (transporter.BoardCount >= transporter.Type->MaxOnBoard) { // full
+		return 0;
+	}
+
+	if (transporter.BoardCount + unit.Type->BoardSize > transporter.Type->MaxOnBoard) { // too big unit
 		return 0;
 	}
 

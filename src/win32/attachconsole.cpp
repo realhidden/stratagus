@@ -28,6 +28,10 @@
 #include <iostream>
 #endif
 
+#ifndef _WIN32_WINNT_WIN2K
+#define _WIN32_WINNT_WIN2K 0x0500
+#endif
+
 static int fixmode = 0;
 
 static HINSTANCE lib_kernel32 = NULL;
@@ -150,7 +154,7 @@ static void WINAPI_AttachConsole(void)
 	version = (osvi.dwMajorVersion << 8) | osvi.dwMinorVersion;
 
 	// We need Windows 2000 or new
-	if (version < 0x0500) {
+	if (version < _WIN32_WINNT_WIN2K) {
 		return;
 	}
 

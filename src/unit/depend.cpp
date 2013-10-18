@@ -41,6 +41,8 @@
 #include "interface.h"
 #include "player.h"
 #include "script.h"
+#include "translate.h"
+#include "trigger.h"
 #include "unit.h"
 #include "unittype.h"
 #include "upgrade_structs.h"
@@ -251,7 +253,7 @@ std::string PrintDependencies(const CPlayer &player, const ButtonAction &button)
 		// Special case for spells
 		if (button.Allowed && IsButtonAllowed(*Selected[0], button) == false) {
 			if (!strncmp(button.AllowStr.c_str(), "upgrade-", 8)) {
-				rules.insert(0, "Requirements:\n");
+				rules.insert(0, _("Requirements:\n"));
 				rules.append("-");
 				rules.append(AllUpgrades[UpgradeIdByIdent(button.AllowStr)]->Name);
 				rules.append("\n");
@@ -305,10 +307,11 @@ std::string PrintDependencies(const CPlayer &player, const ButtonAction &button)
 		if (subrules.empty()) {
 			return subrules;
 		}
+		rules.clear();
 		rules.append(subrules);
 		node = node->Next;
 	}
-	rules.insert(0, "Requirements:\n");
+	rules.insert(0, _("Requirements:\n"));
 	return rules;
 }
 
@@ -345,10 +348,8 @@ bool CheckDependByIdent(const CPlayer &player, const std::string &target)
 		DebugPrint("target `%s' should be unit-type or upgrade\n" _C_ target.c_str());
 		return false;
 	}
-
 	return CheckDependByRule(player, rule);
 }
-
 
 /**
 **  Check if this upgrade or unit is available.
@@ -369,7 +370,6 @@ bool CheckDependByType(const CPlayer &player, const CUnitType &type)
 	rule.Type = DependRuleUnitType;
 	return CheckDependByRule(player, rule);
 }
-
 
 /**
 **  Initialize unit and upgrade dependencies.
@@ -435,9 +435,7 @@ static int CclDefineDependency(lua_State *l)
 		const int subargs = lua_rawlen(l, j + 1);
 
 		for (int k = 0; k < subargs; ++k) {
-			lua_rawgeti(l, j + 1, k + 1);
-			const char *required = LuaToString(l, -1);
-			lua_pop(l, 1);
+			const char *required = LuaToString(l, j + 1, k + 1);
 			int count = 1;
 			if (k + 1 < subargs) {
 				lua_rawgeti(l, j + 1, k + 2);
@@ -478,17 +476,27 @@ static int CclGetDependency(lua_State *l)
 }
 
 /**
-**  Check the dependency.
+**  Checks if dependencies are met.
 **
-**  @todo not written.
+**  @return true if the dependencies are met.
 **
 **  @param l  Lua state.
+**  Argument 1: player
+**  Argument 2: object which we want to check the dependencies of
 */
 static int CclCheckDependency(lua_State *l)
 {
-	DebugPrint("FIXME: write this %p\n" _C_(void *)l);
+	LuaCheckArgs(l, 2);
+	const char *object = LuaToString(l, 2);
+	lua_pop(l, 1);
+	const int plynr = TriggerGetPlayer(l);
+	if (plynr == -1) {
+		LuaError(l, "bad player: %i" _C_ plynr);
+	}
+	CPlayer &player = Players[plynr];
 
-	return 0;
+	lua_pushboolean(l, CheckDependByIdent(player, object));
+	return 1;
 }
 
 /**

@@ -45,6 +45,7 @@
 #include "player.h"
 #include "script.h"
 #include "sound.h"
+#include "tileset.h"
 #include "ui.h"
 #include "unit.h"
 #include "unit_find.h"
@@ -255,13 +256,9 @@ COrder_Resource::~COrder_Resource()
 {
 	if (!strcmp(value, "current-res")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->CurrentResource = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->CurrentResource = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "done-harvesting")) {
-		lua_rawgeti(l, -1, j + 1);
 		this->DoneHarvesting = true;
-		lua_pop(l, 1);
 	} else if (!strcmp(value, "res-depot")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -279,14 +276,10 @@ COrder_Resource::~COrder_Resource()
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "state")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "timetoharvest")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->TimeToHarvest = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->TimeToHarvest = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "worker")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -468,7 +461,7 @@ int COrder_Resource::StartGathering(CUnit &unit)
 	Assert(!unit.IY);
 
 	if (resinfo.TerrainHarvester) {
-		// This shouldn't happend?
+		// This shouldn't happened?
 #if 0
 		if (!Map.IsTerrainResourceOnMap(unit.Orders->goalPos, this->CurrentResource)) {
 			DebugPrint("Wood gone, just like that?\n");
@@ -477,7 +470,7 @@ int COrder_Resource::StartGathering(CUnit &unit)
 #endif
 		UnitHeadingFromDeltaXY(unit, this->goalPos - unit.tilePos);
 		if (resinfo.WaitAtResource) {
-			this->TimeToHarvest = resinfo.WaitAtResource / unit.Player->SpeedResourcesHarvest[resinfo.ResourceId] * SPEEDUP_FACTOR;
+			this->TimeToHarvest = std::max<int>(1, resinfo.WaitAtResource * SPEEDUP_FACTOR / unit.Player->SpeedResourcesHarvest[resinfo.ResourceId]);
 		} else {
 			this->TimeToHarvest = 1;
 		}
@@ -545,7 +538,7 @@ int COrder_Resource::StartGathering(CUnit &unit)
 	goal->Resource.Active++;
 
 	if (resinfo.WaitAtResource) {
-		this->TimeToHarvest = resinfo.WaitAtResource / unit.Player->SpeedResourcesHarvest[resinfo.ResourceId] * SPEEDUP_FACTOR;
+		this->TimeToHarvest = std::max<int>(1, resinfo.WaitAtResource * SPEEDUP_FACTOR / unit.Player->SpeedResourcesHarvest[resinfo.ResourceId]);
 	} else {
 		this->TimeToHarvest = 1;
 	}
@@ -571,7 +564,7 @@ static void AnimateActionHarvest(CUnit &unit)
 **  @param unit    pointer to harvester unit.
 **  @param source  pointer to resource unit.
 */
-void COrder_Resource::LoseResource(CUnit &unit, const CUnit &source)
+void COrder_Resource::LoseResource(CUnit &unit, CUnit &source)
 {
 	CUnit *depot;
 	const ResourceInfo &resinfo = *unit.Type->ResInfo[this->CurrentResource];
@@ -581,6 +574,7 @@ void COrder_Resource::LoseResource(CUnit &unit, const CUnit &source)
 
 	if (resinfo.HarvestFromOutside) {
 		this->ClearGoal();
+		--source.Resource.Active;
 	}
 
 	// Continue to harvest if we aren't fully loaded
@@ -677,7 +671,7 @@ int COrder_Resource::GatherResource(CUnit &unit)
 	while (!this->DoneHarvesting && this->TimeToHarvest < 0) {
 		//FIXME: rb - how should it look for WaitAtResource == 0
 		if (resinfo.WaitAtResource) {
-			this->TimeToHarvest += resinfo.WaitAtResource * SPEEDUP_FACTOR / unit.Player->SpeedResourcesHarvest[resinfo.ResourceId];
+			this->TimeToHarvest += std::max<int>(1, resinfo.WaitAtResource * SPEEDUP_FACTOR / unit.Player->SpeedResourcesHarvest[resinfo.ResourceId]);
 		} else {
 			this->TimeToHarvest += 1;
 		}
@@ -697,7 +691,7 @@ int COrder_Resource::GatherResource(CUnit &unit)
 			unit.ResourcesHeld += addload;
 
 			if (addload && unit.ResourcesHeld == resinfo.ResourceCapacity) {
-				Map.ClearTile(MapFieldForest, this->goalPos);
+				Map.ClearWoodTile(this->goalPos);
 			}
 		} else {
 			if (resinfo.HarvestFromOutside) {
@@ -712,9 +706,7 @@ int COrder_Resource::GatherResource(CUnit &unit)
 			// Target is not dead, getting resources.
 			if (is_visible) {
 				// Don't load more that there is.
-				if (addload > source->ResourcesHeld) {
-					addload = source->ResourcesHeld;
-				}
+				addload = std::min(source->ResourcesHeld, addload);
 				unit.ResourcesHeld += addload;
 				source->ResourcesHeld -= addload;
 			}
@@ -730,14 +722,13 @@ int COrder_Resource::GatherResource(CUnit &unit)
 
 				// Improved version of DropOutAll that makes workers go to the depot.
 				LoseResource(unit, *source);
-				int i;
-				CUnit *uins;
-				for (i = source->InsideCount, uins = source->UnitInside;
-					 i; --i, uins = uins->NextContained) {
-					if (uins->CurrentOrder()->Action == UnitActionResource) {
+				for (CUnit *uins = source->Resource.Workers;
+					 uins; uins = uins->NextWorker) {
+					if (uins != &unit && uins->CurrentOrder()->Action == UnitActionResource) {
 						COrder_Resource &order = *static_cast<COrder_Resource *>(uins->CurrentOrder());
-
-						order.LoseResource(*uins, *source);
+						if (!uins->Anim.Unbreakable && order.State == SUB_GATHER_RESOURCE) {
+							order.LoseResource(*uins, *source);
+						}
 					}
 				}
 				// Don't destroy the resource twice.
@@ -938,16 +929,6 @@ int COrder_Resource::MoveToDepot(CUnit &unit)
 		return 0;
 	}
 
-	// Not ready
-	if (player.AiEnabled && unit.pathFinderData->output.Cycles > 150) {
-		if (AiRequestChangeDepot(unit)) {
-			this->Finished = true;
-			return 0;
-		} else if (unit.pathFinderData->output.Cycles > 300) {
-			AiNewDepotRequest(unit);
-		}
-	}
-
 	// If resource depot is still under construction, wait!
 	if (goal.CurrentAction() == UnitActionBuilt) {
 		unit.Wait = 10;
@@ -971,7 +952,7 @@ int COrder_Resource::MoveToDepot(CUnit &unit)
 	unit.CurrentResource = 0;
 
 	if (unit.Wait) {
-		unit.Wait /= unit.Player->SpeedResourcesReturn[resinfo.ResourceId] / SPEEDUP_FACTOR;
+		unit.Wait /= std::max(1, unit.Player->SpeedResourcesReturn[resinfo.ResourceId] / SPEEDUP_FACTOR);
 		if (unit.Wait) {
 			unit.Wait--;
 		}
@@ -1010,9 +991,30 @@ bool COrder_Resource::WaitInDepot(CUnit &unit)
 			return false;
 		}
 	} else {
+		const unsigned int tooManyWorkers = 15;
 		CUnit *mine = this->Resource.Mine;
-		const int range = (mine ? 15 : 1000);
-		CUnit *goal = UnitFindResource(unit, mine ? *mine : unit, range, this->CurrentResource, unit.Player->AiEnabled, depot);
+		const int range = 15;
+		CUnit *newdepot = NULL;
+		CUnit *goal = NULL;
+		const bool longWay = unit.pathFinderData->output.Cycles > 500;
+
+		if (unit.Player->AiEnabled) {
+			// If the depot is overused, we need first to try to switch into another depot
+			// Use depot's ref counter for that
+			if (longWay || !mine || (depot->Refs > tooManyWorkers)) {
+				newdepot = AiGetSuitableDepot(unit, *depot, &goal);
+				if (newdepot == NULL && longWay) {
+					// We need a new depot
+					AiNewDepotRequest(unit);
+				}
+			}
+		}
+
+		// If goal is not NULL, then we got it in AiGetSuitableDepot
+		if (!goal) {
+			goal = UnitFindResource(unit, newdepot ? *newdepot : (mine ? *mine : unit), mine ? range : 1000,
+									this->CurrentResource, unit.Player->AiEnabled, newdepot ? newdepot : depot);
+		}
 
 		if (goal) {
 			if (depot) {
@@ -1099,6 +1101,9 @@ bool COrder_Resource::ActionResourceInit(CUnit &unit)
 		unit.DeAssignWorkerFromMine(*mine);
 		this->Resource.Mine = NULL;
 	}
+	if (goal && goal->IsAlive() == false) {
+		return false;
+	}
 	if (goal && goal->CurrentAction() != UnitActionBuilt) {
 		unit.AssignWorkerToMine(*goal);
 		this->Resource.Mine = goal;
@@ -1129,6 +1134,7 @@ void COrder_Resource::Execute(CUnit &unit)
 	// Let's start mining.
 	if (this->State == SUB_START_RESOURCE) {
 		if (ActionResourceInit(unit) == false) {
+			ResourceGiveUp(unit);
 			return;
 		}
 	}

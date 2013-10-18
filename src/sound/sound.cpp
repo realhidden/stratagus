@@ -222,11 +222,7 @@ static unsigned char VolumeForDistance(unsigned short d, unsigned char range)
 static unsigned char CalculateVolume(bool isVolume, int power, unsigned char range)
 {
 	if (isVolume) {
-		if (power > MaxVolume) {
-			return MaxVolume;
-		} else {
-			return (unsigned char)power;
-		}
+		return std::min(MaxVolume, power);
 	} else {
 		// map distance to volume
 		return VolumeForDistance(power, range);
@@ -261,7 +257,7 @@ void PlayUnitSound(const CUnit &unit, UnitVoiceGroup voice)
 	}
 
 	bool selection = (voice == VoiceSelected || voice == VoiceBuilding);
-	Origin source = {&unit, UnitNumber(unit)};
+	Origin source = {&unit, unsigned(UnitNumber(unit))};
 
 	if (UnitSoundIsPlaying(&source)) {
 		return;
@@ -285,7 +281,7 @@ void PlayUnitSound(const CUnit &unit, UnitVoiceGroup voice)
 */
 void PlayUnitSound(const CUnit &unit, CSound *sound)
 {
-	Origin source = {&unit, UnitNumber(unit)};
+	Origin source = {&unit, unsigned(UnitNumber(unit))};
 
 	int channel = PlaySample(ChooseSample(sound, false, source));
 	if (channel == -1) {
@@ -303,7 +299,7 @@ void PlayUnitSound(const CUnit &unit, CSound *sound)
 */
 void PlayMissileSound(const Missile &missile, CSound *sound)
 {
-	int stereo = ((missile.position.x + missile.Type->G->Width / 2 -
+	int stereo = ((missile.position.x + (missile.Type->G ? missile.Type->G->Width / 2 : 0) +
 				   UI.SelectedViewport->MapPos.x * PixelTileSize.x) * 256 /
 				  ((UI.SelectedViewport->MapWidth - 1) * PixelTileSize.x)) - 128;
 	clamp(&stereo, -128, 127);

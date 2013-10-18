@@ -81,9 +81,7 @@
 {
 	if (!strcmp(value, "range")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -202,8 +200,8 @@ int DoActionMove(CUnit &unit)
 		d = unit.pathFinderData->output.Length + 1;
 	}
 
-	unit.pathFinderData->output.Cycles++;//reset have to be manualy controled by caller.
-	int move = UnitShowAnimationScaled(unit, unit.Type->Animations->Move, Map.Field(unit.Offset)->Cost);
+	unit.pathFinderData->output.Cycles++;// reset have to be manualy controlled by caller.
+	int move = UnitShowAnimationScaled(unit, unit.Type->Animations->Move, Map.Field(unit.Offset)->getCost());
 
 	unit.IX += posd.x * move;
 	unit.IY += posd.y * move;

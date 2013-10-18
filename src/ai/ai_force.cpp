@@ -44,6 +44,7 @@
 #include "depend.h"
 #include "map.h"
 #include "pathfinder.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unittype.h"
@@ -184,7 +185,7 @@ public:
 
 /**
 **  Find All unittypes equivalent to a given one, and which are available
-**  UnitType are returned in the prefered order ( ie palladin >> knight... )
+**  UnitType are returned in the preferred order (ie palladin >> knight...)
 **
 **  @param unittype     The unittype to find equivalence for
 **  @param usableTypes  int array which will hold the result. (Size UnitTypeMax+1)
@@ -399,6 +400,15 @@ void AiForce::Attack(const Vec2i &pos)
 	}
 	//  Send all units in the force to enemy.
 
+	CUnit *leader = NULL;
+	for (size_t i = 0; i != this->Units.size(); ++i) {
+		CUnit *const unit = this->Units[i];
+
+		if (unit->IsAgressive()) {
+			leader = unit;
+			break;
+		}
+	}
 	for (size_t i = 0; i != this->Units.size(); ++i) {
 		CUnit *const unit = this->Units[i];
 
@@ -406,10 +416,14 @@ void AiForce::Attack(const Vec2i &pos)
 			const int delay = i / 5; // To avoid lot of CPU consuption, send them with a small time difference.
 
 			unit->Wait = delay;
-			if (unit->Type->CanAttack) {
+			if (unit->IsAgressive()) {
 				CommandAttack(*unit, this->GoalPos,  NULL, FlushCommands);
 			} else {
-				CommandMove(*unit, this->GoalPos, FlushCommands);
+				if (leader) {
+					CommandDefend(*unit, *leader, FlushCommands);
+				} else {
+					CommandMove(*unit, this->GoalPos, FlushCommands);
+				}
 			}
 		}
 	}
@@ -434,14 +448,14 @@ void AiForce::ReturnToHome()
 
 AiForceManager::AiForceManager()
 {
-	forces.resize(3);
+	forces.resize(AI_MAX_FORCES);
 	memset(script, -1, AI_MAX_FORCES * sizeof(char));
 }
 
-unsigned int AiForceManager::FindFreeForce(AiForceRole role)
+unsigned int AiForceManager::FindFreeForce(AiForceRole role, int begin)
 {
 	/* find free force */
-	unsigned int f = 0;
+	unsigned int f = begin;
 	while (f < forces.size() && (forces[f].State > AiForceAttackingState_Free)) {
 		++f;
 	};
@@ -451,6 +465,30 @@ unsigned int AiForceManager::FindFreeForce(AiForceRole role)
 	forces[f].State = AiForceAttackingState_Waiting;
 	forces[f].Role = role;
 	return f;
+}
+
+/**
+**  Find unit in force
+**
+**  @param    unit  Unit to search for.
+**
+**  @return   Force number, or -1 if not found
+*/
+
+int AiForceManager::GetForce(const CUnit &unit)
+{
+	for (unsigned int i = 0; i < forces.size(); ++i) {
+		AiForce &force = forces[i];
+
+		for (unsigned int j = 0; j < force.Units.size(); ++j) {
+			CUnit &aiunit = *force.Units[j];
+
+			if (UnitNumber(unit) == UnitNumber(aiunit)) {
+				return i;
+			}
+		}
+	}
+	return -1;
 }
 
 /**
@@ -577,7 +615,7 @@ void AiAttackWithForceAt(unsigned int force, int x, int y)
 {
 	const Vec2i pos(x, y);
 
-	if (!(force < AI_MAX_FORCES)) {
+	if (!(force < AI_MAX_FORCE_INTERNAL)) {
 		DebugPrint("Force out of range: %d" _C_ force);
 		return ;
 	}
@@ -597,7 +635,7 @@ void AiAttackWithForceAt(unsigned int force, int x, int y)
 */
 void AiAttackWithForce(unsigned int force)
 {
-	if (!(force < AI_MAX_FORCES)) {
+	if (!(force < AI_MAX_FORCE_INTERNAL)) {
 		DebugPrint("Force out of range: %d" _C_ force);
 		return ;
 	}
@@ -606,7 +644,7 @@ void AiAttackWithForce(unsigned int force)
 	// the first force, so we can reuse it
 	if (!AiPlayer->Force[force].Defending) {
 		unsigned int top;
-		unsigned int f = AiPlayer->Force.FindFreeForce();
+		unsigned int f = AiPlayer->Force.FindFreeForce(AiForceRoleDefault, AI_MAX_FORCE_INTERNAL);
 		AiPlayer->Force[f].Reset();
 
 		AiPlayer->Force[f].Role = AiPlayer->Force[force].Role;
@@ -644,7 +682,7 @@ void AiAttackWithForces(int *forces)
 	const Vec2i invalidPos(-1, -1);
 	bool found = false;
 	unsigned int top;
-	unsigned int f = AiPlayer->Force.FindFreeForce();
+	unsigned int f = AiPlayer->Force.FindFreeForce(AiForceRoleDefault, AI_MAX_FORCE_INTERNAL);
 
 	AiPlayer->Force[f].Reset();
 
@@ -800,9 +838,13 @@ void AiForce::Update()
 	}
 
 	std::vector<CUnit *> idleUnits;
+	CUnit *leader = NULL;
 	for (unsigned int i = 0; i != Size(); ++i) {
 		CUnit &aiunit = *Units[i];
 
+		if (aiunit.IsAgressive()) {
+			leader = &aiunit;
+		}
 		if (aiunit.IsIdle() && aiunit.IsAliveOnMap()) {
 			idleUnits.push_back(&aiunit);
 		}
@@ -854,7 +896,7 @@ void AiForce::Update()
 		const int delay = i / 5; // To avoid lot of CPU consuption, send them with a small time difference.
 
 		aiunit.Wait = delay;
-		if (aiunit.Type->CanAttack) {
+		if (aiunit.IsAgressive()) {
 			CommandAttack(aiunit, this->GoalPos, NULL, FlushCommands);
 		} else if (aiunit.Type->CanTransport()) {
 			if (aiunit.BoardCount != 0) {
@@ -865,7 +907,11 @@ void AiForce::Update()
 				this->Remove(aiunit);
 			}
 		} else {
-			CommandMove(aiunit, this->GoalPos, FlushCommands);
+			if (leader) {
+				CommandDefend(aiunit, *leader, FlushCommands);
+			} else {
+				CommandMove(aiunit, this->GoalPos, FlushCommands);
+			}
 		}
 	}
 

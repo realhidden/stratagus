@@ -583,8 +583,8 @@ void CreatePlayer(int type)
 
 void CPlayer::Init(/* PlayerTypes */ int type)
 {
-	this->Units.resize(0);
-	this->FreeWorkers.resize(0);
+	std::vector<CUnit *>().swap(this->Units);
+	std::vector<CUnit *>().swap(this->FreeWorkers);
 
 	//  Take first slot for person on this computer,
 	//  fill other with computer players.
@@ -815,7 +815,7 @@ void CPlayer::UpdateFreeWorkers()
 
 	for (int i = 0; i < nunits; ++i) {
 		CUnit &unit = this->GetUnit(i);
-		if (unit.Type->Harvester && unit.Type->ResInfo && !unit.Removed) {
+		if (unit.IsAlive() && unit.Type->Harvester && unit.Type->ResInfo && !unit.Removed) {
 			if (unit.CurrentAction() == UnitActionStill) {
 				FreeWorkers.push_back(&unit);
 			}
@@ -896,9 +896,7 @@ void CPlayer::ChangeResource(const int resource, const int value, const bool sto
 		const int fromStore = std::min(this->StoredResources[resource], abs(value));
 		this->StoredResources[resource] -= fromStore;
 		this->Resources[resource] -= abs(value) - fromStore;
-		if (this->Resources[resource] < 0) {
-			this->Resources[resource] = 0;
-		}
+		this->Resources[resource] = std::max(this->Resources[resource], 0);
 	} else {
 		if (store && this->MaxResources[resource] != -1) {
 			this->StoredResources[resource] += std::min(value, this->MaxResources[resource] - this->StoredResources[resource]);
@@ -991,22 +989,24 @@ int CPlayer::CheckLimits(const CUnitType &type) const
 **
 **  @note The return values of the PlayerCheck functions are inconsistent.
 */
-int CPlayer::CheckCosts(const int *costs) const
+int CPlayer::CheckCosts(const int *costs, bool notify) const
 {
 	int err = 0;
 	for (int i = 1; i < MaxCosts; ++i) {
 		if (this->Resources[i] + this->StoredResources[i] >= costs[i]) {
 			continue;
 		}
-		const char *name = DefaultResourceNames[i].c_str();
-		const char *actionName = DefaultActions[i].c_str();
+		if (notify) {
+			const char *name = DefaultResourceNames[i].c_str();
+			const char *actionName = DefaultActions[i].c_str();
 
-		Notify(_("Not enough %s...%s more %s."), name, actionName, name);
+			Notify(_("Not enough %s...%s more %s."), _(name), _(actionName), _(name));
 
-		err |= 1 << i;
-		if (this == ThisPlayer && GameSounds.NotEnoughRes[this->Race][i].Sound) {
-			PlayGameSound(GameSounds.NotEnoughRes[this->Race][i].Sound, MaxSampleVolume);
+			if (this == ThisPlayer && GameSounds.NotEnoughRes[this->Race][i].Sound) {
+				PlayGameSound(GameSounds.NotEnoughRes[this->Race][i].Sound, MaxSampleVolume);
+			}
 		}
+		err |= 1 << i;
 	}
 	return err;
 }
@@ -1071,7 +1071,7 @@ void CPlayer::SubCosts(const int *costs)
 }
 
 /**
-**  Substract the costs of new unit from resources
+**  Subtract the costs of new unit from resources
 **
 **  @param type    Type of unit.
 */
@@ -1081,7 +1081,7 @@ void CPlayer::SubUnitType(const CUnitType &type)
 }
 
 /**
-**  Substract a factor of costs from the resources
+**  Subtract a factor of costs from the resources
 **
 **  @param costs   How many costs.
 **  @param factor  Factor of the costs to apply.

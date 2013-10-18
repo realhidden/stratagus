@@ -60,7 +60,7 @@ static IconMap Icons;   /// Map of ident to icon.
 /**
 **  CIcon constructor
 */
-CIcon::CIcon(const std::string &ident) : G(NULL), Frame(0), Ident(ident)
+CIcon::CIcon(const std::string &ident) : G(NULL), GScale(NULL), Frame(0), Ident(ident)
 {
 }
 
@@ -70,6 +70,7 @@ CIcon::CIcon(const std::string &ident) : G(NULL), Frame(0), Ident(ident)
 CIcon::~CIcon()
 {
 	CGraphic::Free(this->G);
+	CGraphic::Free(this->GScale);
 }
 
 /**
@@ -111,6 +112,7 @@ void CIcon::Load()
 {
 	Assert(G);
 	G->Load();
+	GScale = G->Clone(true);
 	if (Frame >= G->NumFrames) {
 		DebugPrint("Invalid icon frame: %s - %d\n" _C_ Ident.c_str() _C_ Frame);
 		Frame = 0;
@@ -134,31 +136,28 @@ void CIcon::DrawIcon(const CPlayer &player, const PixelPos &pos) const
 }
 
 /**
-**  Draw icon at pos.
+**  Draw grayscale icon at pos.
 **
-**  @param player  Player pointer used for icon colors
 **  @param pos     display pixel position
 */
 void CIcon::DrawGrayscaleIcon(const PixelPos &pos) const
 {
-	SDL_LockSurface(this->G->Surface);
-	SDL_Color colors[256], backup[256];
-	SDL_Palette &pal = *this->G->Surface->format->palette;
-	memcpy(backup, pal.colors, sizeof(SDL_Color) * 256);
-	for (int i = 0; i < 256; ++i) {
-		int gray = 0.2 * pal.colors[i].r + 0.4 * pal.colors[i].g + 0.12 * pal.colors[i].b;
-		colors[i].r = colors[i].g = colors[i].b = gray;
-	}
-	SDL_SetColors(this->G->Surface, &colors[0], 0, 256);
-	if (this->G->SurfaceFlip) {
-		SDL_SetColors(this->G->SurfaceFlip, &colors[0], 0, 256);
-	}
-	SDL_UnlockSurface(this->G->Surface);
-	this->G->DrawFrameClip(this->Frame, pos.x, pos.y);
-	SDL_LockSurface(this->G->Surface);
-	SDL_SetColors(this->G->Surface, &backup[0], 0, 256);
-	SDL_UnlockSurface(this->G->Surface);
+	this->GScale->DrawFrameClip(this->Frame, pos.x, pos.y);
+}
 
+/**
+**  Draw cooldown spell effect on icon at pos.
+**
+**  @param pos       display pixel position
+**  @param percent   cooldown percent
+*/
+void CIcon::DrawCooldownSpellIcon(const PixelPos &pos, const int percent) const
+{
+	// TO-DO: implement more effect types (clock-like)
+	this->GScale->DrawFrameClip(this->Frame, pos.x, pos.y);
+	const int height = (G->Height * (100 - percent)) / 100;
+	this->G->DrawSubClip(G->frame_map[Frame].x, G->frame_map[Frame].y + G->Height - height, G->Width,
+						 height, pos.x, pos.y + G->Height - height);
 }
 
 /**
@@ -181,7 +180,7 @@ void CIcon::DrawUnitIcon(const ButtonStyle &style,
 		s.Default.BorderColor = 0;
 	}
 	// FIXME: player colors
-	DrawMenuButton(&s, flags, pos.x, pos.y, text);
+	DrawUIButton(&s, flags, pos.x, pos.y, text);
 }
 
 /**
@@ -217,7 +216,7 @@ void LoadIcons()
 	for (IconMap::iterator it = Icons.begin(); it != Icons.end(); ++it) {
 		CIcon &icon = *(*it).second;
 
-		ShowLoadProgress("Icons %s", icon.G->File.c_str());
+		ShowLoadProgress(_("Icons %s"), icon.G->File.c_str());
 		icon.Load();
 	}
 }

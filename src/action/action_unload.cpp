@@ -80,9 +80,7 @@
 {
 	if (!strcmp("state", value)) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -200,12 +198,12 @@ static int UnloadUnit(CUnit &transporter, CUnit &unit)
 	}
 	unit.Boarded = 0;
 	unit.Place(pos);
-	transporter.BoardCount--;
+	transporter.BoardCount -= unit.Type->BoardSize;
 	return true;
 }
 
 /**
-**  Return true is possition is a correct place to drop out units.
+**  Return true if position is a correct place to drop out units.
 **
 **  @param transporter  Transporter unit.
 **  @param pos          position to drop out units.
@@ -299,6 +297,7 @@ static int ClosestFreeDropZone(CUnit &transporter, const Vec2i &startPos, int ma
 		return 0;
 	}
 	const bool isTransporterRemoved = transporter.Removed;
+	const bool selected = transporter.Selected;
 
 	if (!isTransporterRemoved) {
 		// Remove transporter to avoid "collision" with itself.
@@ -307,6 +306,10 @@ static int ClosestFreeDropZone(CUnit &transporter, const Vec2i &startPos, int ma
 	const bool res = ClosestFreeDropZone_internal(transporter, startPos, maxRange, resPos);
 	if (!isTransporterRemoved) {
 		transporter.Place(transporter.tilePos);
+		if (selected) {
+			SelectUnit(transporter);
+			SelectionChanged();
+		}
 	}
 	return res;
 }

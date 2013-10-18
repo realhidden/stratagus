@@ -94,9 +94,12 @@ void initGuichan()
 {
 	gcn::Graphics *graphics;
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		graphics = new MyOpenGLGraphics();
-	} else {
+	} else
+#endif
+	{
 		graphics = new gcn::SDLGraphics();
 
 		// Set the target for the graphics object to be the screen.
@@ -111,7 +114,12 @@ void initGuichan()
 	Gui->setGraphics(graphics);
 	Gui->setInput(Input);
 	Gui->setTop(NULL);
+
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	Gui->setUseDirtyDrawing(!UseOpenGL);
+#else
+	Gui->setUseDirtyDrawing(1);
+#endif
 
 	GuichanCallbacks.ButtonPressed = &MenuHandleButtonDown;
 	GuichanCallbacks.ButtonReleased = &MenuHandleButtonUp;
@@ -134,10 +142,8 @@ void freeGuichan()
 		Gui = NULL;
 	}
 
-	if (Input) {
-		delete Input;
-		Input = NULL;
-	}
+	delete Input;
+	Input = NULL;
 }
 
 /**
@@ -165,7 +171,11 @@ void handleInput(const SDL_Event *event)
 void DrawGuichanWidgets()
 {
 	if (Gui) {
+#if defined(USE_OPENGL) || defined(USE_GLES)
 		Gui->setUseDirtyDrawing(!UseOpenGL && !GameRunning && !Editor.Running);
+#else
+		Gui->setUseDirtyDrawing(!GameRunning && !Editor.Running);
+#endif
 		Gui->draw();
 	}
 }
@@ -188,9 +198,9 @@ LuaActionListener::LuaActionListener(lua_State *l, lua_Object f) :
 }
 
 /**
-**  Called when an action is recieved from a Widget. It is used
-**  to be able to recieve a notification that an action has
-**  occured.
+**  Called when an action is received from a Widget. It is used
+**  to be able to receive a notification that an action has
+**  occurred.
 **
 **  @param eventId  the identifier of the Widget
 */
@@ -208,11 +218,11 @@ LuaActionListener::~LuaActionListener()
 {
 }
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 
 /*----------------------------------------------------------------------------
 --  MyOpenGLGraphics
 ----------------------------------------------------------------------------*/
-
 
 void MyOpenGLGraphics::_beginDraw()
 {
@@ -309,6 +319,8 @@ void MyOpenGLGraphics::fillRectangle(const gcn::Rectangle &rectangle)
 	Video.FillTransRectangle(Video.MapRGB(0, c.r, c.g, c.b),
 							 x1, y1, x2 - x1, y2 - y1, c.a);
 }
+
+#endif
 
 /*----------------------------------------------------------------------------
 --  ImageButton
@@ -534,9 +546,7 @@ void ImageRadioButton::adjustSize()
 	if (uncheckedNormalImage) {
 		width = uncheckedNormalImage->getWidth();
 		width += width / 2;
-		if (uncheckedNormalImage->getHeight() > height) {
-			height = uncheckedNormalImage->getHeight();
-		}
+		height = std::max(height, uncheckedNormalImage->getHeight());
 	} else {
 		width = getFont()->getHeight();
 		width += width / 2;
@@ -669,9 +679,7 @@ void ImageCheckBox::adjustSize()
 	if (uncheckedNormalImage) {
 		width = uncheckedNormalImage->getWidth();
 		width += width / 2;
-		if (uncheckedNormalImage->getHeight() > height) {
-			height = uncheckedNormalImage->getHeight();
-		}
+		height = std::max(height, uncheckedNormalImage->getHeight());
 	} else {
 		width = getFont()->getHeight();
 		width += width / 2;
@@ -860,11 +868,7 @@ void MultiLineLabel::adjustSize()
 	for (int i = 0; i < (int)this->mTextRows.size(); ++i) {
 		int w = this->getFont()->getWidth(this->mTextRows[i]);
 		if (width < w) {
-			if (w <= this->mLineWidth) {
-				width = w;
-			} else {
-				width = this->mLineWidth;
-			}
+			width = std::min(w, this->mLineWidth);
 		}
 	}
 	this->setWidth(width);
@@ -1141,7 +1145,7 @@ void Windows::add(gcn::Widget *widget, int x, int y)
 **  @param y   Y coordinate of the mouse relative to the widndow.
 **
 **  @note Once dragged, without release the mouse,
-**    if you go virtualy outside the container then go back,
+**    if you go virtually outside the container then go back,
 **    you have to wait the virtual cursor are in the container.
 **    It is because x, y argument refer to a virtual cursor :(
 **  @note An another thing is strange
@@ -1197,7 +1201,7 @@ void Windows::mouseMotion(int x, int y)
 	setPosition(x, y);
 
 	// Move the cursor.
-	// Usefull only when window reachs the limit.
+	// Useful only when window reachs the limit.
 	getAbsolutePosition(absx, absy);
 	CursorScreenPos.x = absx + mMouseXOffset;
 	CursorScreenPos.y = absy + mMouseYOffset;
@@ -1236,16 +1240,11 @@ void Windows::setBaseColor(const gcn::Color &color)
 */
 void LuaListModel::setList(lua_State *lua, lua_Object *lo)
 {
-	int args;
-	int j;
-
 	list.clear();
 
-	args = lua_rawlen(lua, *lo);
-	for (j = 0; j < args; ++j) {
-		lua_rawgeti(lua, *lo, j + 1);
-		list.push_back(std::string(LuaToString(lua, -1)));
-		lua_pop(lua, 1);
+	const int args = lua_rawlen(lua, *lo);
+	for (int j = 0; j < args; ++j) {
+		list.push_back(std::string(LuaToString(lua, *lo, j + 1)));
 	}
 }
 

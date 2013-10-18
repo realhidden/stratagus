@@ -46,6 +46,7 @@
 
 #include "spells.h"
 
+#include "actions.h"
 #include "commands.h"
 #include "map.h"
 #include "sound.h"
@@ -104,6 +105,14 @@ static bool PassCondition(const CUnit &caster, const SpellType &spell, const CUn
 	if (caster.Variable[MANA_INDEX].Value < spell.ManaCost) { // Check caster mana.
 		return false;
 	}
+	// check countdown timer
+	if (caster.SpellCoolDownTimers[spell.Slot]) { // Check caster mana.
+		return false;
+	}
+	// Check caster's resources
+	if (caster.Player->CheckCosts(spell.Costs, false)) {
+		return false;
+	}
 	if (spell.Target == TargetUnit) { // Casting a unit spell without a target.
 		if ((!target) || target->IsAlive() == false) {
 			return false;
@@ -130,6 +139,14 @@ static bool PassCondition(const CUnit &caster, const SpellType &spell, const CUn
 			}
 		}
 		// Value and Max
+		if (condition->Variable[i].ExactValue != -1 &&
+			condition->Variable[i].ExactValue != unit->Variable[i].Value) {
+			return false;
+		}
+		if (condition->Variable[i].ExceptValue != -1 &&
+			condition->Variable[i].ExceptValue == unit->Variable[i].Value) {
+			return false;
+		}
 		if (condition->Variable[i].MinValue >= unit->Variable[i].Value) {
 			return false;
 		}
@@ -182,6 +199,32 @@ static bool PassCondition(const CUnit &caster, const SpellType &spell, const CUn
 	}
 	return true;
 }
+
+class AutoCastPrioritySort
+{
+public:
+	explicit AutoCastPrioritySort(const CUnit &caster, const int var, const bool reverse) :
+		caster(caster), variable(var), reverse(reverse) {}
+	bool operator()(const CUnit *lhs, const CUnit *rhs) const {
+		if (variable == ACP_DISTANCE) {
+			if (reverse) {
+				return lhs->MapDistanceTo(caster) > rhs->MapDistanceTo(caster);
+			} else {
+				return lhs->MapDistanceTo(caster) < rhs->MapDistanceTo(caster);
+			}
+		} else {
+			if (reverse) {
+				return lhs->Variable[variable].Value > rhs->Variable[variable].Value;
+			} else {
+				return lhs->Variable[variable].Value < rhs->Variable[variable].Value;
+			}
+		}
+	}
+private:
+	const CUnit &caster;
+	const int variable;
+	const bool reverse;
+};
 
 /**
 **  Select the target for the autocast.
@@ -251,28 +294,29 @@ static Target *SelectTargetUnitsOfAutoCast(CUnit &caster, const SpellType &spell
 
 			int n = 0;
 			for (size_t i = 0; i != table.size(); ++i) {
-				//  FIXME: autocast conditions should include normal conditions.
-				//  FIXME: no, really, they should.
+				// Check if unit in battle
+				if (autocast->Attacker == CONDITION_ONLY) {
+					if (table[i]->CurrentAction() != UnitActionAttack
+						&& table[i]->CurrentAction() != UnitActionAttackGround
+						&& table[i]->CurrentAction() != UnitActionSpellCast) {
+						continue;
+					}
+				}
 				if (PassCondition(caster, spell, table[i], pos, spell.Condition)
 					&& PassCondition(caster, spell, table[i], pos, autocast->Condition)) {
 					table[n++] = table[i];
 				}
 			}
 			// Now select the best unit to target.
-			// FIXME: Some really smart way to do this.
-			// FIXME: Heal the unit with the lowest hit-points
-			// FIXME: Bloodlust the unit with the highest hit-point
-			// FIMXE: it will survive more
 			if (n != 0) {
-#if 0
 				// For the best target???
-				sort(table, n, spell.autocast->f_order);
-				return NewTargetUnit(*table[0]);
-#else
-				// Best unit, random unit, oh well, same stuff.
-				int index = SyncRand() % n;
-				return NewTargetUnit(*table[index]);
-#endif
+				if (autocast->PriorytyVar != ACP_NOVALUE) {
+					std::sort(table.begin(), table.begin() + n,
+							  AutoCastPrioritySort(caster, autocast->PriorytyVar, autocast->ReverseSort));
+					return NewTargetUnit(*table[0]);
+				} else { // Use the old behavior
+					return NewTargetUnit(*table[SyncRand() % n]);
+				}
 			}
 			break;
 		}
@@ -366,18 +410,27 @@ bool CanCastSpell(const CUnit &caster, const SpellType &spell,
 */
 int AutoCastSpell(CUnit &caster, const SpellType &spell)
 {
-	//  Check for mana, trivial optimization.
+	//  Check for mana and cooldown time, trivial optimization.
 	if (!SpellIsAvailable(*caster.Player, spell.Slot)
-		|| caster.Variable[MANA_INDEX].Value < spell.ManaCost) {
+		|| caster.Variable[MANA_INDEX].Value < spell.ManaCost
+		|| caster.SpellCoolDownTimers[spell.Slot]) {
 		return 0;
 	}
 	Target *target = SelectTargetUnitsOfAutoCast(caster, spell);
 	if (target == NULL) {
 		return 0;
 	} else {
+		// Save previous order
+		COrder *savedOrder = NULL;
+		if (caster.CurrentAction() != UnitActionStill && caster.CanStoreOrder(caster.CurrentOrder())) {
+			savedOrder = caster.CurrentOrder()->Clone();
+		}
 		// Must move before ?
 		CommandSpellCast(caster, target->targetPos, target->Unit, spell, FlushCommands);
 		delete target;
+		if (savedOrder != NULL) {
+			caster.SavedOrder = savedOrder;
+		}
 	}
 	return 1;
 }
@@ -426,6 +479,8 @@ int SpellCast(CUnit &caster, const SpellType &spell, CUnit *target, const Vec2i 
 		if (mustSubtractMana) {
 			caster.Variable[MANA_INDEX].Value -= spell.ManaCost;
 		}
+		caster.Player->SubCosts(spell.Costs);
+		caster.SpellCoolDownTimers[spell.Slot] = spell.CoolDown;
 		//
 		// Spells like blizzard are casted again.
 		// This is sort of confusing, we do the test again, to
@@ -449,10 +504,11 @@ int SpellCast(CUnit &caster, const SpellType &spell, CUnit *target, const Vec2i 
 */
 SpellType::SpellType(int slot, const std::string &ident) :
 	Ident(ident), Slot(slot), Target(), Action(),
-	Range(0), ManaCost(0), RepeatCast(0),
+	Range(0), ManaCost(0), RepeatCast(0), CoolDown(0),
 	DependencyId(-1), Condition(NULL),
-	AutoCast(NULL), AICast(NULL)
+	AutoCast(NULL), AICast(NULL), ForceUseAnimation(false)
 {
+	memset(Costs, 0, sizeof(Costs));
 }
 
 /**

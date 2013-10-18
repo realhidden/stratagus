@@ -101,16 +101,12 @@ extern void AiReduceMadeInBuilt(PlayerAi &pai, const CUnitType &type);
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "progress")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->ProgressCounter = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->ProgressCounter = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "cancel")) {
 		this->IsCancelled = true;
 	} else if (!strcmp(value, "frame")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		int frame = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		int frame = LuaToNumber(l, -1, j + 1);
 		CConstructionFrame *cframe = unit.Type->Construction->Frames;
 		while (frame-- && cframe->Next != NULL) {
 			cframe = cframe->Next;
@@ -285,10 +281,7 @@ static void Finish(COrder_Built &order, CUnit &unit)
 	// This should happen when building unit with several peons
 	// Maybe also with only one.
 	// FIXME : Should be better to fix it in action_{build,repair}.c ?
-	if (unit.Variable[BUILD_INDEX].Value > unit.Variable[BUILD_INDEX].Max) {
-		// assume value is wrong.
-		unit.Variable[BUILD_INDEX].Value = unit.Variable[BUILD_INDEX].Max;
-	}
+	unit.Variable[BUILD_INDEX].Value = std::min(unit.Variable[BUILD_INDEX].Max, unit.Variable[BUILD_INDEX].Value);
 }
 
 /* virtual */ void COrder_Built::FillSeenValues(CUnit &unit) const
@@ -350,7 +343,7 @@ void COrder_Built::Progress(CUnit &unit, int amount)
 	Boost(unit, amount, HP_INDEX);
 	Boost(unit, amount, SHIELD_INDEX);
 
-	this->ProgressCounter += amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR;
+	this->ProgressCounter += std::max(1, amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR);
 	UpdateConstructionFrame(unit);
 }
 
@@ -358,7 +351,7 @@ void COrder_Built::ProgressHp(CUnit &unit, int amount)
 {
 	Boost(unit, amount, HP_INDEX);
 
-	this->ProgressCounter += amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR;
+	this->ProgressCounter += std::max(1, amount * unit.Player->SpeedBuild / SPEEDUP_FACTOR);
 	UpdateConstructionFrame(unit);
 }
 
@@ -369,7 +362,7 @@ void COrder_Built::Boost(CUnit &building, int amount, int varIndex) const
 
 	const int costs = building.Stats->Costs[TimeCost] * 600;
 	const int progress = this->ProgressCounter;
-	const int newProgress = progress + amount * building.Player->SpeedBuild / SPEEDUP_FACTOR;
+	const int newProgress = progress + std::max(1, amount * building.Player->SpeedBuild / SPEEDUP_FACTOR);
 	const int maxValue = building.Variable[varIndex].Max;
 
 	int &currentValue = building.Variable[varIndex].Value;

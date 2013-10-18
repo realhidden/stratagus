@@ -46,7 +46,6 @@
 #include "pathfinder.h"
 #include "player.h"
 #include "script.h"
-#include "tileset.h"
 #include "translate.h"
 #include "ui.h"
 #include "unit.h"
@@ -118,14 +117,10 @@ enum {
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "range")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Range = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Range = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "state")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->State = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->State = LuaToNumber(l, -1, j + 1);
 	} else if (!strcmp(value, "tile")) {
 		++j;
 		lua_rawgeti(l, -1, j + 1);
@@ -133,9 +128,7 @@ enum {
 		lua_pop(l, 1);
 	} else if (!strcmp(value, "type")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Type = UnitTypeByIdent(LuaToString(l, -1, j + 1));
 	} else {
 		return false;
 	}
@@ -453,7 +446,9 @@ bool COrder_Build::BuildFromOutside(CUnit &unit) const
 		return ;
 	}
 	if (this->State == State_BuildFromOutside) {
-		this->BuildFromOutside(unit);
+		if (this->BuildFromOutside(unit)) {
+			this->Finished = true;
+		}
 	}
 }
 

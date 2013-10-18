@@ -81,14 +81,10 @@
 {
 	if (!strcmp(value, "type")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Type = UnitTypeByIdent(LuaToString(l, -1, j + 1));
 	} else if (!strcmp(value, "ticks")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Ticks = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Ticks = LuaToNumber(l, -1, j + 1);
 	} else {
 		return false;
 	}
@@ -187,7 +183,7 @@ static void AnimateActionTrain(CUnit &unit)
 	CPlayer &player = *unit.Player;
 	const CUnitType &nType = *this->Type;
 	const int cost = nType.Stats[player.Index].Costs[TimeCost];
-	this->Ticks += player.SpeedTrain / SPEEDUP_FACTOR;
+	this->Ticks += std::max(1, player.SpeedTrain / SPEEDUP_FACTOR);
 
 	if (this->Ticks < cost) {
 		unit.Wait = CYCLES_PER_SECOND / 6;

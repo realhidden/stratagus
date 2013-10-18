@@ -108,13 +108,15 @@ public:
 class ConditionInfoVariable
 {
 public:
-	ConditionInfoVariable() : Enable(0), Check(false), MinValue(0), MaxValue(0),
-		MinMax(0), MinValuePercent(0), MaxValuePercent(0),
+	ConditionInfoVariable() : Enable(0), Check(false), ExactValue(0), ExceptValue(0),
+		MinValue(0), MaxValue(0), MinMax(0), MinValuePercent(0), MaxValuePercent(0),
 		ConditionApplyOnCaster(0) {};
 
 	char Enable;                /// Target is 'user defined variable'.
 	bool Check;                 /// True if need to check that variable.
 
+	int ExactValue;             /// Target must have exactly ExactValue of it's value.
+	int ExceptValue;            /// Target mustn't have ExceptValue of it's value.
 	int MinValue;               /// Target must have more Value than that.
 	int MaxValue;               /// Target must have less Value than that.
 	int MinMax;                 /// Target must have more Max than that.
@@ -164,16 +166,24 @@ public:
 class AutoCastInfo
 {
 public:
-	AutoCastInfo() : Range(0), Condition(0), Combat(0) {};
+	// Special flags for priority sorting
+#define ACP_NOVALUE -1
+#define ACP_DISTANCE -2
+	AutoCastInfo() : Range(0), PriorytyVar(ACP_NOVALUE), ReverseSort(false), Condition(NULL),
+		Combat(0), Attacker(0) {};
 	~AutoCastInfo() { delete Condition; };
 	/// @todo this below is SQUARE!!!
 	int Range;                   /// Max range of the target.
 
+	int PriorytyVar;             /// Variable to sort autocast targets by priority.
+	bool ReverseSort;            /// If true, small values have the highest priority.
+
 	ConditionInfo *Condition;    /// Conditions to cast the spell.
 
-	/// Detalied generic conditions (not per-target, where Condition is evaluated.)
+	/// Detailed generic conditions (not per-target, where Condition is evaluated.)
 	/// Combat mode is when there are hostile non-coward units around
 	int Combat;                  /// If it should be casted in combat
+	int Attacker;                /// If it should be casted on unit which attacks
 
 	/// @todo Add stuff here for target preference.
 	/// @todo Heal units with the lowest hit points first.
@@ -194,13 +204,15 @@ public:
 	int Slot;             /// Spell numeric identifier
 
 	// Spell Specifications
-	TargetType Target;          /// Targetting information. See TargetType.
+	TargetType Target;          /// Targeting information. See TargetType.
 	std::vector<SpellActionType *> Action; /// More arguments for spell (damage, delay, additional sounds...).
 
 	int Range;                  /// Max range of the target.
 #define INFINITE_RANGE 0xFFFFFFF
 	int ManaCost;               /// Required mana for each cast.
 	int RepeatCast;             /// If the spell will be cast again until out of targets.
+	int Costs[MaxCosts];        /// Resource costs of spell.
+	int CoolDown;               /// How much time spell needs to be cast again.
 
 	int DependencyId;           /// Id of upgrade, -1 if no upgrade needed for cast the spell.
 	ConditionInfo *Condition;   /// Conditions to cast the spell. (generic (no test for each target))
@@ -215,6 +227,7 @@ public:
 	bool IsCasterOnly() const {
 		return !Range && Target == TargetSelf;
 	}
+	bool ForceUseAnimation;
 
 };
 
@@ -241,7 +254,7 @@ extern void InitSpells();
 /// done spell tables
 extern void CleanSpells();
 
-/// return 1 if spell is availible, 0 if not (must upgrade)
+/// return 1 if spell is available, 0 if not (must upgrade)
 extern bool SpellIsAvailable(const CPlayer &player, int SpellId);
 
 /// returns true if spell can be casted (enough mana, valid target)

@@ -44,6 +44,8 @@
 #include "iocompat.h"
 #include "iolib.h"
 #include "map.h"
+#include "parameters.h"
+#include "translate.h"
 #include "trigger.h"
 #include "ui.h"
 #include "unit.h"
@@ -61,15 +63,15 @@ NumberDesc *Damage;                   /// Damage calculation for missile.
 static int NumberCounter = 0; /// Counter for lua function.
 static int StringCounter = 0; /// Counter for lua function.
 
-
-/// Usefull for getComponent.
-typedef enum {
+/// Useful for getComponent.
+enum UStrIntType {
 	USTRINT_STR, USTRINT_INT
-} UStrIntType;
-typedef struct {
+};
+struct UStrInt {
 	union {const char *s; int i;};
 	UStrIntType type;
-} UStrInt;
+};
+
 /// Get component for unit variable.
 extern UStrInt GetComponent(const CUnit &unit, int index, EnumVariable e, int t);
 /// Get component for unit type variable.
@@ -175,7 +177,7 @@ static bool GetFileContent(const std::string &file, std::string &content)
 
 	content.clear();
 	if (fp.open(file.c_str(), CL_OPEN_READ) == -1) {
-		DebugPrint("Can't open file '%s': %s\n" _C_ file.c_str());
+		DebugPrint("Can't open file '%s\n" _C_ file.c_str());
 		fprintf(stderr, "Can't open file '%s': %s\n", file.c_str(), strerror(errno));
 		return false;
 	}
@@ -244,12 +246,10 @@ static int CclSavePreferences(lua_State *l)
 */
 static int CclLoad(lua_State *l)
 {
-	char buf[1024];
-
 	LuaCheckArgs(l, 1);
-	LibraryFileName(LuaToString(l, 1), buf, sizeof(buf));
-	if (LuaLoadFile(buf) == -1) {
-		DebugPrint("Load failed: %s\n" _C_ LuaToString(l, 1));
+	const std::string filename = LibraryFileName(LuaToString(l, 1));
+	if (LuaLoadFile(filename) == -1) {
+		DebugPrint("Load failed: %s\n" _C_ filename.c_str());
 	}
 	return 0;
 }
@@ -263,12 +263,10 @@ static int CclLoad(lua_State *l)
 */
 static int CclLoadBuffer(lua_State *l)
 {
-	char file[1024];
-	std::string content;
-
 	LuaCheckArgs(l, 1);
-	LibraryFileName(LuaToString(l, 1), file, sizeof(file));
-	DebugPrint("Loading '%s'\n" _C_ file);
+	const std::string file = LibraryFileName(LuaToString(l, 1));
+	DebugPrint("Loading '%s'\n" _C_ file.c_str());
+	std::string content;
 	if (GetFileContent(file, content) == false) {
 		return 0;
 	}
@@ -309,6 +307,21 @@ int LuaToNumber(lua_State *l, int narg)
 }
 
 /**
+**  Convert lua number in C unsigned int.
+**  It checks also type and exit in case of error.
+**
+**  @param l     Lua state.
+**  @param narg  Argument number.
+**
+**  @return      C number from lua.
+*/
+unsigned int LuaToUnsignedNumber(lua_State *l, int narg)
+{
+	luaL_checktype(l, narg, LUA_TNUMBER);
+	return static_cast<unsigned int>(lua_tonumber(l, narg));
+}
+
+/**
 **  Convert lua boolean to bool.
 **  It also checks type and exits in case of error.
 **
@@ -323,29 +336,56 @@ bool LuaToBoolean(lua_State *l, int narg)
 	return lua_toboolean(l, narg) != 0;
 }
 
+const char *LuaToString(lua_State *l, int index, int subIndex)
+{
+	luaL_checktype(l, index, LUA_TTABLE);
+	lua_rawgeti(l, index, subIndex);
+	const char *res = LuaToString(l, -1);
+	lua_pop(l, 1);
+	return res;
+}
+
+int LuaToNumber(lua_State *l, int index, int subIndex)
+{
+	luaL_checktype(l, index, LUA_TTABLE);
+	lua_rawgeti(l, index, subIndex);
+	const int res = LuaToNumber(l, -1);
+	lua_pop(l, 1);
+	return res;
+}
+
+unsigned int LuaToUnsignedNumber(lua_State *l, int index, int subIndex)
+{
+	luaL_checktype(l, index, LUA_TTABLE);
+	lua_rawgeti(l, index, subIndex);
+	const unsigned int res = LuaToUnsignedNumber(l, -1);
+	lua_pop(l, 1);
+	return res;
+}
+
+bool LuaToBoolean(lua_State *l, int index, int subIndex)
+{
+	luaL_checktype(l, index, LUA_TTABLE);
+	lua_rawgeti(l, index, subIndex);
+	const bool res = LuaToBoolean(l, -1);
+	lua_pop(l, 1);
+	return res;
+}
+
+
 /**
-**  Perform CCL garbage collection
-**
-**  @param fast  set this flag to disable slow GC (during game)
+**  Perform lua garbage collection
 */
-void CclGarbageCollect(int)
+void LuaGarbageCollect()
 {
 #if LUA_VERSION_NUM >= 501
-	DebugPrint("Garbage collect (before): %d\n" _C_
-			   lua_gc(Lua, LUA_GCCOUNT, 0));
-
+	DebugPrint("Garbage collect (before): %d\n" _C_ lua_gc(Lua, LUA_GCCOUNT, 0));
 	lua_gc(Lua, LUA_GCCOLLECT, 0);
-
-	DebugPrint("Garbage collect (after): %d\n" _C_
-			   lua_gc(Lua, LUA_GCCOUNT, 0));
+	DebugPrint("Garbage collect (after): %d\n" _C_ lua_gc(Lua, LUA_GCCOUNT, 0));
 #else
-	DebugPrint("Garbage collect (before): %d/%d\n" _C_
-			   lua_getgccount(Lua) _C_ lua_getgcthreshold(Lua));
-
+	DebugPrint("Garbage collect (before): %d/%d\n" _C_  lua_getgccount(Lua) _C_ lua_getgcthreshold(Lua));
 	lua_setgcthreshold(Lua, 0);
-
-	DebugPrint("Garbage collect (after): %d/%d\n" _C_
-			   lua_getgccount(Lua) _C_ lua_getgcthreshold(Lua));
+	DebugPrint("Garbage collect (after): %d/%d\n" _C_ lua_getgccount(Lua) _C_ lua_getgcthreshold(Lua));
 #endif
 }
 
@@ -563,43 +603,43 @@ NumberDesc *CclParseNumberDesc(lua_State *l)
 		lua_rawgeti(l, -1, 2); // table
 		if (!strcmp(key, "Add")) {
 			res->e = ENumber_Add;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "Sub")) {
 			res->e = ENumber_Sub;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "Mul")) {
 			res->e = ENumber_Mul;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "Div")) {
 			res->e = ENumber_Div;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "Min")) {
 			res->e = ENumber_Min;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "Max")) {
 			res->e = ENumber_Max;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "Rand")) {
 			res->e = ENumber_Rand;
 			res->D.N = CclParseNumberDesc(l);
 		} else if (!strcmp(key, "GreaterThan")) {
 			res->e = ENumber_Gt;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "GreaterThanOrEq")) {
 			res->e = ENumber_GtEq;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "LessThan")) {
 			res->e = ENumber_Lt;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "LessThanOrEq")) {
 			res->e = ENumber_LtEq;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "Equal")) {
 			res->e = ENumber_Eq;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "NotEqual")) {
 			res->e = ENumber_NEq;
-			ParseBinOp(l, &res->D.BinOp);
+			ParseBinOp(l, &res->D.binOp);
 		} else if (!strcmp(key, "UnitVar")) {
 			Assert(lua_istable(l, -1));
 
@@ -620,7 +660,7 @@ NumberDesc *CclParseNumberDesc(lua_State *l)
 				} else if (!strcmp(key, "Loc")) {
 					res->D.UnitStat.Loc = LuaToNumber(l, -1);
 					if (res->D.UnitStat.Loc < 0 || 2 < res->D.UnitStat.Loc) {
-						LuaError(l, "Bad Loc number :'%d'" _C_(int) LuaToNumber(l, -1));
+						LuaError(l, "Bad Loc number :'%d'" _C_ LuaToNumber(l, -1));
 					}
 				} else {
 					LuaError(l, "Bad param %s for Unit" _C_ key);
@@ -682,6 +722,20 @@ NumberDesc *CclParseNumberDesc(lua_State *l)
 			lua_pop(l, 1); // pop the char
 
 			lua_pop(l, 1); // pop the table.
+		} else if (!strcmp(key, "NumIf")) {
+			res->e = ENumber_NumIf;
+			if (lua_rawlen(l, -1) != 2 && lua_rawlen(l, -1) != 3) {
+				LuaError(l, "Bad number of args in NumIf\n");
+			}
+			lua_rawgeti(l, -1, 1); // Condition.
+			res->D.NumIf.Cond = CclParseNumberDesc(l);
+			lua_rawgeti(l, -1, 2); // Then.
+			res->D.NumIf.BTrue = CclParseNumberDesc(l);
+			if (lua_rawlen(l, -1) == 3) {
+				lua_rawgeti(l, -1, 3); // Else.
+				res->D.NumIf.BFalse = CclParseNumberDesc(l);
+			}
+			lua_pop(l, 1); // table.
 		} else {
 			lua_pop(l, 1);
 			LuaError(l, "unknow condition '%s'"_C_ key);
@@ -750,10 +804,10 @@ StringDesc *CclParseStringDesc(lua_State *l)
 			lua_rawgeti(l, -1, 1); // Condition.
 			res->D.If.Cond = CclParseNumberDesc(l);
 			lua_rawgeti(l, -1, 2); // Then.
-			res->D.If.True = CclParseStringDesc(l);
+			res->D.If.BTrue = CclParseStringDesc(l);
 			if (lua_rawlen(l, -1) == 3) {
 				lua_rawgeti(l, -1, 3); // Else.
-				res->D.If.False = CclParseStringDesc(l);
+				res->D.If.BFalse = CclParseStringDesc(l);
 			}
 			lua_pop(l, 1); // table.
 		} else if (!strcmp(key, "SubString")) {
@@ -780,7 +834,7 @@ StringDesc *CclParseStringDesc(lua_State *l)
 			lua_rawgeti(l, -1, 2); // String.
 			res->D.Line.String = CclParseStringDesc(l);
 			if (lua_rawlen(l, -1) >= 3) {
-				lua_rawgeti(l, -1, 3); // Lenght.
+				lua_rawgeti(l, -1, 3); // Length.
 				res->D.Line.MaxLen = CclParseNumberDesc(l);
 			}
 			res->D.Line.Font = NULL;
@@ -793,6 +847,9 @@ StringDesc *CclParseStringDesc(lua_State *l)
 				lua_pop(l, 1); // font name.
 			}
 			lua_pop(l, 1); // table.
+		} else if (!strcmp(key, "PlayerName")) {
+			res->e = EString_PlayerName;
+			res->D.PlayerName = CclParseNumberDesc(l);
 		} else {
 			lua_pop(l, 1);
 			LuaError(l, "unknow condition '%s'"_C_ key);
@@ -851,49 +908,49 @@ int EvalNumber(const NumberDesc *number)
 		case ENumber_Dir :     // directly a number.
 			return number->D.Val;
 		case ENumber_Add :     // a + b.
-			return EvalNumber(number->D.BinOp.Left) + EvalNumber(number->D.BinOp.Right);
+			return EvalNumber(number->D.binOp.Left) + EvalNumber(number->D.binOp.Right);
 		case ENumber_Sub :     // a - b.
-			return EvalNumber(number->D.BinOp.Left) - EvalNumber(number->D.BinOp.Right);
+			return EvalNumber(number->D.binOp.Left) - EvalNumber(number->D.binOp.Right);
 		case ENumber_Mul :     // a * b.
-			return EvalNumber(number->D.BinOp.Left) * EvalNumber(number->D.BinOp.Right);
+			return EvalNumber(number->D.binOp.Left) * EvalNumber(number->D.binOp.Right);
 		case ENumber_Div :     // a / b.
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
 			if (!b) { // FIXME : manage better this.
 				return 0;
 			}
 			return a / b;
 		case ENumber_Min :     // a <= b ? a : b
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
-			return (a <= b ? a : b);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
+			return std::min(a, b);
 		case ENumber_Max :     // a >= b ? a : b
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
-			return (a >= b ? a : b);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
+			return std::max(a, b);
 		case ENumber_Gt  :     // a > b  ? 1 : 0
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
 			return (a > b ? 1 : 0);
 		case ENumber_GtEq :    // a >= b ? 1 : 0
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
 			return (a >= b ? 1 : 0);
 		case ENumber_Lt  :     // a < b  ? 1 : 0
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
 			return (a < b ? 1 : 0);
 		case ENumber_LtEq :    // a <= b ? 1 : 0
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
 			return (a <= b ? 1 : 0);
 		case ENumber_Eq  :     // a == b ? 1 : 0
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
 			return (a == b ? 1 : 0);
 		case ENumber_NEq  :    // a != b ? 1 : 0
-			a = EvalNumber(number->D.BinOp.Left);
-			b = EvalNumber(number->D.BinOp.Right);
+			a = EvalNumber(number->D.binOp.Left);
+			b = EvalNumber(number->D.binOp.Right);
 			return (a != b ? 1 : 0);
 
 		case ENumber_Rand :    // random(a) [0..a-1]
@@ -928,6 +985,14 @@ int EvalNumber(const NumberDesc *number)
 				size_t pos = s.find(number->D.StringFind.C);
 				return pos != std::string::npos ? (int)pos : -1;
 			} else { // ERROR.
+				return 0;
+			}
+		case ENumber_NumIf : // cond ? True : False;
+			if (EvalNumber(number->D.NumIf.Cond)) {
+				return EvalNumber(number->D.NumIf.BTrue);
+			} else if (number->D.NumIf.BFalse) {
+				return EvalNumber(number->D.NumIf.BFalse);
+			} else {
 				return 0;
 			}
 	}
@@ -980,9 +1045,9 @@ std::string EvalString(const StringDesc *s)
 			}
 		case EString_If : // cond ? True : False;
 			if (EvalNumber(s->D.If.Cond)) {
-				return EvalString(s->D.If.True);
-			} else if (s->D.If.False) {
-				return EvalString(s->D.If.False);
+				return EvalString(s->D.If.BTrue);
+			} else if (s->D.If.BFalse) {
+				return EvalString(s->D.If.BFalse);
 			} else {
 				return std::string("");
 			}
@@ -1023,9 +1088,7 @@ std::string EvalString(const StringDesc *s)
 				}
 				if (s->D.Line.MaxLen) {
 					maxlen = EvalNumber(s->D.Line.MaxLen);
-					if (maxlen < 0) {
-						maxlen = 0;
-					}
+					maxlen = std::max(maxlen, 0);
 				} else {
 					maxlen = 0;
 				}
@@ -1033,6 +1096,8 @@ std::string EvalString(const StringDesc *s)
 				res = GetLineFont(line, tmp1, maxlen, font);
 				return res;
 			}
+		case EString_PlayerName : // player name
+			return std::string(Players[EvalNumber(s->D.PlayerName)].Name);
 	}
 	return std::string("");
 }
@@ -1079,10 +1144,10 @@ void FreeNumberDesc(NumberDesc *number)
 		case ENumber_LtEq :    // a <= b ? 1 : 0
 		case ENumber_NEq  :    // a <> b ? 1 : 0
 		case ENumber_Eq  :     // a == b ? 1 : 0
-			FreeNumberDesc(number->D.BinOp.Left);
-			FreeNumberDesc(number->D.BinOp.Right);
-			delete number->D.BinOp.Left;
-			delete number->D.BinOp.Right;
+			FreeNumberDesc(number->D.binOp.Left);
+			FreeNumberDesc(number->D.binOp.Right);
+			delete number->D.binOp.Left;
+			delete number->D.binOp.Right;
 			break;
 		case ENumber_Rand :    // random(a) [0..a-1]
 			FreeNumberDesc(number->D.N);
@@ -1102,6 +1167,14 @@ void FreeNumberDesc(NumberDesc *number)
 		case ENumber_StringFind : // strchr(s, c) - s.
 			FreeStringDesc(number->D.StringFind.String);
 			delete number->D.StringFind.String;
+			break;
+		case ENumber_NumIf : // cond ? True : False;
+			FreeNumberDesc(number->D.NumIf.Cond);
+			delete number->D.NumIf.Cond;
+			FreeNumberDesc(number->D.NumIf.BTrue);
+			delete number->D.NumIf.BTrue;
+			FreeNumberDesc(number->D.NumIf.BFalse);
+			delete number->D.NumIf.BFalse;
 			break;
 	}
 }
@@ -1148,10 +1221,10 @@ void FreeStringDesc(StringDesc *s)
 		case EString_If : // cond ? True : False;
 			FreeNumberDesc(s->D.If.Cond);
 			delete s->D.If.Cond;
-			FreeStringDesc(s->D.If.True);
-			delete s->D.If.True;
-			FreeStringDesc(s->D.If.False);
-			delete s->D.If.False;
+			FreeStringDesc(s->D.If.BTrue);
+			delete s->D.If.BTrue;
+			FreeStringDesc(s->D.If.BFalse);
+			delete s->D.If.BFalse;
 			break;
 		case EString_SubString : // substring(s, begin, end)
 			FreeStringDesc(s->D.SubString.String);
@@ -1168,6 +1241,10 @@ void FreeStringDesc(StringDesc *s)
 			delete s->D.Line.Line;
 			FreeNumberDesc(s->D.Line.MaxLen);
 			delete s->D.Line.MaxLen;
+			break;
+		case EString_PlayerName : // player name
+			FreeNumberDesc(s->D.PlayerName);
+			delete s->D.PlayerName;
 			break;
 	}
 }
@@ -1701,6 +1778,36 @@ static int CclStringFind(lua_State *l)
 	return Alias(l, "StringFind");
 }
 
+/**
+**  Return equivalent lua table for NumIf.
+**  {"NumIf", {arg1}}
+**
+**  @param l  Lua state.
+**
+**  @return   equivalent lua table.
+*/
+static int CclNumIf(lua_State *l)
+{
+	if (lua_gettop(l) != 2 && lua_gettop(l) != 3) {
+		LuaError(l, "Bad number of arg for NumIf()\n");
+	}
+	return Alias(l, "NumIf");
+}
+
+/**
+**  Return equivalent lua table for PlayerName.
+**  {"PlayerName", {arg1}}
+**
+**  @param l  Lua state.
+**
+**  @return   equivalent lua table.
+*/
+static int CclPlayerName(lua_State *l)
+{
+	LuaCheckArgs(l, 1);
+	return Alias(l, "PlayerName");
+}
+
 
 static void AliasRegister()
 {
@@ -1739,8 +1846,10 @@ static void AliasRegister()
 	lua_register(Lua, "SubString", CclSubString);
 	lua_register(Lua, "Line", CclLine);
 	lua_register(Lua, "GameInfo", CclGameInfo);
+	lua_register(Lua, "PlayerName", CclPlayerName);
 
 	lua_register(Lua, "If", CclIf);
+	lua_register(Lua, "NumIf", CclNumIf);
 }
 
 /*............................................................................
@@ -1765,8 +1874,12 @@ static int CclStratagusLibraryPath(lua_State *l)
 */
 static int CclFilteredListDirectory(lua_State *l, int type, int mask)
 {
-	LuaCheckArgs(l, 1);
+	const int args = lua_gettop(l);
+	if (args < 1 || args > 2) {
+		LuaError(l, "incorrect argument");
+	}
 	const char *userdir = lua_tostring(l, 1);
+	const int rel = args > 1 ? lua_toboolean(l, 2) : 0;
 	int n = strlen(userdir);
 
 	int pathtype = 0; // path relative to stratagus dir
@@ -1779,7 +1892,7 @@ static int CclFilteredListDirectory(lua_State *l, int type, int mask)
 	if (strpbrk(userdir, ":*?\"<>|") != 0 || strstr(userdir, "..") != 0) {
 		LuaError(l, "Forbidden directory");
 	}
-	char directory[256];
+	char directory[PATH_MAX];
 
 	if (pathtype == 1) {
 		++userdir;
@@ -1789,6 +1902,10 @@ static int CclFilteredListDirectory(lua_State *l, int type, int mask)
 			dir += GameName;
 		}
 		snprintf(directory, sizeof(directory), "%s/%s", dir.c_str(), userdir);
+	} else if (rel) {
+		std::string dir = LibraryFileName(userdir);
+		snprintf(directory, sizeof(directory), "%s", dir.c_str());
+		lua_pop(l, 1);
 	} else {
 		snprintf(directory, sizeof(directory), "%s/%s", StratagusLibPath.c_str(), userdir);
 	}
@@ -1907,7 +2024,7 @@ void InitLua()
 		//{LUA_LOADLIBNAME, luaopen_package},
 		{LUA_TABLIBNAME, luaopen_table},
 		//{LUA_IOLIBNAME, luaopen_io},
-		//{LUA_OSLIBNAME, luaopen_os},
+		{LUA_OSLIBNAME, luaopen_os},
 		{LUA_STRLIBNAME, luaopen_string},
 		{LUA_MATHLIBNAME, luaopen_math},
 		{LUA_DBLIBNAME, luaopen_debug},
@@ -2038,7 +2155,7 @@ static bool LuaValueToString(lua_State *l, std::string &value)
 		case LUA_TFUNCTION:
 			// Could be done with string.dump(function)
 			// and debug.getinfo(function).name (could be nil for anonymous function)
-			// But not usefull yet.
+			// But not useful yet.
 			value = "";
 			return false;
 		case LUA_TUSERDATA:
@@ -2175,20 +2292,18 @@ void SavePreferences()
 */
 void LoadCcl(const std::string &filename)
 {
-	char buf[PATH_MAX];
-
 	//  Load and evaluate configuration file
 	CclInConfigFile = 1;
-	LibraryFileName(filename.c_str(), buf, sizeof(buf));
-	if (access(buf, R_OK)) {
+	const std::string name = LibraryFileName(filename.c_str());
+	if (access(name.c_str(), R_OK)) {
 		fprintf(stderr, "Maybe you need to specify another gamepath with '-d /path/to/datadir'?\n");
 		ExitFatal(-1);
 	}
 
-	ShowLoadProgress("Script %s\n", buf);
-	LuaLoadFile(buf);
+	ShowLoadProgress(_("Script %s\n"), name.c_str());
+	LuaLoadFile(name);
 	CclInConfigFile = 0;
-	CclGarbageCollect(0);  // Cleanup memory after load
+	LuaGarbageCollect();
 }
 
 

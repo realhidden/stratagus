@@ -53,7 +53,6 @@
 #pragma warning(disable:4761)               /// Integral size mismatch
 #pragma warning(disable:4786)               /// Truncated to 255 chars
 
-#define inline __inline
 #ifndef __func__
 #define __func__ __FUNCTION__
 #endif
@@ -103,7 +102,9 @@ extern void PrintLocation(const char *file, int line, const char *funcName);
 /// Print function in debug macros
 #define PrintFunction() PrintLocation(__FILE__, __LINE__, __func__);
 
-#ifdef DEBUG  // {
+extern bool EnableDebugPrint;
+extern bool EnableAssert;
+extern bool EnableUnitDebug;
 
 extern void AbortAt(const char *file, int line, const char *funcName, const char *conditionStr);
 extern void PrintOnStdOut(const char *format, ...);
@@ -112,33 +113,13 @@ extern void PrintOnStdOut(const char *format, ...);
 **  Assert a condition. If cond is not true abort with file,line.
 */
 #define Assert(cond) \
-	do { if (!(cond)) { AbortAt(__FILE__, __LINE__, __func__, #cond); }} while (0)
+	do { if (EnableAssert && !(cond)) { AbortAt(__FILE__, __LINE__, __func__, #cond); }} while (0)
 
 /**
 **  Print debug information with function name.
 */
 #define DebugPrint(args) \
-	do { PrintFunction(); PrintOnStdOut(args); } while (0)
-
-#else  // }{ DEBUG
-
-#define Assert(cond)        /* disabled */
-#define DebugPrint(args)    /* disabled */
-
-#endif
-
-#ifdef REFS_DEBUG  // {
-
-/**
-**  Assert a condition for references
-*/
-#define RefsAssert(cond) \
-	do { if (!(cond)) { AbortAt(__FILE__, __LINE__, __func__, #cond); } } while (0)
-#else  // }{ REFS_DEBUG
-
-#define RefsAssert(cond)      /* disabled */
-
-#endif  // } !REFS_DEBUG
+	do { if (EnableDebugPrint) { PrintFunction(); PrintOnStdOut(args); } } while (0)
 
 /*============================================================================
 ==  Definitions
@@ -180,29 +161,8 @@ extern const char NameLine[];
 #define CYCLES_PER_SECOND  30  // 1/30s 0.33ms
 
 /*----------------------------------------------------------------------------
---  stratagus.c
+--  stratagus.cpp
 ----------------------------------------------------------------------------*/
-
-class Parameters
-{
-public:
-	void SetDefaultValues();
-
-	const std::string &GetUserDirectory() { return UserDirectory; }
-
-private:
-	void SetUserDirectory();
-
-public:
-	std::string applicationName;
-	std::string luaStartFilename;
-	std::string luaEditorStartFilename;
-	std::string LocalPlayerName;        /// Name of local player
-private:
-	std::string UserDirectory;          /// Directory containing user settings and data
-public:
-	static Parameters Instance;
-};
 
 extern std::string StratagusLibPath;        /// Location of stratagus data
 extern std::string MenuRace;
@@ -216,6 +176,7 @@ extern void ExitFatal(int err);             /// Exit with fatal error
 extern void UpdateDisplay();            /// Game display update
 extern void DrawMapArea();              /// Draw the map area
 extern void GameMainLoop();             /// Game main loop
+extern int stratagusMain(int argc, char **argv); /// main entry
 
 //@}
 

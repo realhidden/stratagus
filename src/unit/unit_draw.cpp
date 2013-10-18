@@ -50,7 +50,7 @@
 #include "player.h"
 #include "script.h"
 #include "sound.h"
-#include "tileset.h"
+#include "translate.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unitsound.h"
@@ -161,8 +161,8 @@ void DrawUnitSelection(const CViewport &vp, const CUnit &unit)
 
 	const CUnitType &type = *unit.Type;
 	const PixelPos screenPos = vp.MapToScreenPixelPos(unit.GetMapPixelPosCenter());
-	const int x = screenPos.x - type.BoxWidth / 2 - (type.Width - type.Sprite->Width) / 2;
-	const int y = screenPos.y - type.BoxHeight / 2 - (type.Height - type.Sprite->Height) / 2;
+	const int x = screenPos.x - type.BoxWidth / 2 - (type.Width - (type.Sprite ? type.Sprite->Width : 0)) / 2;
+	const int y = screenPos.y - type.BoxHeight / 2 - (type.Height - (type.Sprite ? type.Sprite->Height : 0)) / 2;
 
 	DrawSelection(color, x + type.BoxOffsetX, y + type.BoxOffsetY, x + type.BoxWidth + type.BoxOffsetX, y + type.BoxHeight + type.BoxOffsetY);
 }
@@ -343,7 +343,7 @@ void LoadDecorations()
 {
 	std::vector<Decoration>::iterator i;
 	for (i = DecoSprite.SpriteArray.begin(); i != DecoSprite.SpriteArray.end(); ++i) {
-		ShowLoadProgress("Decorations `%s'", (*i).File.c_str());
+		ShowLoadProgress(_("Decorations `%s'"), (*i).File.c_str());
 		(*i).Sprite = CGraphic::New((*i).File, (*i).Width, (*i).Height);
 		(*i).Sprite->Load();
 	}
@@ -458,8 +458,8 @@ void CDecoVarSpriteBar::Draw(int x, int y, const CUnitType &/*type*/, const CVar
 
 	Decoration &decosprite = DecoSprite.SpriteArray[(int)this->NSprite];
 	CGraphic &sprite = *decosprite.Sprite;
-	x += decosprite.HotPos.x; // in addition of OffsetX... Usefull ?
-	y += decosprite.HotPos.y; // in addition of OffsetY... Usefull ?
+	x += decosprite.HotPos.x; // in addition of OffsetX... Useful ?
+	y += decosprite.HotPos.y; // in addition of OffsetY... Useful ?
 
 	int n = sprite.NumFrames - 1; // frame of the sprite to show.
 	n -= (n * var.Value) / var.Max;
@@ -482,20 +482,25 @@ void CDecoVarSpriteBar::Draw(int x, int y, const CUnitType &/*type*/, const CVar
 **
 **  @todo fix sprite configuration configuration.
 */
-void CDecoVarStaticSprite::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &/*var*/) const
+void CDecoVarStaticSprite::Draw(int x, int y, const CUnitType &/*type*/, const CVariable &var) const
 {
 	Decoration &decosprite = DecoSprite.SpriteArray[(int)this->NSprite];
 	CGraphic &sprite = *decosprite.Sprite;
 
-	x += decosprite.HotPos.x; // in addition of OffsetX... Usefull ?
-	y += decosprite.HotPos.y; // in addition of OffsetY... Usefull ?
+	x += decosprite.HotPos.x; // in addition of OffsetX... Useful ?
+	y += decosprite.HotPos.y; // in addition of OffsetY... Useful ?
 	if (this->IsCenteredInX) {
 		x -= sprite.Width / 2;
 	}
 	if (this->IsCenteredInY) {
 		y -= sprite.Height / 2;
 	}
-	sprite.DrawFrameClip(this->n, x, y);
+	if (this->FadeValue && var.Value < this->FadeValue) {
+		int alpha = var.Value * 255 / this->FadeValue;
+		sprite.DrawFrameClipTrans(this->n, x, y, alpha);
+	} else {
+		sprite.DrawFrameClip(this->n, x, y);
+	}
 }
 
 /**
@@ -509,9 +514,9 @@ static void DrawDecoration(const CUnit &unit, const CUnitType &type, const Pixel
 {
 	int x = screenPos.x;
 	int y = screenPos.y;
-#ifdef REFS_DEBUG
+#ifdef DEBUG
 	// Show the number of references.
-	VideoDrawNumberClip(x + 1, y + 1, GetGameFont(), unit.Refs);
+	CLabel(GetGameFont()).DrawClip(x + 1, y + 1, unit.Refs);
 #endif
 
 	UpdateUnitVariables(const_cast<CUnit &>(unit));
@@ -695,7 +700,7 @@ static void DrawInformations(const CUnit &unit, const CUnitType &type, const Pix
 	}
 
 	// FIXME: johns: ugly check here, should be removed!
-	if (unit.CurrentAction() != UnitActionDie && unit.IsVisible(*ThisPlayer)) {
+	if (unit.CurrentAction() != UnitActionDie && (unit.IsVisible(*ThisPlayer) || ReplayRevealMap)) {
 		DrawDecoration(unit, type, screenPos);
 	}
 }

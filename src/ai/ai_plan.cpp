@@ -42,6 +42,7 @@
 #include "map.h"
 #include "missile.h"
 #include "pathfinder.h"
+#include "tileset.h"
 #include "unit.h"
 #include "unit_find.h"
 #include "unittype.h"
@@ -115,14 +116,14 @@ class WallFinder
 {
 public:
 	WallFinder(const CUnit &unit, int maxDist, Vec2i *resultPos) :
-		unit(unit),
+		//unit(unit),
 		maxDist(maxDist),
 		movemask(unit.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit)),
 		resultPos(resultPos)
 	{}
 	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
 private:
-	const CUnit &unit;
+	//const CUnit &unit;
 	int maxDist;
 	int movemask;
 	Vec2i *resultPos;
@@ -207,17 +208,14 @@ int AiFindWall(AiForce *force)
 	return 0;
 }
 
-
 class ReachableTerrainMarker
 {
 public:
 	ReachableTerrainMarker(const CUnit &unit) :
-		unit(unit),
 		movemask(unit.Type->MovementMask & ~(MapFieldLandUnit | MapFieldAirUnit | MapFieldSeaUnit))
 	{}
 	VisitResult Visit(TerrainTraversal &terrainTraversal, const Vec2i &pos, const Vec2i &from);
 private:
-	const CUnit &unit;
 	int movemask;
 };
 
@@ -394,7 +392,7 @@ int AiForce::PlanAttack()
 			CUnit &unit = *Units[i];
 
 			if (CanTransport(*transporter, unit)) {
-				totalBoardCapacity--;
+				totalBoardCapacity -= unit.Type->BoardSize;
 			}
 		}
 		if (totalBoardCapacity < 0) { // Not enough transporter.

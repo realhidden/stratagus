@@ -36,13 +36,15 @@
 #include "stratagus.h"
 
 #include "actions.h"
+#include "action/action_built.h"
+#include "action/action_research.h"
 #include "action/action_train.h"
+#include "action/action_upgradeto.h"
 #include "commands.h"
 #include "map.h"
 #include "pathfinder.h"
 #include "player.h"
 #include "spells.h"
-#include "tileset.h"
 #include "translate.h"
 #include "upgrade.h"
 #include "ui.h"
@@ -64,8 +66,19 @@ static void ReleaseOrders(CUnit &unit)
 	Assert(unit.Orders.empty() == false);
 
 	// Order 0 must be stopped in the action loop.
-	for (size_t i = 1; i != unit.Orders.size(); ++i) {
-		delete unit.Orders[i];
+	for (size_t i = 0; i != unit.Orders.size(); ++i) {
+		if (unit.Orders[i]->Action == UnitActionBuilt) {
+			(dynamic_cast<COrder_Built *>(unit.Orders[i]))->Cancel(unit);
+		} else if (unit.Orders[i]->Action == UnitActionResearch) {
+			(dynamic_cast<COrder_Research *>(unit.Orders[i]))->Cancel(unit);
+		} else if (unit.Orders[i]->Action == UnitActionTrain) {
+			(dynamic_cast<COrder_Train *>(unit.Orders[i]))->Cancel(unit);
+		} else if (unit.Orders[i]->Action == UnitActionUpgradeTo) {
+			(dynamic_cast<COrder_UpgradeTo *>(unit.Orders[i]))->Cancel(unit);
+		}
+		if (i > 0) {
+			delete unit.Orders[i];
+		}
 	}
 	unit.Orders.resize(1);
 	unit.Orders[0]->Finished = true;
@@ -179,6 +192,33 @@ void CommandStandGround(CUnit &unit, int flush)
 		}
 	}
 	*order = COrder::NewActionStandGround();
+	ClearSavedAction(unit);
+}
+
+/**
+**  Follow unit and defend it
+**
+**  @param unit   pointer to unit.
+**  @param dest   unit to follow
+**  @param flush  if true, flush command queue.
+*/
+void CommandDefend(CUnit &unit, CUnit &dest, int flush)
+{
+	if (IsUnitValidForNetwork(unit) == false) {
+		return ;
+	}
+	COrderPtr *order;
+
+	if (!unit.CanMove()) {
+		ClearNewAction(unit);
+		order = &unit.NewOrder;
+	} else {
+		order = GetNextOrder(unit, flush);
+		if (order == NULL) {
+			return;
+		}
+	}
+	*order = COrder::NewActionDefend(dest);
 	ClearSavedAction(unit);
 }
 
@@ -446,7 +486,7 @@ void CommandBuildBuilding(CUnit &unit, const Vec2i &pos, CUnitType &what, int fl
 	}
 	COrderPtr *order;
 
-	if (unit.Type->Building) {
+	if (unit.Type->Building && !what.BuilderOutside && unit.MapDistanceTo(pos) > unit.Type->RepairRange) {
 		ClearNewAction(unit);
 		order = &unit.NewOrder;
 	} else {
@@ -900,7 +940,7 @@ void CommandQuit(int player)
 			CommandSharedVision(player, 0, i);
 			// Remove Selection from Quit Player
 			std::vector<CUnit *> empty;
-			ChangeTeamSelectedUnits(Players[player], empty, 0);
+			ChangeTeamSelectedUnits(Players[player], empty);
 		}
 	}
 

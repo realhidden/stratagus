@@ -49,20 +49,20 @@ enum EIfVarBinOp {
 	IF_NOT_EQUAL,
 };
 
-bool binOpGreaterEqual(int lhs, int rhs) { return lhs >= rhs; }
-bool binOpGreater(int lhs, int rhs) { return lhs > rhs; }
-bool binOpLessEqual(int lhs, int rhs) { return lhs <= rhs; }
-bool binOpLess(int lhs, int rhs) { return lhs < rhs; }
-bool binOpEqual(int lhs, int rhs) { return lhs == rhs; }
-bool binOpNotEqual(int lhs, int rhs) { return lhs != rhs; }
-bool returnFalse(int , int) { return false; }
+static bool binOpGreaterEqual(int lhs, int rhs) { return lhs >= rhs; }
+static bool binOpGreater(int lhs, int rhs) { return lhs > rhs; }
+static bool binOpLessEqual(int lhs, int rhs) { return lhs <= rhs; }
+static bool binOpLess(int lhs, int rhs) { return lhs < rhs; }
+static bool binOpEqual(int lhs, int rhs) { return lhs == rhs; }
+static bool binOpNotEqual(int lhs, int rhs) { return lhs != rhs; }
+static bool returnFalse(int, int) { return false; }
 
 /* virtual */ void CAnimation_IfVar::Action(CUnit &unit, int &/*move*/, int /*scale*/) const
 {
 	Assert(unit.Anim.Anim == this);
 
-	const int lop = ParseAnimInt(&unit, this->leftVar.c_str());
-	const int rop = ParseAnimInt(&unit, this->rightVar.c_str());
+	const int lop = ParseAnimInt(unit, this->leftVar.c_str());
+	const int rop = ParseAnimInt(unit, this->rightVar.c_str());
 	const bool cond = this->binOpFunc(lop, rop);
 
 	if (cond) {
@@ -73,7 +73,7 @@ bool returnFalse(int , int) { return false; }
 /*
 ** s = "leftOp Op rigthOp gotoLabel"
 */
-/* virtual */ void CAnimation_IfVar::Init(const char *s)
+/* virtual */ void CAnimation_IfVar::Init(const char *s, lua_State *)
 {
 	const std::string str(s);
 	const size_t len = str.size();

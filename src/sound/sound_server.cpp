@@ -57,7 +57,7 @@ static int MusicVolume = 128;    /// music volume
 static bool MusicEnabled = true;
 static bool EffectsEnabled = true;
 
-/// Channels for sound effects and unit speach
+/// Channels for sound effects and unit speech
 struct SoundChannel {
 	CSample *Sample;       /// sample to play
 	Origin *Unit;          /// pointer to unit, who plays the sound, if any
@@ -206,9 +206,7 @@ static int MixSampleToStereo32(CSample *sample, int index, unsigned char volume,
 
 	Assert(!(index & 1));
 
-	if (size >= (sample->Len - index) * div / 2) {
-		size = (sample->Len - index) * div / 2;
-	}
+	size = std::min((sample->Len - index) * div / 2, size);
 
 	size = ConvertToStereo32((char *)(sample->Buffer + index), (char *)buf, sample->Frequency,
 							 sample->SampleSize / 8, sample->Channels,
@@ -266,13 +264,8 @@ static void ClipMixToStereo16(const int *mix, int size, short *output)
 
 	while (mix < end) {
 		int s = (*mix++);
-		if (s > SHRT_MAX) {
-			*output++ = SHRT_MAX;
-		} else if (s < SHRT_MIN) {
-			*output++ = SHRT_MIN;
-		} else {
-			*output++ = s;
-		}
+		clamp(&s, SHRT_MIN, SHRT_MAX);
+		*output++ = s;
 	}
 }
 
@@ -410,9 +403,7 @@ int SetChannelVolume(int channel, int volume)
 	} else {
 		SDL_LockAudio();
 
-		if (volume > MaxVolume) {
-			volume = MaxVolume;
-		}
+		volume = std::min(MaxVolume, volume);
 		Channels[channel].Volume = volume;
 
 		SDL_UnlockAudio();
@@ -438,14 +429,7 @@ int SetChannelStereo(int channel, int stereo)
 		stereo = Channels[channel].Stereo;
 	} else {
 		SDL_LockAudio();
-
-		if (stereo > 127) {
-			stereo = 127;
-		} else if (stereo < -128) {
-			stereo = -128;
-		}
 		Channels[channel].Stereo = stereo;
-
 		SDL_UnlockAudio();
 	}
 	return stereo;
@@ -540,10 +524,8 @@ static CSample *LoadSample(const char *name, enum _play_audio_flags_ flag)
 */
 CSample *LoadSample(const std::string &name)
 {
-	char buf[PATH_MAX];
-
-	LibraryFileName(name.c_str(), buf, sizeof(buf));
-	CSample *sample = LoadSample(buf, PlayAudioLoadInMemory);
+	const std::string filename = LibraryFileName(name.c_str());
+	CSample *sample = LoadSample(filename.c_str(), PlayAudioLoadInMemory);
 
 	if (sample == NULL) {
 		fprintf(stderr, "Can't load the sound `%s'\n", name.c_str());
@@ -665,11 +647,9 @@ int PlayMusic(const std::string &file)
 	if (!SoundEnabled() || !IsMusicEnabled()) {
 		return -1;
 	}
-	char name[PATH_MAX];
-
-	LibraryFileName(file.c_str(), name, sizeof(name));
-	DebugPrint("play music %s\n" _C_ name);
-	CSample *sample = LoadSample(name, PlayAudioStream);
+	const std::string name = LibraryFileName(file.c_str());
+	DebugPrint("play music %s\n" _C_ name.c_str());
+	CSample *sample = LoadSample(name.c_str(), PlayAudioStream);
 
 	if (sample) {
 		StopMusic();

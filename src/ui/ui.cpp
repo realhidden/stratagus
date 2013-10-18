@@ -43,8 +43,9 @@
 #include "iolib.h"
 #include "map.h"
 #include "menus.h"
-#include "tileset.h"
 #include "title.h"
+#include "ui/contenttype.h"
+#include "ui/popup.h"
 #include "unit.h"
 #include "video.h"
 
@@ -84,9 +85,9 @@ void ShowLoadProgress(const char *fmt, ...)
 	temp[sizeof(temp) - 1] = '\0';
 	va_end(va);
 
-	if (Video.Depth && GetGameFont().IsLoaded()) {
+	if (Video.Depth && IsGameFontReady() && GetGameFont().IsLoaded()) {
 		// Remove non printable chars
-		for (char *s = temp; *s; ++s) {
+		for (unsigned char *s = (unsigned char*)temp; *s; ++s) {
 			if (*s < 32) {
 				*s = ' ';
 			}
@@ -98,6 +99,15 @@ void ShowLoadProgress(const char *fmt, ...)
 	} else {
 		DebugPrint("!!!!%s\n" _C_ temp);
 	}
+}
+
+CUnitInfoPanel::~CUnitInfoPanel()
+{
+	for (std::vector<CContentType *>::iterator content = Contents.begin();
+		 content != Contents.end(); ++content) {
+		delete *content;
+	}
+	delete Condition;
 }
 
 
@@ -325,6 +335,7 @@ void CleanUserInterface()
 	delete UI.UpgradingButton;
 	delete UI.ResearchingButton;
 	UI.TransportingButtons.clear();
+	UI.UserButtons.clear();
 
 	// Button Panel
 	CGraphic::Free(UI.ButtonPanel.G);
@@ -421,9 +432,7 @@ static void FinishViewportModeConfiguration(CViewport new_vps[], int num_vps)
 	//  Update the viewport pointers
 	//
 	UI.MouseViewport = GetViewport(CursorScreenPos);
-	if (UI.SelectedViewport > UI.Viewports + UI.NumViewports - 1) {
-		UI.SelectedViewport = UI.Viewports + UI.NumViewports - 1;
-	}
+	UI.SelectedViewport = std::min(UI.Viewports + UI.NumViewports - 1, UI.SelectedViewport);
 }
 
 /**

@@ -64,7 +64,6 @@ void LuaCallback::pushPreamble()
 	arguments = 0;
 }
 
-
 /**
 **  Push a string argument for the callback on the stack.
 **
@@ -75,7 +74,6 @@ void LuaCallback::pushInteger(int value)
 	lua_pushnumber(luastate, value);
 	arguments++;
 }
-
 
 /**
 **  Push a string argument for the callback on the stack.
@@ -88,11 +86,10 @@ void LuaCallback::pushString(const std::string &s)
 	arguments++;
 }
 
-
 /**
-**  Called when an action is recieved from a Widget. It is used
-**  to be able to recieve a notification that an action has
-**  occured.
+**  Called when an action is received from a Widget. It is used
+**  to be able to receive a notification that an action has
+**  occurred.
 */
 void LuaCallback::run()
 {

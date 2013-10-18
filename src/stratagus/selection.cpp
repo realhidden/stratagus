@@ -186,44 +186,25 @@ static void ChangeSelectedUnits(CUnit **units, int count)
 **
 **  @param player  The Player who is selecting the units
 **  @param units   The Units to add/remove
-**  @param adjust  0 = reset, 1 = remove units, 2 = add units
 */
-void ChangeTeamSelectedUnits(CPlayer &player, const std::vector<CUnit *> &units, int adjust)
+void ChangeTeamSelectedUnits(CPlayer &player, const std::vector<CUnit *> &units)
 {
-	switch (adjust) {
-		case 0:
-			// UnSelectAllTeam(player);
-			while (TeamNumSelected[player.Index]) {
-				CUnit *unit = TeamSelected[player.Index][--TeamNumSelected[player.Index]];
-				unit->TeamSelected &= ~(1 << player.Index);
-				TeamSelected[player.Index][TeamNumSelected[player.Index]] = NULL; // FIXME: only needed for old code
-			}
-			// FALL THROUGH
-		case 2:
-			for (size_t i = 0; i != units.size(); ++i) {
-				CUnit &unit = *units[i];
-				Assert(!unit.Removed);
-				if (!unit.Type->IsNotSelectable) {
-					TeamSelected[player.Index][TeamNumSelected[player.Index]++] = &unit;
-					unit.TeamSelected |= 1 << player.Index;
-				}
-			}
-			Assert(TeamNumSelected[player.Index] <= MaxSelectable);
-			break;
-		case 1:
-			for (int n = 0; n < TeamNumSelected[player.Index]; ++n) {
-				for (size_t i = 0; i != units.size(); ++i) {
-					if (units[i] == TeamSelected[player.Index][n]) {
-						TeamSelected[player.Index][n] =
-							TeamSelected[player.Index][TeamNumSelected[player.Index]--];
-					}
-				}
-			}
-			Assert(TeamNumSelected[player.Index] >= 0);
-			break;
-		default:
-			Assert(0);
+	// UnSelectAllTeam(player);
+	while (TeamNumSelected[player.Index]) {
+		CUnit *unit = TeamSelected[player.Index][--TeamNumSelected[player.Index]];
+		unit->TeamSelected &= ~(1 << player.Index);
+		TeamSelected[player.Index][TeamNumSelected[player.Index]] = NULL; // FIXME: only needed for old code
 	}
+	// Add to selection
+	for (size_t i = 0; i != units.size(); ++i) {
+		CUnit &unit = *units[i];
+		Assert(!unit.Removed);
+		if (!unit.Type->IsNotSelectable) {
+			TeamSelected[player.Index][TeamNumSelected[player.Index]++] = &unit;
+			unit.TeamSelected |= 1 << player.Index;
+		}
+	}
+	Assert(TeamNumSelected[player.Index] <= MaxSelectable);
 }
 
 /**
@@ -1099,9 +1080,7 @@ static int CclSelection(lua_State *l)
 	NumSelected = LuaToNumber(l, 1);
 	const int args = lua_rawlen(l, 2);
 	for (int j = 0; j < args; ++j) {
-		lua_rawgeti(l, 2, j + 1);
-		const char *str = LuaToString(l, -1);
-		lua_pop(l, 1);
+		const char *str = LuaToString(l, 2, j + 1);
 		Selected[j] = &UnitManager.GetSlotUnit(strtol(str + 1, NULL, 16));
 	}
 	return 0;

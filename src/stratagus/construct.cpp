@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "script.h"
+#include "translate.h"
 #include "ui.h"
 #include "video.h"
 
@@ -94,7 +95,7 @@ void CConstruction::Load()
 	this->Width = this->File.Width;
 	this->Height = this->File.Height;
 	if (!file.empty()) {
-		ShowLoadProgress("Construction %s", file.c_str());
+		ShowLoadProgress(_("Construction %s"), file.c_str());
 		this->Sprite = CPlayerColorGraphic::New(file, this->Width, this->Height);
 		this->Sprite->Load();
 		this->Sprite->Flip();
@@ -103,7 +104,7 @@ void CConstruction::Load()
 	this->ShadowWidth = this->ShadowFile.Width;
 	this->ShadowHeight = this->ShadowFile.Height;
 	if (!file.empty()) {
-		ShowLoadProgress("Construction %s", file.c_str());
+		ShowLoadProgress(_("Construction %s"), file.c_str());
 		this->ShadowSprite = CGraphic::ForceNew(file, this->ShadowWidth, this->ShadowHeight);
 		this->ShadowSprite->Load();
 		this->ShadowSprite->Flip();
@@ -123,7 +124,7 @@ void InitConstructions()
 **  Load the graphics for the constructions.
 **
 **  HELPME: who make this better terrain depended and extendable
-**  HELPME: filename constuction.
+**  HELPME: filename construction.
 */
 void LoadConstructions()
 {

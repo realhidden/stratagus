@@ -146,7 +146,7 @@ MissileType *NewMissileTypeSlot(const std::string &ident)
 Missile::Missile() :
 	Type(NULL), SpriteFrame(0), State(0), AnimWait(0), Wait(0),
 	Delay(0), SourceUnit(), TargetUnit(), Damage(0),
-	TTL(-1), Hidden(0),
+	TTL(-1), Hidden(0), DestroyMissile(0),
 	CurrentStep(0), TotalStep(0),
 	Local(0)
 {
@@ -224,6 +224,9 @@ Missile::Missile() :
 		case MissileClassContinious :
 			missile = new MissileContinious;
 			break;
+		case MissileClassStraightFly :
+			missile = new MissileStraightFly;
+			break;
 	}
 	const PixelPos halfSize = mtype.size / 2;
 	missile->position = startPos - halfSize;
@@ -233,7 +236,6 @@ Missile::Missile() :
 	missile->Wait = mtype.Sleep;
 	missile->Delay = mtype.StartDelay;
 	missile->TTL = mtype.TTL;
-	missile->Damage = mtype.Damage;
 
 	return missile;
 }
@@ -314,19 +316,19 @@ static int CalculateDamageStats(const CUnitStats &attacker_stats,
 **
 **  @return          damage produces on goal.
 */
-static int CalculateDamage(const CUnit &attacker, const CUnit &goal)
+static int CalculateDamage(const CUnit &attacker, const CUnit &goal, const NumberDesc *formula)
 {
-	if (!Damage) { // Use old method.
+	if (!formula) { // Use old method.
 		return CalculateDamageStats(*attacker.Stats, *goal.Stats,
 									attacker.Variable[BLOODLUST_INDEX].Value);
 	}
-	Assert(Damage);
+	Assert(formula);
 
 	UpdateUnitVariables(const_cast<CUnit &>(attacker));
 	UpdateUnitVariables(const_cast<CUnit &>(goal));
 	TriggerData.Attacker = const_cast<CUnit *>(&attacker);
 	TriggerData.Defender = const_cast<CUnit *>(&goal);
-	const int res = EvalNumber(Damage);
+	const int res = EvalNumber(formula);
 	TriggerData.Attacker = NULL;
 	TriggerData.Defender = NULL;
 	return res;
@@ -379,7 +381,7 @@ void FireMissile(CUnit &unit, CUnit *goal, const Vec2i &goalPos)
 			DebugPrint("Missile-none hits no unit, shouldn't happen!\n");
 			return;
 		}
-		HitUnit(&unit, *goal, CalculateDamage(unit, *goal));
+		HitUnit(&unit, *goal, CalculateDamage(unit, *goal, Damage));
 		return;
 	}
 
@@ -536,7 +538,9 @@ void Missile::DrawMissile(const CViewport &vp) const
 			CLabel(GetGameFont()).DrawClip(screenPixelPos.x, screenPixelPos.y, this->Damage);
 			break;
 		default:
-			this->Type->DrawMissileType(this->SpriteFrame, screenPixelPos);
+			if (Type->G) {
+				this->Type->DrawMissileType(this->SpriteFrame, screenPixelPos);
+			}
 			break;
 	}
 }
@@ -639,7 +643,7 @@ bool MissileInitMove(Missile &missile)
 	Assert(missile.TotalStep != 0);
 	missile.CurrentStep += missile.Type->Speed;
 	if (missile.CurrentStep >= missile.TotalStep) {
-		missile.position = missile.destination;
+		missile.CurrentStep = missile.TotalStep;
 		return true;
 	}
 	return false;
@@ -647,11 +651,74 @@ bool MissileInitMove(Missile &missile)
 
 void MissileHandlePierce(Missile &missile, const Vec2i &pos)
 {
-	CUnit *unit = UnitOnMapTile(pos, -1);
-	if (unit && unit->IsAliveOnMap()
-		&& (missile.Type->FriendlyFire || unit->IsEnemy(*missile.SourceUnit->Player))) {
-		missile.MissileHit(unit);
+	if (Map.Info.IsPointOnMap(pos) == false) {
+		return;
 	}
+	std::vector<CUnit *> units;
+	Select(pos, pos, units);
+	for (std::vector<CUnit *>::iterator it = units.begin(); it != units.end(); ++it) {
+		CUnit &unit = **it;
+
+		if (unit.IsAliveOnMap()
+			&& (missile.Type->FriendlyFire == false || unit.IsEnemy(*missile.SourceUnit->Player))) {
+			missile.MissileHit(&unit);
+		}
+	}
+}
+
+bool MissileHandleBlocking(Missile &missile, const PixelPos &position)
+{
+	const MissileType &mtype = *missile.Type;
+	if (missile.SourceUnit) {
+		bool shouldHit = false;
+		if (missile.TargetUnit && missile.SourceUnit->Type->UnitType == missile.TargetUnit->Type->UnitType) {
+			shouldHit = true;
+		}
+		if (mtype.Range && mtype.CorrectSphashDamage) {
+			shouldHit = true;
+		}
+		if (shouldHit) {
+			// search for blocking units
+			std::vector<CUnit *> blockingUnits;
+			const Vec2i missilePos = Map.MapPixelPosToTilePos(position);
+			Select(missilePos, missilePos, blockingUnits);
+			for (std::vector<CUnit *>::iterator it = blockingUnits.begin();	it != blockingUnits.end(); ++it) {
+				CUnit &unit = **it;
+				// If land unit shoots at land unit, missile can be blocked by Wall units
+				if (!missile.Type->IgnoreWalls && missile.SourceUnit->Type->UnitType == UnitTypeLand) {
+					if (&unit != missile.SourceUnit && unit.Type->BoolFlag[WALL_INDEX].value
+						&& unit.Player != missile.SourceUnit->Player && unit.IsAllied(*missile.SourceUnit) == false) {
+						if (missile.TargetUnit) {
+							missile.TargetUnit = &unit;
+							if (unit.Type->TileWidth == 1 || unit.Type->TileHeight == 1) {
+								missile.position = Map.TilePosToMapPixelPos_TopLeft(unit.tilePos);
+							}
+						} else {
+							missile.position = position;
+						}
+						missile.DestroyMissile = 1;
+						return true;
+					}
+				}
+				// missile can kill any unit on it's way
+				if (missile.Type->KillFirstUnit && &unit != missile.SourceUnit) {
+					// can't kill non-solid or dead units
+					if (unit.IsAliveOnMap() == false || unit.Type->BoolFlag[NONSOLID_INDEX].value) {
+						continue;
+					}
+					if (missile.Type->FriendlyFire == false || unit.IsEnemy(*missile.SourceUnit->Player)) {
+						missile.TargetUnit = &unit;
+						if (unit.Type->TileWidth == 1 || unit.Type->TileHeight == 1) {
+							missile.position = Map.TilePosToMapPixelPos_TopLeft(unit.tilePos);
+						}
+						missile.DestroyMissile = 1;
+						return true;
+					}
+				}
+			}
+		}
+	}
+	return false;
 }
 
 /**
@@ -663,33 +730,77 @@ void MissileHandlePierce(Missile &missile, const Vec2i &pos)
 */
 bool PointToPointMissile(Missile &missile)
 {
-	if (MissileInitMove(missile) == true) {
+	MissileInitMove(missile);
+	if (missile.TotalStep == 0) {
 		return true;
 	}
-
 	Assert(missile.Type != NULL);
 	Assert(missile.TotalStep != 0);
 
 	const PixelPos diff = (missile.destination - missile.source);
+	const PixelPrecise sign(diff.x >= 0 ? 1.0 : -1.0, diff.y >= 0 ? 1.0 : -1.0); // Remember sign to move into correct direction
+	const PixelPrecise oldPos((double)missile.position.x, (double)missile.position.y); // Remember old position
+	PixelPrecise pos(oldPos);
 	missile.position = missile.source + diff * missile.CurrentStep / missile.TotalStep;
 
-	if (missile.Type->Smoke.Missile && (missile.CurrentStep || missile.State > 1)) {
-		const PixelPos position = missile.position + missile.Type->size / 2;
-		MakeMissile(*missile.Type->Smoke.Missile, position, position);
+	for (; pos.x * sign.x <= missile.position.x * sign.x
+		 && pos.y * sign.y <= missile.position.y * sign.y;
+		 pos.x += (double)diff.x * missile.Type->SmokePrecision / missile.TotalStep,
+		 pos.y += (double)diff.y * missile.Type->SmokePrecision / missile.TotalStep) {
+		const PixelPos position((int)pos.x + missile.Type->size.x / 2,
+								(int)pos.y + missile.Type->size.y / 2);
+
+		if (missile.Type->Smoke.Missile && (missile.CurrentStep || missile.State > 1)) {
+			Missile *smoke = MakeMissile(*missile.Type->Smoke.Missile, position, position);
+			if (smoke && smoke->Type->NumDirections > 1) {
+				smoke->MissileNewHeadingFromXY(diff);
+			}
+		}
+
+		if (missile.Type->SmokeParticle && (missile.CurrentStep || missile.State > 1)) {
+			missile.Type->SmokeParticle->pushPreamble();
+			missile.Type->SmokeParticle->pushInteger(position.x);
+			missile.Type->SmokeParticle->pushInteger(position.y);
+			missile.Type->SmokeParticle->run();
+		}
+
+		if (missile.Type->Pierce) {
+			const PixelPos posInt((int)pos.x, (int)pos.y);
+			MissileHandlePierce(missile, Map.MapPixelPosToTilePos(posInt));
+		}
 	}
 
-	if (missile.Type->SmokeParticle && (missile.CurrentStep || missile.State > 1)) {
-		const PixelPos position = missile.position + missile.Type->size / 2;
-		missile.Type->SmokeParticle->pushPreamble();
-		missile.Type->SmokeParticle->pushInteger(position.x);
-		missile.Type->SmokeParticle->pushInteger(position.y);
-		missile.Type->SmokeParticle->run();
+	// Handle wall blocking and kill first enemy
+	for (pos = oldPos; pos.x * sign.x <= missile.position.x * sign.x
+		 && pos.y * sign.y <= missile.position.y * sign.y;
+		 pos.x += (double)diff.x / missile.TotalStep,
+		 pos.y += (double)diff.y / missile.TotalStep) {
+		const PixelPos position((int)pos.x + missile.Type->size.x / 2,
+								(int)pos.y + missile.Type->size.y / 2);
+		const Vec2i tilePos(Map.MapPixelPosToTilePos(position));
+
+		if (MissileHandleBlocking(missile, position)) {
+			return true;
+		}
+		if (missile.Type->MissileStopFlags) {
+			if (!Map.Info.IsPointOnMap(tilePos)) { // gone outside
+				missile.TTL = 0;
+				return false;
+			}
+			const CMapField &mf = *Map.Field(tilePos);
+			if (missile.Type->MissileStopFlags & mf.Flags) { // incompatible terrain
+				missile.position = position;
+				missile.MissileHit();
+				missile.TTL = 0;
+				return false;
+			}
+		}
 	}
 
-	if (missile.Type->Pierce) {
-		MissileHandlePierce(missile, Map.MapPixelPosToTilePos(missile.position));
+	if (missile.CurrentStep == missile.TotalStep) {
+		missile.position = missile.destination;
+		return true;
 	}
-
 	return false;
 }
 
@@ -709,11 +820,14 @@ static void MissileHitsGoal(const Missile &missile, CUnit &goal, int splash)
 	if (goal.CurrentAction() != UnitActionDie) {
 		int damage;
 
-		if (missile.Damage) {  // direct damage, spells mostly
+		if (missile.Type->Damage) {   // custom formula
+			Assert(missile.SourceUnit != NULL);
+			damage = CalculateDamage(*missile.SourceUnit, goal, missile.Type->Damage) / splash;
+		} else if (missile.Damage) {  // direct damage, spells mostly
 			damage = missile.Damage / splash;
 		} else {
 			Assert(missile.SourceUnit != NULL);
-			damage = CalculateDamage(*missile.SourceUnit, goal) / splash;
+			damage = CalculateDamage(*missile.SourceUnit, goal, Damage) / splash;
 		}
 		if (missile.Type->Pierce) {  // Handle pierce factor
 			for (size_t i = 0; i < (missile.PiercedUnits.size() - 1); ++i) {
@@ -757,7 +871,7 @@ static void MissileHitsWall(const Missile &missile, const Vec2i &tilePos, int sp
 }
 
 /**
-**  Check if missle has already pierced that unit
+**  Check if missile has already pierced that unit
 **
 **  @param missile  Current missile.
 **  @param unit     Target unit.
@@ -890,14 +1004,18 @@ void Missile::MissileHit(CUnit *unit)
 				}
 
 				if (mtype.CorrectSphashDamage == true) {
-					bool isPositionSpell = false;
-					if (this->TargetUnit == NULL && this->SourceUnit->CurrentAction() == UnitActionSpellCast) {
-						const COrder_SpellCast &order = *static_cast<COrder_SpellCast *>(this->SourceUnit->CurrentOrder());
-						if (order.GetSpell().Target == TargetPosition) {
-							isPositionSpell = true;
+					bool isPosition = false;
+					if (this->TargetUnit == NULL) {
+						if (this->SourceUnit->CurrentAction() == UnitActionSpellCast) {
+							const COrder_SpellCast &order = *static_cast<COrder_SpellCast *>(this->SourceUnit->CurrentOrder());
+							if (order.GetSpell().Target == TargetPosition) {
+								isPosition = true;
+							}
+						} else {
+							isPosition = true;
 						}
 					}
-					if (isPositionSpell || this->SourceUnit->CurrentAction() == UnitActionAttackGround) {
+					if (isPosition || this->SourceUnit->CurrentAction() == UnitActionAttackGround) {
 						if (goal.Type->UnitType != this->SourceUnit->Type->UnitType) {
 							shouldHit = false;
 						}
@@ -1071,7 +1189,7 @@ void MissileActions()
 }
 
 /**
-**  Calculate distance from view-point to missle.
+**  Calculate distance from view-point to missile.
 **
 **  @param missile  Missile pointer for distance.
 **
@@ -1199,9 +1317,11 @@ MissileType::MissileType(const std::string &ident) :
 	Ident(ident), Transparency(0), DrawLevel(0),
 	SpriteFrames(0), NumDirections(0), ChangeVariable(-1), ChangeAmount(0), ChangeMax(false),
 	CorrectSphashDamage(false), Flip(false), CanHitOwner(false), FriendlyFire(false),
-	AlwaysFire(false), Pierce(false), PierceOnce(false), Class(), NumBounces(0), StartDelay(0),
-	Sleep(0), Speed(0), TTL(-1), Damage(0), ReduceFactor(100), Range(0), SplashFactor(0),
-	ImpactParticle(NULL), SmokeParticle(NULL),
+	AlwaysFire(false), Pierce(false), PierceOnce(false), IgnoreWalls(true), KillFirstUnit(false),
+	Class(), NumBounces(0),	ParabolCoefficient(2048), StartDelay(0),
+	Sleep(0), Speed(0), TTL(-1), ReduceFactor(100), SmokePrecision(0),
+	MissileStopFlags(0), Damage(NULL), Range(0), SplashFactor(0),
+	ImpactParticle(NULL), SmokeParticle(NULL), OnImpact(NULL),
 	G(NULL)
 {
 	size.x = 0;
@@ -1217,6 +1337,8 @@ MissileType::~MissileType()
 	Impact.clear();
 	delete ImpactParticle;
 	delete SmokeParticle;
+	delete OnImpact;
+	FreeNumberDesc(this->Damage);
 }
 
 /**

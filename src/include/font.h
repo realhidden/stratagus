@@ -96,7 +96,9 @@ public:
 
 	void Load();
 	void Reload() const;
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	void FreeOpenGL();
+#endif
 	void Clean();
 
 	CGraphic *GetFontColorGraphic(const CFontColor &fontColor) const;
@@ -107,7 +109,9 @@ public:
 	void DynamicLoad() const;
 
 private:
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	void MakeFontColorTextures() const;
+#endif
 	void MeasureWidths();
 
 private:
@@ -146,19 +150,17 @@ public:
 #define FontGrey "grey"
 
 /*----------------------------------------------------------------------------
---  Variables
+--  Functions
 ----------------------------------------------------------------------------*/
 
 /**
 **  Font selector for the font functions.
 **  FIXME: should be moved to lua
 */
-extern CFont &GetSmallFont();       /// Small font used in stats
-extern CFont &GetGameFont();        /// Normal font used in game
+extern CFont &GetSmallFont();  /// Small font used in stats
+extern CFont &GetGameFont();   /// Normal font used in game
+extern bool IsGameFontReady(); /// true when GameFont is provided
 
-/*----------------------------------------------------------------------------
---  Functions
-----------------------------------------------------------------------------*/
 
 /// Set the default text colors for normal and reverse text
 extern void SetDefaultTextColors(const std::string &normal, const std::string &reverse);
@@ -172,10 +174,14 @@ extern int GetHotKey(const std::string &text);
 
 /// Load and initialize the fonts
 extern void LoadFonts();
+
+#if defined(USE_OPENGL) || defined(USE_GLES)
 /// Free OpenGL fonts
 extern void FreeOpenGLFonts();
 /// Reload OpenGL fonts
 extern void ReloadFonts();
+#endif
+
 /// Cleanup the font module
 extern void CleanFonts();
 
@@ -212,6 +218,7 @@ public:
 	int DrawReverseClip(int x, int y, int number) const;
 
 	int DrawCentered(int x, int y, const std::string &text) const;
+	int DrawReverseCentered(int x, int y, const std::string &text) const;
 private:
 	template <const bool CLIP>
 	int DoDrawText(int x, int y, const char *const text,

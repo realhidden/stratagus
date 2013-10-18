@@ -96,7 +96,7 @@ void DoScrollArea(int state, bool fast)
 	if (fast) {
 		stepx = (int)(UI.MouseScrollSpeed * vp->MapWidth / 2 * PixelTileSize.x * FRAMES_PER_SECOND / 4);
 		stepy = (int)(UI.MouseScrollSpeed * vp->MapHeight / 2 * PixelTileSize.y * FRAMES_PER_SECOND / 4);
-	} else {// dynamic: let these variables increase upto fast..
+	} else {// dynamic: let these variables increase up to fast..
 		// FIXME: pixels per second should be configurable
 		stepx = (int)(UI.MouseScrollSpeed * PixelTileSize.x * FRAMES_PER_SECOND / 4);
 		stepy = (int)(UI.MouseScrollSpeed * PixelTileSize.y * FRAMES_PER_SECOND / 4);
@@ -185,13 +185,14 @@ void UpdateDisplay()
 											 UI.Fillers[i].X, UI.Fillers[i].Y);
 			}
 			DrawMenuButtonArea();
+			DrawUserDefinedButtons();
 
 			UI.Minimap.Draw();
 			UI.Minimap.DrawViewportArea(*UI.SelectedViewport);
 
 			UI.InfoPanel.Draw();
-			UI.ButtonPanel.Draw();
 			DrawResources();
+			UI.ButtonPanel.Draw();
 			UI.StatusLine.Draw();
 		}
 
@@ -300,7 +301,6 @@ static void GameLogicLoop()
 	if (!NetworkInSync) {
 		NetworkRecover(); // recover network
 	}
-
 }
 
 //#define REALVIDEO
@@ -318,10 +318,12 @@ static void DisplayLoop()
 	}
 #endif
 
+#if defined(USE_OPENGL) || defined(USE_GLES)
 	if (UseOpenGL) {
 		/* update only if screen changed */
 		ValidateOpenGLScreen();
 	}
+#endif
 
 	/* update only if viewmode changed */
 	CheckViewportMode();
@@ -366,12 +368,6 @@ static void DisplayLoop()
 		VideoSyncSpeed = RealVideoSyncSpeed;
 	}
 #endif
-
-	if (!UseOpenGL) {
-		if ((GameRunning || Editor.Running) && (FastForwardCycle <= GameCycle || !(GameCycle & 0x3f))) {
-			Video.ClearScreen();
-		}
-	}
 }
 
 static void SingleGameLoop()
@@ -430,7 +426,7 @@ void GameMainLoop()
 		VideoSyncSpeed = RealVideoSyncSpeed;
 	}
 #endif
-	NetworkQuit();
+	NetworkQuitGame();
 	EndReplayLog();
 
 	GameCycle = 0;//????

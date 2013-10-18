@@ -134,7 +134,7 @@ public:
 	char Enable;    /// True if the unit doesn't have this variable. (f.e shield)
 };
 
-// Index for boolflag aready defined
+// Index for boolflag already defined
 enum {
 	COWARD_INDEX = 0,
 	BUILDING_INDEX,
@@ -191,6 +191,8 @@ enum {
 	BASICDAMAGE_INDEX,
 	POSX_INDEX,
 	POSY_INDEX,
+	TARGETPOSX_INDEX,
+	TARGETPOSY_INDEX,
 	RADAR_INDEX,
 	RADARJAMMER_INDEX,
 	AUTOREPAIRRANGE_INDEX,
@@ -203,6 +205,9 @@ enum {
 	SHIELD_INDEX,
 	POINTS_INDEX,
 	MAXHARVESTERS_INDEX,
+	POISON_INDEX,
+	SHIELDPERMEABILITY_INDEX,
+	SHIELDPIERCING_INDEX,
 	NVARALREADYDEFINED
 };
 
@@ -294,13 +299,14 @@ public:
 class CDecoVarStaticSprite : public CDecoVar
 {
 public:
-	CDecoVarStaticSprite() : NSprite(-1), n(0) {}
+	CDecoVarStaticSprite() : NSprite(-1), n(0), FadeValue(0) {}
 	/// function to draw the decorations.
 	virtual void Draw(int x, int y, const CUnitType &type, const CVariable &var) const;
 
 	// FIXME Sprite info. and Replace n with more appropriate var.
 	char NSprite;  /// Index of sprite. (@see DefineSprites and @see GetSpriteIndex)
 	int n;         /// identifiant in SpellSprite
+	int FadeValue; /// if variable's value is below than FadeValue, it drawn transparent.
 };
 
 enum UnitTypeType {
@@ -406,6 +412,7 @@ public:
 	int Distance;        /// distance to build (circle)
 	DistanceTypeType DistanceType;
 	std::string RestrictTypeName;
+	std::string RestrictTypeOwner;
 	CUnitType *RestrictType;
 };
 
@@ -465,6 +472,10 @@ public:
 	LuaCallback *OnHit;             /// lua function called when unit is hit
 	LuaCallback *OnEachCycle;       /// lua function called every cycle
 	LuaCallback *OnEachSecond;      /// lua function called every second
+	LuaCallback *OnInit;            /// lua function called on unit init
+
+	int TeleportCost;               /// mana used for teleportation
+	MissileConfig TeleportEffect;   /// missile created when teleported
 
 	mutable std::string DamageType; /// DamageType (used for extra death animations and impacts)
 
@@ -496,6 +507,8 @@ public:
 	int RandomMovementProbability;  /// Probability to move randomly.
 	int ClicksToExplode;            /// Number of consecutive clicks until unit suicides.
 	int MaxOnBoard;                 /// Number of Transporter slots.
+	int BoardSize;                  /// How much "cells" unit occupies inside transporter
+	int ButtonLevelForTransporter;  /// On which button level game will show units inside transporter
 	int StartingResources;          /// Amount of Resources on build
 	/// originally only visual effect, we do more with this!
 	UnitTypeType UnitType;          /// Land / fly / naval
@@ -542,7 +555,6 @@ public:
 	unsigned Decoration : 1;            /// Unit is a decoration (act as tile).
 	unsigned Indestructible : 1;        /// Unit is indestructible (take no damage).
 	unsigned Teleporter : 1;            /// Can teleport other units.
-	unsigned ShieldPiercing : 1;        /// Can directly damage shield-protected units, without shield damaging.
 	unsigned SaveCargo : 1;             /// Unit unloads his passengers after death.
 	unsigned NonSolid : 1;              /// Unit can be entered by other units.
 	unsigned Wall : 1;                  /// Use special logic for Direction field.
@@ -568,6 +580,8 @@ public:
 
 	int Supply;                     /// Food supply
 	int Demand;                     /// Food demand
+
+	int PoisonDrain;                /// How much health is drained every second when poisoned
 
 	// --- FILLED UP ---
 
@@ -715,6 +729,7 @@ extern CUnitTypeVar UnitTypeVar;
 extern CUnitType *CclGetUnitType(lua_State *l);  /// Access unit-type object
 extern void UnitTypeCclRegister();               /// Register ccl features
 
+extern void UpdateUnitStats(CUnitType &type, int reset_to_default);       /// Update unit stats
 extern void UpdateStats(int reset_to_default);       /// Update unit stats
 extern CUnitType *UnitTypeByIdent(const std::string &ident);/// Get unit-type by ident
 

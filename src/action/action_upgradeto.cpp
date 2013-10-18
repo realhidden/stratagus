@@ -138,7 +138,9 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 
 	if (newtype.CanCastSpell && !unit.AutoCastSpell) {
 		unit.AutoCastSpell = new char[SpellTypeTable.size()];
+		unit.SpellCoolDownTimers = new int[SpellTypeTable.size()];
 		memset(unit.AutoCastSpell, 0, SpellTypeTable.size() * sizeof(char));
+		memset(unit.SpellCoolDownTimers, 0, SpellTypeTable.size() * sizeof(int));
 	}
 
 	UpdateForNewUnit(unit, 1);
@@ -177,9 +179,7 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 {
 	if (!strcmp(value, "type")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Type = UnitTypeByIdent(LuaToString(l, -1, j + 1));
 	} else {
 		return false;
 	}
@@ -223,14 +223,10 @@ static int TransformUnitIntoType(CUnit &unit, const CUnitType &newtype)
 {
 	if (!strcmp(value, "type")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Type = UnitTypeByIdent(LuaToString(l, -1));
-		lua_pop(l, 1);
+		this->Type = UnitTypeByIdent(LuaToString(l, -1, j + 1));
 	} else if (!strcmp(value, "ticks")) {
 		++j;
-		lua_rawgeti(l, -1, j + 1);
-		this->Ticks = LuaToNumber(l, -1);
-		lua_pop(l, 1);
+		this->Ticks = LuaToNumber(l, -1, j + 1);
 	} else {
 		return false;
 	}
@@ -266,7 +262,7 @@ static void AnimateActionUpgradeTo(CUnit &unit)
 	const CUnitType &newtype = *this->Type;
 	const CUnitStats &newstats = newtype.Stats[player.Index];
 
-	this->Ticks += player.SpeedUpgrade / SPEEDUP_FACTOR;
+	this->Ticks += std::max(1, player.SpeedUpgrade / SPEEDUP_FACTOR);
 	if (this->Ticks < newstats.Costs[TimeCost]) {
 		unit.Wait = CYCLES_PER_SECOND / 6;
 		return ;

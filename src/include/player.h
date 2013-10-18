@@ -169,7 +169,7 @@ public:
 	int CheckLimits(const CUnitType &type) const;
 
 	/// Check if enough resources are available for costs
-	int CheckCosts(const int *costs) const;
+	int CheckCosts(const int *costs, bool notify = true) const;
 	/// Check if enough resources are available for a new unit-type
 	int CheckUnitType(const CUnitType &type) const;
 
@@ -271,7 +271,7 @@ enum PlayerRacesOld {
 **
 **  #PlayerNobody
 **
-**    This player is unused. Nobody controlls this player.
+**    This player is unused. Nobody controls this player.
 **
 **  #PlayerComputer
 **

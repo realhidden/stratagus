@@ -141,7 +141,7 @@
 **
 **    Determines the range in which a projectile will deal its damage.
 **    A range of 0 will mean that the damage will be limited to the
-**    targetted unit only.  So if you shot a missile at a unit, it
+**    targeted unit only.  So if you shot a missile at a unit, it
 **    would only damage that unit.  A value of 1 only affects the
 **    field where the missile hits.  A value of 2  would mean that
 **    the damage for that particular missile would be dealt for a range
@@ -296,6 +296,7 @@
 ----------------------------------------------------------------------------*/
 
 #include "missileconfig.h"
+#include "script.h"
 #include "unitptr.h"
 #include "unitsound.h"
 #include "vec2i.h"
@@ -318,23 +319,24 @@ class LuaCallback;
 **  Missile-class this defines how a missile-type reacts.
 */
 enum {
-	MissileClassNone, /// Missile does nothing
-	MissileClassPointToPoint, /// Missile flies from x,y to x1,y1
-	MissileClassPointToPointWithHit, /// Missile flies from x,y to x1,y1 than shows hit animation.
-	MissileClassPointToPointCycleOnce, /// Missile flies from x,y to x1,y1 and animates ONCE from start to finish and back
-	MissileClassPointToPointBounce, /// Missile flies from x,y to x1,y1 than bounces three times.
-	MissileClassStay, /// Missile appears at x,y, does it's anim and vanishes.
-	MissileClassCycleOnce, /// Missile appears at x,y, then cycle through the frames once.
-	MissileClassFire, /// Missile doesn't move, than checks the source unit for HP.
-	MissileClassHit, /// Missile shows the hit points.
-	MissileClassParabolic, /// Missile flies from x,y to x1,y1 using a parabolic path
-	MissileClassLandMine, /// Missile wait on x,y until a non-air unit comes by, the explodes.
-	MissileClassWhirlwind, /// Missile appears at x,y, is whirlwind
-	MissileClassFlameShield, /// Missile surround x,y
-	MissileClassDeathCoil, /// Missile is death coil.
-	MissileClassTracer, /// Missile seeks towards to target unit
-	MissileClassClipToTarget, /// Missile remains clipped to target's current goal and plays his animation once
-	MissileClassContinious /// Missile stays and plays it's animation several times
+	MissileClassNone,                     /// Missile does nothing
+	MissileClassPointToPoint,             /// Missile flies from x,y to x1,y1
+	MissileClassPointToPointWithHit,      /// Missile flies from x,y to x1,y1 than shows hit animation.
+	MissileClassPointToPointCycleOnce,    /// Missile flies from x,y to x1,y1 and animates ONCE from start to finish and back
+	MissileClassPointToPointBounce,       /// Missile flies from x,y to x1,y1 than bounces three times.
+	MissileClassStay,                     /// Missile appears at x,y, does it's anim and vanishes.
+	MissileClassCycleOnce,                /// Missile appears at x,y, then cycle through the frames once.
+	MissileClassFire,                     /// Missile doesn't move, than checks the source unit for HP.
+	MissileClassHit,                      /// Missile shows the hit points.
+	MissileClassParabolic,                /// Missile flies from x,y to x1,y1 using a parabolic path
+	MissileClassLandMine,                 /// Missile wait on x,y until a non-air unit comes by, the explodes.
+	MissileClassWhirlwind,                /// Missile appears at x,y, is whirlwind
+	MissileClassFlameShield,              /// Missile surround x,y
+	MissileClassDeathCoil,                /// Missile is death coil.
+	MissileClassTracer,                   /// Missile seeks towards to target unit
+	MissileClassClipToTarget,             /// Missile remains clipped to target's current goal and plays his animation once
+	MissileClassContinious,               /// Missile stays and plays it's animation several times
+	MissileClassStraightFly               /// Missile flies from x,y to x1,y1 then continues to fly, until incompatible terrain is detected
 };
 
 /// Base structure of missile-types
@@ -376,15 +378,20 @@ public:
 	bool AlwaysFire;           /// missile will always fire (even if target is dead)
 	bool Pierce;               /// missile will hit every unit on his way
 	bool PierceOnce;           /// pierce every target only once
+	bool IgnoreWalls;          /// missile ignores Wall units on it's way
+	bool KillFirstUnit;        /// missile kills first unit blocking it's way
 
 	int Class;                 /// missile class
 	int NumBounces;            /// number of bounces
+	int ParabolCoefficient;    /// parabol coefficient in parabolic missile
 	int StartDelay;            /// missile start delay
 	int Sleep;                 /// missile sleep
 	int Speed;                 /// missile speed
 	int TTL;                   /// missile time-to-live
-	int Damage;                /// missile damage (used for non-direct missiles, e.g. impacts)
 	int ReduceFactor;          /// Multiplier for reduce or increase damage dealt to the next unit
+	int SmokePrecision;        /// How frequently the smoke missile will generate itself
+	int MissileStopFlags;      /// On which terrain types missile won't fly
+	NumberDesc *Damage;        /// missile damage (used for non-direct missiles, e.g. impacts)
 
 	int Range;                             /// missile damage range
 	int SplashFactor;                      /// missile splash divisor
@@ -392,6 +399,7 @@ public:
 	MissileConfig Smoke;                   /// trailing missile
 	LuaCallback *ImpactParticle;           /// impact particle
 	LuaCallback *SmokeParticle;            /// smoke particle
+	LuaCallback *OnImpact;                 /// called when
 
 	// --- FILLED UP ---
 	CGraphic *G;         /// missile graphic
@@ -440,8 +448,9 @@ public:
 
 	int Damage;  /// direct damage that missile applies
 
-	int TTL;     /// time to live (ticks) used for spells
-	int Hidden;  /// If this is 1 then the missile is invisible
+	int TTL;             /// time to live (ticks) used for spells
+	int Hidden;          /// If this is 1 then the missile is invisible
+	int DestroyMissile;  /// this tells missile-class-straight-fly, that it's time to die
 
 	// Internal use:
 	int CurrentStep;  /// Current step (0 <= x < TotalStep).
@@ -456,6 +465,7 @@ public:
 extern bool MissileInitMove(Missile &missile);
 extern bool PointToPointMissile(Missile &missile);
 extern void MissileHandlePierce(Missile &missile, const Vec2i &pos);
+extern bool MissileHandleBlocking(Missile &missile, const PixelPos &position);
 
 class MissileNone : public Missile
 {
@@ -545,6 +555,13 @@ class MissileContinious : public Missile
 public:
 	virtual void Action();
 };
+
+class MissileStraightFly : public Missile
+{
+public:
+	virtual void Action();
+};
+
 
 class BurningBuildingFrame
 {
